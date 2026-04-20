@@ -1,0 +1,31 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	encode zstd gzip
+
+	respond /healthz "ok" 200
+
+	reverse_proxy app:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		health_uri /healthcheck
+		health_interval 10s
+		health_timeout 5s
+	}
+}

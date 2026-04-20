@@ -6,7 +6,7 @@ from learnic.web import create_app_production
 
 def main() -> None:
     configs = setup_configs()
-    app = create_app_production(configs)
+    app = create_app_production()
     uvicorn.run(app, host=configs.asgi.host, port=configs.asgi.port)
 
 

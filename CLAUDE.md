@@ -21,14 +21,28 @@ invoices, payments.">
 ## Tech Stack
 
 - Python `>=3.10` (use `X | Y`, `list[T]`, `dict[K, V]`; no `from __future__ import annotations`)
-- FastAPI + uvicorn — FastAPI serializes responses via Pydantic directly to JSON bytes; no `ORJSONResponse` needed
+- FastAPI + uvicorn — FastAPI serializes responses via Pydantic directly to JSON bytes; no `ORJSONResponse` needed.
+  **All route handlers and anything they transitively touch are `async def`** —
+  no sync route handlers, no sync dependencies, no blocking I/O on the event
+  loop. If a third-party lib is sync-only, isolate it behind
+  `asyncio.to_thread(...)` or `anyio.to_thread.run_sync(...)` in an adapter.
 - Pydantic 2 — **only at the HTTP boundary** (routes) and **configuration** (`BaseSettings`), never in application/entities
 - pydantic-settings — configuration via `BaseSettings` subclasses in `infrastructure/configs.py`; reads from env vars and `.env` file automatically; never use `os.environ` directly for config
-- **Database: PostgreSQL EXCLUSIVELY** — SQLAlchemy 2.0 async + psycopg 3,
-  Alembic. No MySQL, no SQLite (not even for tests), no MSSQL, no Oracle.
-  Connection URL scheme is `postgresql+psycopg://…`; table types may use
-  PostgreSQL-specific features (`sa.Uuid`, `JSONB`, arrays, `ON CONFLICT`)
-  freely — portability is not a goal.
+- **Database: PostgreSQL EXCLUSIVELY** — SQLAlchemy 2.0 async for the app,
+  Alembic for migrations. No MySQL, no SQLite (not even for tests), no MSSQL,
+  no Oracle.
+  - **Application path (async):** driver is `asyncpg`; URL scheme
+    `postgresql+asyncpg://…`; engine built via `create_async_engine(...)`;
+    sessions are `AsyncSession`; gateways/readers `await` everything.
+  - **Migration path (sync):** Alembic runs synchronously with `psycopg` 3
+    driver; URL scheme `postgresql+psycopg://…`; `env.py` uses
+    `engine_from_config(...)` (sync). **Do not** try to drive Alembic via
+    asyncpg — keep it sync, it's simpler and matches Alembic's default flow.
+  - Both drivers are pinned in `pyproject.toml` runtime dependencies. The two
+    DSN properties live on `PostgresConfig` (e.g. `dsn_async` / `dsn_sync`) —
+    never hardcode a URL elsewhere.
+  - Table types may use PostgreSQL-specific features (`sa.Uuid`, `JSONB`,
+    arrays, `ON CONFLICT`) freely — portability is not a goal.
 - dishka for DI (`make_async_container`, `setup_dishka`, `FromDishka`, `DishkaRoute`)
 - pytest + pytest-asyncio (auto mode), httpx for integration tests
 - ruff (strict), mypy (strict), bandit, semgrep, codespell
@@ -497,6 +511,15 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
 - ❌ Import `fastapi`, `sqlalchemy`, `pydantic`, `dishka` inside `entities/`
   or `application/`.
 - ❌ Put business logic in routes. Routes build DTOs and call `interactor.run(...)`.
+- ❌ Write sync route handlers or sync use-case handlers. FastAPI is async-only
+  here: every route is `async def`, every handler's `run(...)` is `async def`,
+  every gateway/reader/adapter method is `async def`. If you must call a
+  blocking sync library, wrap it in `asyncio.to_thread(...)` /
+  `anyio.to_thread.run_sync(...)` inside an infrastructure adapter —
+  never on the event loop directly.
+- ❌ Use the sync `psycopg` driver for application code, or try to run Alembic
+  through `asyncpg`. The split is: **app → asyncpg (async)**,
+  **Alembic → psycopg (sync)**. Don't mix.
 - ❌ Return Pydantic models from application handlers. Use dataclasses / `NamedTuple`.
 - ❌ Raise `HTTPException` from handlers. Raise domain/application errors;
   let `exc_handlers.py` translate them.
@@ -539,6 +562,15 @@ Configs are `BaseSettings` subclasses in `infrastructure/configs.py`
 reads + validates values automatically — **never use `os.environ` directly**.
 `Configs` is a plain class that aggregates them; `load_configs()` instantiates
 each `BaseSettings` subclass with no arguments.
+
+`PostgresConfig` exposes two DSN properties — same host/port/user/password,
+different drivers:
+
+- `dsn_async` → `postgresql+asyncpg://…` for the app (`create_async_engine`).
+- `dsn_sync`  → `postgresql+psycopg://…`  for Alembic (`engine_from_config`).
+
+The app wiring (`ioc.db_provider`) must use `dsn_async`; Alembic's `env.py`
+must use `dsn_sync`. Anything else is a configuration error.
 
 `.env.dist` is the template; `just bootstrap` copies it to `.env`.
 

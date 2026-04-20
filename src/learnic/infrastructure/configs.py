@@ -15,11 +15,18 @@ class PostgresConfig(BaseSettings):
     debug: bool = Field(default=False, validation_alias="SQLALCHEMY_DEBUG")
 
     @property
-    def dsn(self) -> str:
+    def _credentials(self) -> str:
         return (
-            f"postgresql+psycopg://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.db}"
+            f"{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
         )
+
+    @property
+    def dsn_async(self) -> str:
+        return f"postgresql+asyncpg://{self._credentials}"
+
+    @property
+    def dsn_sync(self) -> str:
+        return f"postgresql+psycopg://{self._credentials}"
 
 
 class ASGIConfig(BaseSettings):
@@ -40,4 +47,7 @@ class Configs:
 
 
 def load_configs() -> Configs:
-    return Configs(postgres=PostgresConfig(), asgi=ASGIConfig())
+    return Configs(
+        postgres=PostgresConfig(),  # pyright: ignore[reportCallIssue]
+        asgi=ASGIConfig(),  # pyright: ignore[reportCallIssue]
+    )

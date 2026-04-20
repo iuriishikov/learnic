@@ -47,7 +47,7 @@ class DBProvider(Provider):
         self,
         postgres: PostgresConfig,
     ) -> AsyncIterator[AsyncEngine]:
-        engine = create_async_engine(postgres.dsn, echo=postgres.debug)
+        engine = create_async_engine(postgres.dsn_async, echo=postgres.debug)
         try:
             yield engine
         finally:
