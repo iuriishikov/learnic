@@ -44,8 +44,18 @@ invoices, payments.">
   - Table types may use PostgreSQL-specific features (`sa.Uuid`, `JSONB`,
     arrays, `ON CONFLICT`) freely — portability is not a goal.
 - dishka for DI (`make_async_container`, `setup_dishka`, `FromDishka`, `DishkaRoute`)
+- **TaskIQ + Redis** for background tasks — `taskiq-redis` broker (`ListQueueBroker`)
+  + `RedisAsyncResultBackend`. The producer side (FastAPI) talks to the broker
+  through a `TaskScheduler` Protocol; the consumer side is a separate process
+  (`poetry run taskiq worker learnic.worker:broker`). Never run the worker inside
+  the API process in production — it would block the event loop and break
+  independent scaling.
+- **Object storage: S3-compatible** (`aioboto3`) — application code uses a
+  `FileStorage` Protocol, infrastructure implements it via `S3FileStorage`
+  (MinIO locally, any S3-compatible service in prod). All calls are async.
 - pytest + pytest-asyncio (auto mode), httpx for integration tests
-- ruff (strict), mypy (strict), bandit, semgrep, codespell
+- ruff (strict), mypy (strict via `[tool.mypy]` with `strict = true` and
+  `plugins = ["pydantic.mypy"]`), bandit, semgrep, codespell
 - Package management: **Poetry** (see below)
 - Task runner: `just`
 
@@ -178,12 +188,17 @@ infrastructure ───────┘   (implements application protocols)
     `Final` constant, never inlined in `__post_init__`)
 
 - `src/<project>/application/` — use cases + persistence protocols. Knows nothing
-  about FastAPI, SQLAlchemy, or dishka.
+  about FastAPI, SQLAlchemy, dishka, TaskIQ, or boto3.
   - `commands/<aggregate>/` — write-side handlers (`*CommandHandler`)
   - `queries/<aggregate>/` — read-side handlers (`*QueryHandler`)
   - `common/persistence/` — `Protocol`-based gateways and readers; view models
   - `common/errors/` — `ApplicationError`, `EntityNotFoundError`, and other
     application-layer errors
+  - `common/tasks/` — `TaskScheduler` Protocol. Add one method per background
+    operation (`schedule_send_welcome_email(user_id)`, etc.). Handlers depend on
+    this protocol, never on TaskIQ primitives.
+  - `common/storage/` — `FileStorage` Protocol for object storage (put/get/
+    delete/presigned URL). Handlers depend on this, never on boto3 directly.
   - `common/validators.py` — tiny pure helpers (e.g. `validate_empty`)
 
 - `src/<project>/infrastructure/` — adapters. SQLAlchemy, configs, external APIs.
@@ -195,7 +210,17 @@ infrastructure ───────┘   (implements application protocols)
     Tables are defined as `sa.Table(...)`; entities are mapped later through
     `setup_map_tables()` at startup.
   - `persistence/alembic/` — migrations
-  - `configs.py` — `NamedTuple`-based configs
+  - `tasks/broker.py` — module-level `AsyncBroker` singleton. Every
+    `@broker.task` decorator registers against this instance; both the FastAPI
+    producer and the worker process import it.
+  - `tasks/scheduler.py` — `TaskSchedulerTaskIQ` adapter: implements
+    `TaskScheduler` by calling `<task>.kiq(...)` on the right handler.
+  - `tasks/handlers/<aggregate>.py` — `@broker.task` functions. Keep them
+    thin: `@inject` the relevant `CommandHandler` via `FromDishka[...]` and
+    delegate to `handler.run(...)`. Business logic stays in the handler.
+  - `storage/adapters/s3.py` — `S3FileStorage` implementing `FileStorage`.
+  - `configs.py` — `BaseSettings` subclasses (`PostgresConfig`, `ASGIConfig`,
+    `S3Config`, `TaskIQConfig`) aggregated by a `Configs` class.
 
 - `src/<project>/presentation/http/` — FastAPI routes, Pydantic schemas,
   exception handlers. Routes convert schemas to command/query DTOs and delegate
@@ -205,13 +230,23 @@ infrastructure ───────┘   (implements application protocols)
   `setup_routes`, `setup_middlewares`, `setup_exc_handlers`, `setup_map_tables`,
   `setup_observability`.
 
-- `src/<project>/ioc.py` — dishka providers (`configs_provider`, `db_provider`,
-  `gateways_provider`, `interactors_provider`, `setup_providers`).
+- `src/<project>/ioc.py` — dishka providers (`ConfigsProvider`, `DBProvider`,
+  `GatewaysProvider`, `S3Provider`, `TasksProvider`, `InteractorsProvider`,
+  `setup_providers`). When a new aggregate/task/storage target is added, the
+  corresponding provider class gets the new `provide(...)`.
 
 - `src/<project>/web.py` — `create_app_tests()` and `create_app_production()`
-  entry points.
+  FastAPI entry points. Manages TaskIQ broker lifecycle via FastAPI `lifespan`
+  (`broker.startup()` / `broker.shutdown()`).
 
-- `src/<project>/__main__.py` — runs the production app via uvicorn.
+- `src/<project>/__main__.py` — runs the production API via `uvicorn.run(...)`
+  with host/port from `ASGIConfig`.
+
+- `src/<project>/worker.py` — TaskIQ worker entry point. Re-exports `broker`
+  and wires dishka via `setup_dishka(container, broker=broker)`. Imports
+  `infrastructure.tasks.handlers` to force `@broker.task` decorators to run
+  before the worker starts consuming. Launch with
+  `poetry run taskiq worker learnic.worker:broker`.
 
 ### Core rules (non-negotiable)
 
@@ -250,6 +285,24 @@ infrastructure ───────┘   (implements application protocols)
      `provider.provide_all(...)`. When adding a handler, add it to that list.
    - Gateways/readers are registered in `gateways_provider` with explicit
      `provides=<Protocol>` (e.g. `provider.provide(UserMapperAlchemy, provides=UserGateway)`).
+   - Task schedulers are registered in `TasksProvider` the same way
+     (`provider.provide(TaskSchedulerTaskIQ, provides=TaskScheduler)`).
+   - Storage adapters go in `S3Provider` (`file_storage`, `FileStorage`).
+
+9. **Background tasks**: the application layer only knows about `TaskScheduler`
+   methods. Adding a new background operation means (a) adding a method to the
+   Protocol, (b) adding the `@broker.task` function in
+   `infrastructure/tasks/handlers/`, (c) implementing the scheduler method by
+   calling `<task>.kiq(...)`. Tasks are thin: they resolve the `CommandHandler`
+   via `FromDishka[...]` and delegate — business logic lives in the handler,
+   not the task body.
+
+10. **Producer/consumer process split**: FastAPI is the producer, `taskiq worker`
+    is the consumer. They are separate OS processes (separate containers in
+    prod). Do not run `Receiver.listen()` inside a FastAPI lifespan for
+    production — it blocks the HTTP event loop and breaks independent scaling.
+    In-process execution via `InMemoryBroker` is allowed ONLY when
+    `TASKIQ_IN_MEMORY=true` is set (tests, throwaway local dev).
 
 ## Code Style
 
@@ -460,6 +513,55 @@ async def add(
     return await interactor.run(command_data)
 ```
 
+### Background task (TaskIQ)
+
+Three files per new task: the Protocol method in application, the task body
+in infrastructure, and the scheduler method wiring them together.
+
+```python
+# application/common/tasks/scheduler.py
+from typing import Protocol
+
+class TaskScheduler(Protocol):
+    async def schedule_<action>(self, <id>: <AggregateID>) -> None: ...
+```
+
+```python
+# infrastructure/tasks/handlers/<aggregate>.py
+from dishka.integrations.taskiq import FromDishka, inject
+
+from <project>.application.commands.<aggregate>.<action> import (
+    <Action><Aggregate>Command,
+    <Action><Aggregate>CommandHandler,
+)
+from <project>.infrastructure.tasks.broker import broker
+
+
+@broker.task
+@inject
+async def <action>_<aggregate>_task(
+    <id>: <AggregateID>,
+    handler: FromDishka[<Action><Aggregate>CommandHandler],
+) -> None:
+    await handler.run(<Action><Aggregate>Command(<id>=<id>))
+```
+
+```python
+# infrastructure/tasks/scheduler.py
+from typing_extensions import override
+
+from <project>.application.common.tasks.scheduler import TaskScheduler
+from <project>.infrastructure.tasks.handlers.<aggregate> import (
+    <action>_<aggregate>_task,
+)
+
+
+class TaskSchedulerTaskIQ(TaskScheduler):
+    @override
+    async def schedule_<action>(self, <id>: <AggregateID>) -> None:
+        await <action>_<aggregate>_task.kiq(<id>)
+```
+
 ### Exception handler mapping
 
 Domain `FieldError` → 422; application `EntityNotFoundError` → 404;
@@ -519,17 +621,21 @@ prefer `poetry run <cmd>` over activating the venv — it's explicit and works
 the same in local shells, Docker, and CI.
 
 ```bash
-just bootstrap      # copy .env.dist to .env, poetry install, install pre-commit hooks
-just sync           # poetry sync --with dev  (align env with lock exactly)
-just serve          # poetry run alembic upgrade head && poetry run python -m <project>
+just bootstrap      # copy .env.dist to .env, poetry install
+just serve          # dev-up, alembic upgrade head, then uvicorn + taskiq worker in parallel
+just worker         # run the TaskIQ worker only (debugging tasks without the API)
 just lint           # poetry run ruff check + ruff format + codespell
 just static         # poetry run mypy + bandit + semgrep
-just pre-commit     # poetry run pre-commit run --all-files
-just test           # spin up dev DB, poetry run pytest -x --ff, tear down
-just test-cov       # test + coverage report
-just dev-up / dev-down
-just prod-up / prod-down
+just dev-up         # bring up Postgres, MinIO, Redis via docker-compose.dev
+just dev-down       # tear down dev containers
+just prod-up        # docker compose up for the full production-like stack
+just prod-down      # tear down the production-like stack
 ```
+
+`just serve` is the single daily-use recipe: it boots the dev dependencies,
+applies migrations, and runs API + worker together with `--reload` on both.
+Keep heavy/rare operations (tests, coverage) as ad-hoc `poetry run ...` calls
+until the test suite grows enough to justify a dedicated recipe again.
 
 Inside a recipe, prefer:
 
@@ -588,11 +694,31 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
   `[dependency-groups]` (PEP 735) over `[tool.poetry.group.*]`.
 - ❌ Use `poetry install --sync` (deprecated flag). Use the standalone
   `poetry sync` command.
+- ❌ Import TaskIQ primitives (`AsyncBroker`, `.kiq`, `taskiq_redis`) from
+  `application/`. Applications talk to the scheduler **only** through the
+  `TaskScheduler` Protocol.
+- ❌ Import `aioboto3` / `aiobotocore` from `application/` or `entities/`.
+  Use the `FileStorage` Protocol; the S3 adapter is the only place that
+  knows about boto3.
+- ❌ Put business logic inside a `@broker.task` function. Tasks resolve the
+  relevant `CommandHandler` via `FromDishka[...]` and delegate — if you
+  find yourself writing SQL or validation inside a task, move it into a
+  command handler first.
+- ❌ Run the TaskIQ worker inside the FastAPI process in production
+  (`asyncio.create_task(Receiver(broker).listen())` in a lifespan, or any
+  equivalent). It steals the HTTP event loop and breaks horizontal scaling.
+  The `InMemoryBroker` escape hatch exists strictly for tests and one-off
+  local runs — gated by `TASKIQ_IN_MEMORY=true`.
+- ❌ Hardcode broker/host/port defaults that only work in one environment
+  (e.g. `host: str = "0.0.0.0"` for uvicorn). Required env values have no
+  default in `BaseSettings`; defaulting in code forces every other
+  environment to override it.
 
 ## Environment & configuration
 
 Configs are `BaseSettings` subclasses in `infrastructure/configs.py`
-(`PostgresConfig`, `ASGIConfig`). Each class declares its env-var prefix via
+(`PostgresConfig`, `ASGIConfig`, `S3Config`, `TaskIQConfig`). Each class
+declares its env-var prefix via
 `SettingsConfigDict(env_prefix="...", env_file=".env")` and pydantic-settings
 reads + validates values automatically — **never use `os.environ` directly**.
 `Configs` is a plain class that aggregates them; `load_configs()` instantiates
@@ -609,11 +735,25 @@ must use `dsn_sync`. Anything else is a configuration error.
 
 `.env.dist` is the template; `just bootstrap` copies it to `.env`.
 
-Typical required env vars:
-`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`,
-`POSTGRES_DB`, `SQLALCHEMY_DEBUG`, `UVICORN_HOST`, `UVICORN_PORT`.
+Required env vars (no code defaults — set them or startup fails):
 
-Optional: `FASTAPI_DEBUG`, `APP_NAME`, `GRPC_ENDPOINT` (observability).
+- **Postgres**: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`,
+  `POSTGRES_PORT`, `POSTGRES_DB`, `SQLALCHEMY_DEBUG`.
+- **Uvicorn**: `UVICORN_HOST`, `UVICORN_PORT` (no defaults — deploys must
+  declare the binding explicitly; Docker sets `0.0.0.0`, bare metal sets
+  whatever is safe for that machine).
+- **S3 / object storage**: `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+  `S3_BUCKET`, `S3_REGION`.
+
+Optional / pre-filled defaults:
+
+- **TaskIQ**: `TASKIQ_BROKER_URL` (default `redis://localhost:6379/0`),
+  `TASKIQ_RESULT_BACKEND_URL` (default `redis://localhost:6379/1`),
+  `TASKIQ_IN_MEMORY` (default `false` — set `true` only in tests / throwaway
+  local runs to swap the Redis broker for `InMemoryBroker`),
+  `TASKIQ_WORKERS` (default `2` — number of worker subprocesses; ignored in
+  local dev because `--reload` forces 1 worker).
+- **FastAPI**: `FASTAPI_DEBUG`, `APP_NAME`, `GRPC_ENDPOINT` (observability).
 
 ## Git & commits
 

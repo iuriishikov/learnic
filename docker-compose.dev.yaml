@@ -40,6 +40,21 @@ services:
       retries: 10
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    container_name: learnic-dev-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   minio-bootstrap:
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
     environment:
@@ -57,3 +72,5 @@ volumes:
     name: learnic-dev-postgres-data
   minio-data:
     name: learnic-dev-minio-data
+  redis-data:
+    name: learnic-dev-redis-data

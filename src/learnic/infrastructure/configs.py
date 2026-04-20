@@ -16,9 +16,7 @@ class PostgresConfig(BaseSettings):
 
     @property
     def _credentials(self) -> str:
-        return (
-            f"{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
-        )
+        return f"{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
     @property
     def dsn_async(self) -> str:
@@ -34,20 +32,51 @@ class ASGIConfig(BaseSettings):
         env_prefix="UVICORN_", env_file=".env", extra="ignore"
     )
 
-    host: str = "0.0.0.0"
-    port: int = 8000
+    host: str
+    port: int
+
+
+class S3Config(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="S3_", env_file=".env", extra="ignore")
+
+    endpoint: str
+    access_key: str
+    secret_key: str
+    bucket: str
+    region: str = "us-east-1"
+
+
+class TaskIQConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="TASKIQ_", env_file=".env", extra="ignore"
+    )
+
+    broker_url: str = "redis://localhost:6379/0"
+    result_backend_url: str = "redis://localhost:6379/1"
+    in_memory: bool = False
+    workers: int = 2
 
 
 class Configs:
-    __slots__ = ("postgres", "asgi")
+    __slots__ = ("postgres", "asgi", "s3", "taskiq")
 
-    def __init__(self, postgres: PostgresConfig, asgi: ASGIConfig) -> None:
+    def __init__(
+        self,
+        postgres: PostgresConfig,
+        asgi: ASGIConfig,
+        s3: S3Config,
+        taskiq: TaskIQConfig,
+    ) -> None:
         self.postgres = postgres
         self.asgi = asgi
+        self.s3 = s3
+        self.taskiq = taskiq
 
 
 def load_configs() -> Configs:
     return Configs(
         postgres=PostgresConfig(),  # pyright: ignore[reportCallIssue]
         asgi=ASGIConfig(),  # pyright: ignore[reportCallIssue]
+        s3=S3Config(),  # pyright: ignore[reportCallIssue]
+        taskiq=TaskIQConfig(),  # pyright: ignore[reportCallIssue]
     )

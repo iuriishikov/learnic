@@ -8,14 +8,17 @@ bootstrap:
     cp -n .env.dist .env || true
     poetry install
 
-[doc("Sync virtualenv to poetry.lock (removes anything not in lock)")]
-sync:
-    poetry sync --with dev
-
-[doc("Run app locally: apply migrations then start uvicorn with reload")]
-serve:
+[doc("Run app + worker locally: bring up dev stack, apply migrations, start both with reload")]
+serve: dev-up
+    #!/usr/bin/env bash
     poetry run alembic upgrade head
-    poetry run uvicorn learnic.web:create_app_production --factory --reload
+    poetry run uvicorn learnic.web:create_app_production --factory --reload &
+    poetry run taskiq worker learnic.worker:broker --reload &
+    wait
+
+[doc("Run TaskIQ worker only (useful when debugging tasks without the API)")]
+worker:
+    poetry run taskiq worker learnic.worker:broker --reload
 
 [doc("Run ruff check + ruff format + codespell")]
 lint:
@@ -29,30 +32,14 @@ static:
     poetry run bandit -c pyproject.toml -r src
     poetry run semgrep scan --config auto --error
 
-[doc("Run pre-commit on all files")]
-pre-commit:
-    poetry run pre-commit run --show-diff-on-failure --color=always --all-files
-
-[doc("Start dev Postgres and MinIO in background and wait until healthy")]
+[doc("Start dev Postgres, MinIO and Redis in background and wait until healthy")]
 dev-up:
-    docker compose -f docker-compose.dev.yaml up -d --wait postgres minio
+    docker compose -f docker-compose.dev.yaml up -d --wait postgres minio redis
     docker compose -f docker-compose.dev.yaml run --rm minio-bootstrap
 
 [doc("Stop and remove dev containers")]
 dev-down:
     docker compose -f docker-compose.dev.yaml down
-
-[doc("Run tests with coverage (spins up dev DB for the duration)")]
-test *args: dev-up
-    poetry run coverage run -m pytest -x --ff {{ args }}
-    just dev-down
-
-[doc("Run tests then print combined coverage report")]
-test-cov *args:
-    just test {{ args }}
-    poetry run coverage combine
-    poetry run coverage report --show-missing --skip-covered --sort=cover --precision=2
-    rm -f .coverage*
 
 [doc("Build and start the full production-like stack (Postgres + migrate + app + Caddy)")]
 prod-up:
@@ -61,7 +48,3 @@ prod-up:
 [doc("Stop production-like stack and remove orphan containers")]
 prod-down:
     docker compose down --remove-orphans
-
-[doc("Follow logs from production-like stack (optionally pass a service name)")]
-prod-logs *args:
-    docker compose logs -f {{ args }}
