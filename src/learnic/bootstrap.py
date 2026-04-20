@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from learnic.infrastructure.configs import Configs, load_configs
-from learnic.presentation.http.v1.routes.ping import router as ping_router
+from learnic.presentation.http.routes.root import router as root_router
 
 
 def setup_configs() -> Configs:
@@ -9,7 +9,7 @@ def setup_configs() -> Configs:
 
 
 def setup_routes(app: FastAPI) -> None:
-    app.include_router(ping_router, prefix="/api/v1")
+    app.include_router(root_router)
 
 
 def setup_map_tables() -> None:

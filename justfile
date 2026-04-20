@@ -33,9 +33,10 @@ static:
 pre-commit:
     poetry run pre-commit run --show-diff-on-failure --color=always --all-files
 
-[doc("Start dev Postgres in background and wait until healthy")]
+[doc("Start dev Postgres and MinIO in background and wait until healthy")]
 dev-up:
-    docker compose -f docker-compose.dev.yaml up -d --wait
+    docker compose -f docker-compose.dev.yaml up -d --wait postgres minio
+    docker compose -f docker-compose.dev.yaml run --rm minio-bootstrap
 
 [doc("Stop and remove dev containers")]
 dev-down:

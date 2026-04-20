@@ -15,14 +15,19 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from learnic.application.common.persistence.ping import PingReader
-from learnic.application.queries.ping.ping import PingQueryHandler
+from learnic.application.common.persistence.transaction import (
+    EntitySaver,
+    Transaction,
+)
 from learnic.infrastructure.configs import (
     ASGIConfig,
     Configs,
     PostgresConfig,
 )
-from learnic.infrastructure.persistence.adapters.ping import PingReaderAlchemy
+from learnic.infrastructure.persistence.adapters.transaction import (
+    EntitySaverAlchemy,
+    TransactionAlchemy,
+)
 
 
 class ConfigsProvider(Provider):
@@ -72,13 +77,8 @@ class DBProvider(Provider):
 class GatewaysProvider(Provider):
     scope = Scope.REQUEST
 
-    ping_reader = provide(PingReaderAlchemy, provides=PingReader)
-
-
-class InteractorsProvider(Provider):
-    scope = Scope.REQUEST
-
-    ping_handler = provide(PingQueryHandler)
+    transaction = provide(TransactionAlchemy, provides=Transaction)
+    entity_saver = provide(EntitySaverAlchemy, provides=EntitySaver)
 
 
 def setup_providers(configs: Configs) -> AsyncContainer:
@@ -86,6 +86,5 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         ConfigsProvider(),
         DBProvider(),
         GatewaysProvider(),
-        InteractorsProvider(),
         context={Configs: configs},
     )

@@ -197,7 +197,7 @@ infrastructure ───────┘   (implements application protocols)
   - `persistence/alembic/` — migrations
   - `configs.py` — `NamedTuple`-based configs
 
-- `src/<project>/presentation/http/v<N>/` — FastAPI routes, Pydantic schemas,
+- `src/<project>/presentation/http/` — FastAPI routes, Pydantic schemas,
   exception handlers. Routes convert schemas to command/query DTOs and delegate
   to handlers.
 
@@ -275,6 +275,25 @@ infrastructure ───────┘   (implements application protocols)
 - Timestamps in tables: `server_default=sa.func.now()`, and for `updated_at`
   also `onupdate=sa.func.now(), server_onupdate=sa.func.now()`.
 - In application code, prefer `datetime.now(timezone.utc)` — never `utcnow()` (deprecated, naive).
+- **Docstring style: Google.** All docstrings in this codebase use Google-style
+  sections (`Args:`, `Returns:`, `Raises:`, `Yields:`, `Examples:`) — no
+  reST/Sphinx (`:param:` / `:returns:`), no NumPy-style underlines. Mixing
+  styles inside one project breaks tool output (Sphinx, IDE hover, pydocstyle).
+  Write the summary as a single imperative line; leave a blank line before any
+  section.
+- **Every HTTP route handler MUST have a Google-style docstring.** Routes are
+  the public API surface — their docstrings feed directly into the OpenAPI
+  schema and `/docs` (FastAPI uses the docstring as the operation
+  `description`). Required sections:
+  - One-line summary (becomes the OpenAPI `summary`).
+  - `Args:` — every path/query/body/dependency parameter, what it means.
+    Skip `interactor: FromDishka[...]` since it is not a public input.
+  - `Returns:` — the response shape, in human terms (not just the type).
+  - `Raises:` — every domain/application error the handler can propagate
+    (e.g. `EntityNotFoundError`, `FieldError` subclasses), plus the HTTP
+    status the exception handler maps it to.
+  Docstrings on application handlers, gateways, readers, and entities are
+  encouraged but optional. Docstrings on routes are non-negotiable.
 
 ## Canonical examples (copy these patterns)
 
@@ -422,6 +441,22 @@ async def add(
     command_data: <Action><Aggregate>Command,
     interactor: FromDishka[<Action><Aggregate>CommandHandler],
 ) -> <ReturnType>:
+    """Create a new <aggregate>.
+
+    Args:
+        command_data: Payload describing the <aggregate> to create
+            (validated by Pydantic at the HTTP boundary).
+
+    Returns:
+        The created <aggregate>'s identifier (or full view, as the
+        handler defines).
+
+    Raises:
+        FieldError: One of the value-object invariants was violated;
+            mapped to HTTP 422 by the global exception handler.
+        EntityNotFoundError: A referenced related entity does not
+            exist; mapped to HTTP 404.
+    """
     return await interactor.run(command_data)
 ```
 
@@ -429,7 +464,7 @@ async def add(
 
 Domain `FieldError` → 422; application `EntityNotFoundError` → 404;
 generic `Exception` → 500. Mapping lives in
-`presentation/http/v<N>/common/exc_handlers.py::map_exc_handlers(app)`.
+`presentation/http/common/exc_handlers.py::map_exc_handlers(app)`.
 **Do not raise `HTTPException` from handlers** — raise domain/application
 errors instead, let the exception handlers translate them.
 
@@ -441,12 +476,12 @@ errors instead, let the exception handlers translate them.
    - extend the relevant `Protocol` in `application/common/persistence/<aggregate>.py`
    - implement in `infrastructure/persistence/adapters/<aggregate>.py` with `@override`
 4. **Register the handler** in `ioc.interactors_provider` — add it to `provide_all(...)`.
-5. Expose via a route in `presentation/http/v<N>/routes/<aggregate>.py`, using
+5. Expose via a route in `presentation/http/routes/<aggregate>.py`, using
    a Pydantic schema for input validation if needed. Use `FromDishka[Handler]`.
 6. Map any new domain errors to HTTP codes in `exc_handlers.py`.
 7. Unit test in `tests/unit/application/...` using Mock-based fixtures
    (see `tests/unit/application/conftest.py` for the pattern).
-8. Integration test in `tests/integrations/http/v<N>/...` if the route is new.
+8. Integration test in `tests/integrations/http/...` if the route is new.
 
 ## Adding a new aggregate (checklist)
 
