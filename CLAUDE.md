@@ -21,9 +21,14 @@ invoices, payments.">
 ## Tech Stack
 
 - Python `>=3.10` (use `X | Y`, `list[T]`, `dict[K, V]`; no `from __future__ import annotations`)
-- FastAPI + uvicorn, `ORJSONResponse` as default
-- Pydantic 2 — **only at the HTTP boundary** (routes), never in application/entities
-- SQLAlchemy 2.0 async + psycopg 3, Alembic
+- FastAPI + uvicorn — FastAPI serializes responses via Pydantic directly to JSON bytes; no `ORJSONResponse` needed
+- Pydantic 2 — **only at the HTTP boundary** (routes) and **configuration** (`BaseSettings`), never in application/entities
+- pydantic-settings — configuration via `BaseSettings` subclasses in `infrastructure/configs.py`; reads from env vars and `.env` file automatically; never use `os.environ` directly for config
+- **Database: PostgreSQL EXCLUSIVELY** — SQLAlchemy 2.0 async + psycopg 3,
+  Alembic. No MySQL, no SQLite (not even for tests), no MSSQL, no Oracle.
+  Connection URL scheme is `postgresql+psycopg://…`; table types may use
+  PostgreSQL-specific features (`sa.Uuid`, `JSONB`, arrays, `ON CONFLICT`)
+  freely — portability is not a goal.
 - dishka for DI (`make_async_container`, `setup_dishka`, `FromDishka`, `DishkaRoute`)
 - pytest + pytest-asyncio (auto mode), httpx for integration tests
 - ruff (strict), mypy (strict), bandit, semgrep, codespell
@@ -32,26 +37,110 @@ invoices, payments.">
 
 Pinned versions live in `pyproject.toml`. Do not loosen pins without a reason.
 
-## Package Management (Poetry)
+## Package Management (Poetry 2.x)
 
 Always use `poetry` commands. Do not mix `pip install`, `uv`, or raw
-`requirements.txt` into instructions.
+`requirements.txt` into instructions. This project uses Poetry 2.x conventions —
+PEP 621 for dependencies, PEP 735 for dependency groups.
 
-```bash
-poetry install --with dev             # install everything for local dev
-poetry install --only main            # prod only
-poetry add <pkg>                      # add runtime dep
-poetry add --group dev <pkg>          # add dev dep
-poetry add --group test <pkg>         # add test dep
-poetry remove <pkg>
-poetry run <cmd>                      # run inside venv
-poetry shell                          # activate venv
-poetry lock --no-update               # refresh lock without bumping
+### pyproject.toml layout (Poetry 2.x)
+
+Main (runtime) dependencies go under `[project]` (PEP 621):
+
+```toml
+[project]
+name = "<project>"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi (>=0.119,<0.120)",
+    "sqlalchemy[asyncio] (>=2.0,<3.0)",
+    # ...
+]
 ```
 
-Dependency groups are declared under `[tool.poetry.dependencies]` and
-`[tool.poetry.group.*.dependencies]`. When adding a dependency, always commit
-the updated `poetry.lock`.
+Dev / test / lint dependencies go under `[dependency-groups]` (PEP 735):
+
+```toml
+[dependency-groups]
+test = [
+    "pytest (>=8.0,<9.0)",
+    "pytest-asyncio (>=1.0,<2.0)",
+    "httpx (>=0.28,<0.29)",
+]
+lint = [
+    "ruff (>=0.14,<0.15)",
+    "mypy (>=1.18,<2.0)",
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
+    "pre-commit (>=4.0,<5.0)",
+]
+```
+
+Legacy `[tool.poetry.dependencies]` / `[tool.poetry.group.*.dependencies]`
+still work, but prefer PEP 621 / PEP 735 in new projects.
+
+### Day-to-day commands
+
+```bash
+poetry install                        # install main + non-optional groups
+poetry install --with dev             # also include the `dev` optional group
+poetry install --only main            # production-only: main group, nothing else
+poetry install --only-root            # install project root only, no deps
+
+poetry add <pkg>                      # add runtime dep (to main group)
+poetry add -G dev <pkg>               # add dep to `dev` group (-G == --group)
+poetry add -G test <pkg>
+poetry remove <pkg>
+poetry remove -G docs <pkg>
+
+poetry sync                           # sync env to lock: removes anything not in lock
+poetry sync --without dev             # prod-like sync
+poetry lock                           # regenerate poetry.lock after editing pyproject
+poetry lock --no-update               # refresh lock hashes without bumping versions
+
+poetry run <cmd>                      # run a command inside the venv
+poetry run pytest
+poetry run alembic upgrade head
+```
+
+### Activating the virtual environment
+
+**`poetry shell` no longer exists** in Poetry 2.x — it was extracted to the
+separate `poetry-plugin-shell` plugin. The recommended way is `poetry env activate`,
+which **prints** the activation command; you feed it to `eval` in your shell:
+
+```bash
+# Bash / Zsh
+eval $(poetry env activate)
+
+# Fish
+eval (poetry env activate)
+
+# PowerShell
+Invoke-Expression (poetry env activate)
+```
+
+Most of the time you do not need to activate at all — `poetry run <cmd>` is
+enough and composes better with CI, Docker, and `just` recipes.
+
+### Environment management
+
+```bash
+poetry env use 3.12                   # pin the Python interpreter
+poetry env use /full/path/to/python
+poetry env use system                 # drop explicit activation
+poetry env info                       # show info about the active venv
+poetry env info --path                # just the venv path
+poetry env info --executable          # just the Python executable path
+poetry env list                       # list all venvs for this project
+poetry env remove 3.12                # remove a specific venv
+poetry env remove --all               # remove all venvs for this project
+```
+
+When adding a dependency, always commit the updated `poetry.lock`.
 
 ## Architecture
 
@@ -69,7 +158,10 @@ infrastructure ───────┘   (implements application protocols)
   **Zero external imports.** Only stdlib + `typing_extensions`.
   - `common/` — `BaseEntity[OIDType]`, `DomainError`, `FieldError` base classes
   - `<aggregate>/` — `models.py` (entity), `value_objects.py` (VOs with invariants
-    enforced in `__post_init__`), `errors.py` (FieldError subclasses)
+    enforced in `__post_init__`), `errors.py` (FieldError subclasses),
+    `constants.py` (domain-level limits: max field lengths, bounded ranges,
+    etc. — every magic number used inside VO invariants lives here as a
+    `Final` constant, never inlined in `__post_init__`)
 
 - `src/<project>/application/` — use cases + persistence protocols. Knows nothing
   about FastAPI, SQLAlchemy, or dishka.
@@ -131,9 +223,9 @@ infrastructure ───────┘   (implements application protocols)
    subclasses. Domain invariants live in entities/VOs, not in handlers or routes.
 
 6. **Entities use `BaseEntity[OIDType]`** with a single `oid` field. Construct
-   new entities via `@classmethod create_<n>(...)` that passes
-   `cast("<IDType>", cast("object", None))` as a placeholder `oid` — the real
-   ID is assigned by the DB on flush.
+   new entities via `@classmethod create_<n>(...)` that generates the `oid`
+   via `uuid.uuid4()` wrapped in the aggregate's `NewType`. IDs are produced in
+   the domain, not by the database.
 
 7. **Imperative SQLAlchemy mapping.** Mapping functions (e.g. `map_user_table()`)
    must be called once at startup via `setup_map_tables()`. Do not introduce
@@ -156,7 +248,13 @@ infrastructure ───────┘   (implements application protocols)
   `Protocol` method.
 - `Final` for injected dependencies stored as attributes.
 - `@final` decorator on handler classes.
-- `NewType` for typed IDs: `UserID = NewType("UserID", int)`.
+- **IDs are EXCLUSIVELY `uuid.UUID`** — never `int`, never auto-increment, never
+  DB-generated sequences. Every aggregate ID must be a `NewType` wrapping
+  `uuid.UUID`: `UserID = NewType("UserID", uuid.UUID)`. Generate new IDs in the
+  domain via `uuid.uuid4()` inside `create_<aggregate>(...)` — not in
+  handlers, not in adapters, not in the DB. Store as `sa.Uuid` in tables.
+  No exceptions.
+- `NewType` for typed IDs: `UserID = NewType("UserID", uuid.UUID)`.
 - Commands/queries: `@dataclass(slots=True, frozen=True)`.
 - Value objects: `@dataclass(slots=True, frozen=True, eq=True, unsafe_hash=True)`.
 - Async for all I/O.
@@ -184,13 +282,14 @@ class <VO>:
 ### Entity
 
 ```python
+import uuid
 from dataclasses import dataclass
-from typing import NewType, cast
+from typing import NewType
 from typing_extensions import Self
 
 from <project>.entities.common.base_entity import BaseEntity
 
-<Aggregate>ID = NewType("<Aggregate>ID", int)
+<Aggregate>ID = NewType("<Aggregate>ID", uuid.UUID)
 
 @dataclass
 class <Aggregate>(BaseEntity[<Aggregate>ID]):
@@ -203,7 +302,7 @@ class <Aggregate>(BaseEntity[<Aggregate>ID]):
     @classmethod
     def create_<aggregate>(cls, <args>) -> Self:
         return cls(
-            oid=cast("<Aggregate>ID", cast("object", None)),
+            oid=<Aggregate>ID(uuid.uuid4()),
             <field>=<args>,
         )
 ```
@@ -366,18 +465,32 @@ Beyond the use-case checklist, also:
 
 ## Commands (justfile)
 
+Recipes wrap Poetry commands to avoid remembering flags. Inside recipes,
+prefer `poetry run <cmd>` over activating the venv — it's explicit and works
+the same in local shells, Docker, and CI.
+
 ```bash
-just bootstrap      # copy .env.dist to .env, install deps, install pre-commit
-just venv-sync      # poetry install --with dev
-just serve          # alembic upgrade head && python -m <project>
-just lint           # ruff check + ruff format + codespell
-just static         # mypy + bandit + semgrep
-just pre-commit     # run all pre-commit hooks
-just test           # spin up dev DB, run pytest -x --ff, tear down
+just bootstrap      # copy .env.dist to .env, poetry install, install pre-commit hooks
+just sync           # poetry sync --with dev  (align env with lock exactly)
+just serve          # poetry run alembic upgrade head && poetry run python -m <project>
+just lint           # poetry run ruff check + ruff format + codespell
+just static         # poetry run mypy + bandit + semgrep
+just pre-commit     # poetry run pre-commit run --all-files
+just test           # spin up dev DB, poetry run pytest -x --ff, tear down
 just test-cov       # test + coverage report
 just dev-up / dev-down
 just prod-up / prod-down
 ```
+
+Inside a recipe, prefer:
+
+```just
+@test:
+    poetry run pytest -x --ff
+```
+
+over manual venv activation. If you need an interactive shell with the venv
+on PATH, run `eval $(poetry env activate)` once in your terminal.
 
 ## Anti-patterns (do not do this)
 
@@ -400,13 +513,34 @@ just prod-up / prod-down
   in dishka and Pydantic.
 - ❌ Silently catch `DomainError` / `ApplicationError` in routes — let them propagate
   to the exception handlers.
+- ❌ Swap PostgreSQL for another database (SQLite, MySQL, Oracle, MSSQL),
+  even "just for tests" or "just for local dev". Use a real PostgreSQL
+  instance — via `docker-compose.dev` locally, a dedicated test DB in CI.
+- ❌ Inline magic numbers (max lengths, bounded ranges, etc.) inside VO
+  `__post_init__` or entity methods. They live in the aggregate's
+  `constants.py` as `Final` values and are imported by the VOs and any
+  adapter that needs the same limit (e.g. `sa.String(FIRST_NAME_MAX_LEN)`).
+- ❌ Read config values with `os.environ` directly — use `BaseSettings` subclasses
+  in `infrastructure/configs.py`; pydantic-settings handles parsing and validation.
+- ❌ Use `poetry shell` — it was removed from core in Poetry 2.x. Use
+  `poetry run <cmd>` in recipes/CI, or `eval $(poetry env activate)` for an
+  interactive shell.
+- ❌ Put runtime dependencies under `[tool.poetry.dependencies]` in new code —
+  use PEP 621 `[project].dependencies` instead. Same for groups: prefer
+  `[dependency-groups]` (PEP 735) over `[tool.poetry.group.*]`.
+- ❌ Use `poetry install --sync` (deprecated flag). Use the standalone
+  `poetry sync` command.
 
 ## Environment & configuration
 
-Configs are `NamedTuple`s in `infrastructure/configs.py` (`PostgresConfig`,
-`ASGIConfig`, `ObservabilityConfig`, `Configs`). Values are read from env vars
-in `bootstrap.setup_configs()`. `.env.dist` is the template; `just bootstrap`
-copies it to `.env`.
+Configs are `BaseSettings` subclasses in `infrastructure/configs.py`
+(`PostgresConfig`, `ASGIConfig`). Each class declares its env-var prefix via
+`SettingsConfigDict(env_prefix="...", env_file=".env")` and pydantic-settings
+reads + validates values automatically — **never use `os.environ` directly**.
+`Configs` is a plain class that aggregates them; `load_configs()` instantiates
+each `BaseSettings` subclass with no arguments.
+
+`.env.dist` is the template; `just bootstrap` copies it to `.env`.
 
 Typical required env vars:
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`,
