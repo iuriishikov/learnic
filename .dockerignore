@@ -1,0 +1,57 @@
+# Virtual envs
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Tests / coverage
+tests/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Static analysis caches
+.mypy_cache/
+.ruff_cache/
+
+# Editors / IDE
+.vscode/
+.idea/
+.zed/
+.DS_Store
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Docker / CI / deploy
+Dockerfile
+Dockerfile.*
+docker-compose.yaml
+docker-compose.*.yaml
+.dockerignore
+.github/
+deploy/
+
+# Secrets / local env — .env.dist is the only one we actually want in build context
+.env
+.env.*
+!.env.dist
+
+# Certs / keys / logs
+*.pem
+*.key
+*.log
