@@ -4,6 +4,10 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from learnic.infrastructure.configs import load_configs
+from learnic.infrastructure.persistence.models import user as _user_model
+from learnic.infrastructure.persistence.models.registry import mapper_registry
+
+_ = _user_model  # ensure tables register on mapper_registry.metadata
 
 config = context.config
 
@@ -12,7 +16,7 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", load_configs().postgres.dsn_sync)
 
-target_metadata = None
+target_metadata = mapper_registry.metadata
 
 
 def run_migrations_offline() -> None:

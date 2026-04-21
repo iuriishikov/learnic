@@ -180,12 +180,17 @@ infrastructure ───────┘   (implements application protocols)
 
 - `src/<project>/entities/` — pure domain. Entities, value objects, domain errors.
   **Zero external imports.** Only stdlib + `typing_extensions`.
-  - `common/` — `BaseEntity[OIDType]`, `DomainError`, `FieldError` base classes
-  - `<aggregate>/` — `models.py` (entity), `value_objects.py` (VOs with invariants
-    enforced in `__post_init__`), `errors.py` (FieldError subclasses),
-    `constants.py` (domain-level limits: max field lengths, bounded ranges,
-    etc. — every magic number used inside VO invariants lives here as a
-    `Final` constant, never inlined in `__post_init__`)
+  - `common/` — `BaseEntity[OIDType]`, `ValueObject`, `DomainError`,
+    `FieldError` base classes. `ValueObject` supplies
+    `__composite_values__` so single- and multi-attribute VOs can be
+    mapped through SQLAlchemy `composite()` without each VO restating
+    the serializer; every concrete VO inherits from it.
+  - `<aggregate>/` — `models.py` (entity), `value_objects.py` (VOs inherit
+    from `ValueObject`; invariants enforced in `__post_init__`),
+    `errors.py` (FieldError subclasses), `constants.py` (domain-level
+    limits: max field lengths, bounded ranges, etc. — every magic number
+    used inside VO invariants lives here as a `Final` constant, never
+    inlined in `__post_init__`)
 
 - `src/<project>/application/` — use cases + persistence protocols. Knows nothing
   about FastAPI, SQLAlchemy, dishka, TaskIQ, or boto3.
@@ -279,6 +284,15 @@ infrastructure ───────┘   (implements application protocols)
 7. **Imperative SQLAlchemy mapping.** Mapping functions (e.g. `map_user_table()`)
    must be called once at startup via `setup_map_tables()`. Do not introduce
    declarative `DeclarativeBase` models — entities must remain ORM-free.
+   Columns are plain SA types (`sa.String(MAX_LEN)`, `sa.Uuid`, etc.);
+   VO ↔ primitive conversion lives in `properties={...}` via
+   `composite(VO, table.c.col)` — never in custom `TypeDecorator`s.
+   For **nullable** VO columns, pass a small factory function
+   (`lambda v: VO(v) if v is not None else None`) instead of the VO
+   class: SQLAlchemy 2.0 always instantiates the composite class on
+   load, so the VO class itself would receive `None` and crash in
+   `__post_init__`. (Obsoleted by `composite.return_none_on` in
+   SQLAlchemy 2.1 once that ships.)
 
 8. **DI registration**:
    - Use cases are registered in `ioc.interactors_provider` via

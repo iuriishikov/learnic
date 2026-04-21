@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 
 import aioboto3
+import httpx
 from aiobotocore.client import AioBaseClient
 from dishka import (
     AsyncContainer,
@@ -17,22 +18,39 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from learnic.application.commands.user.create import (
+    CreateUserCommandHandler,
+)
+from learnic.application.common.email.sender import EmailSender
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
 )
+from learnic.application.common.persistence.user import (
+    UserGateway,
+    UserReader,
+)
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.application.queries.user.get import GetUserQueryHandler
 from learnic.infrastructure.configs import (
     ASGIConfig,
     Configs,
     PostgresConfig,
+    RusenderConfig,
     S3Config,
     TaskIQConfig,
+)
+from learnic.infrastructure.email.adapters.rusender import (
+    RusenderEmailSender,
 )
 from learnic.infrastructure.persistence.adapters.transaction import (
     EntitySaverAlchemy,
     TransactionAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.user import (
+    UserMapperAlchemy,
+    UserReaderAlchemy,
 )
 from learnic.infrastructure.storage.adapters.s3 import S3FileStorage
 from learnic.infrastructure.tasks.scheduler import TaskSchedulerTaskIQ
@@ -58,6 +76,10 @@ class ConfigsProvider(Provider):
     @provide
     def taskiq_config(self, configs: Configs) -> TaskIQConfig:
         return configs.taskiq
+
+    @provide
+    def rusender_config(self, configs: Configs) -> RusenderConfig:
+        return configs.rusender
 
 
 class DBProvider(Provider):
@@ -95,6 +117,8 @@ class GatewaysProvider(Provider):
 
     transaction = provide(TransactionAlchemy, provides=Transaction)
     entity_saver = provide(EntitySaverAlchemy, provides=EntitySaver)
+    user_gateway = provide(UserMapperAlchemy, provides=UserGateway)
+    user_reader = provide(UserReaderAlchemy, provides=UserReader)
 
 
 class S3Provider(Provider):
@@ -134,6 +158,38 @@ class TasksProvider(Provider):
     scheduler = provide(TaskSchedulerTaskIQ, provides=TaskScheduler)
 
 
+class InteractorsProvider(Provider):
+    scope = Scope.REQUEST
+
+    create_user = provide(CreateUserCommandHandler)
+    get_user = provide(GetUserQueryHandler)
+
+
+class EmailProvider(Provider):
+    scope = Scope.APP
+
+    @provide
+    async def http_client(self) -> AsyncIterator[httpx.AsyncClient]:
+        client = httpx.AsyncClient(timeout=10.0)
+        try:
+            yield client
+        finally:
+            await client.aclose()
+
+    @provide(scope=Scope.REQUEST)
+    def email_sender(
+        self,
+        client: httpx.AsyncClient,
+        rusender: RusenderConfig,
+    ) -> EmailSender:
+        return RusenderEmailSender(
+            client=client,
+            api_key=rusender.api_key,
+            from_email=rusender.from_email,
+            from_name=rusender.from_name,
+        )
+
+
 def setup_providers(configs: Configs) -> AsyncContainer:
     return make_async_container(
         ConfigsProvider(),
@@ -141,5 +197,7 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         GatewaysProvider(),
         S3Provider(),
         TasksProvider(),
+        EmailProvider(),
+        InteractorsProvider(),
         context={Configs: configs},
     )

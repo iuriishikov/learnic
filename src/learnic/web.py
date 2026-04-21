@@ -4,7 +4,12 @@ from contextlib import asynccontextmanager
 from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 
-from learnic.bootstrap import setup_configs, setup_map_tables, setup_routes
+from learnic.bootstrap import (
+    setup_configs,
+    setup_exc_handlers,
+    setup_map_tables,
+    setup_routes,
+)
 from learnic.infrastructure.configs import Configs
 from learnic.infrastructure.tasks.broker import broker
 from learnic.ioc import setup_providers
@@ -23,6 +28,7 @@ def _create_app(configs: Configs) -> FastAPI:
     setup_map_tables()
     app = FastAPI(lifespan=_lifespan)
     setup_routes(app)
+    setup_exc_handlers(app)
     container = setup_providers(configs)
     setup_dishka(container, app)
     return app

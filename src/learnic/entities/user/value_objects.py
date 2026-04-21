@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-
+from learnic.entities.common.value_object import ValueObject
 from learnic.entities.user.constants import (
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
@@ -8,13 +7,11 @@ from learnic.entities.user.constants import (
 from learnic.entities.user.errors import EmptyNameError, NameTooLongError
 
 
-@dataclass(slots=True, frozen=True, eq=True, unsafe_hash=True)
-class Email:
+class Email(ValueObject):
     value: str
 
 
-@dataclass(slots=True, frozen=True, eq=True, unsafe_hash=True)
-class FirstName:
+class FirstName(ValueObject):
     value: str
 
     def __post_init__(self) -> None:
@@ -24,8 +21,7 @@ class FirstName:
             raise NameTooLongError("first_name", FIRST_NAME_MAX_LEN)
 
 
-@dataclass(slots=True, frozen=True, eq=True, unsafe_hash=True)
-class LastName:
+class LastName(ValueObject):
     value: str
 
     def __post_init__(self) -> None:
@@ -35,8 +31,7 @@ class LastName:
             raise NameTooLongError("last_name", LAST_NAME_MAX_LEN)
 
 
-@dataclass(slots=True, frozen=True, eq=True, unsafe_hash=True)
-class Patronymic:
+class Patronymic(ValueObject):
     value: str
 
     def __post_init__(self) -> None:
