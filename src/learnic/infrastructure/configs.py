@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -67,8 +69,25 @@ class RusenderConfig(BaseSettings):
     from_name: str = ""
 
 
+class SecurityConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="AUTH_", env_file=".env", extra="ignore"
+    )
+
+    jwt_secret: str
+    access_token_ttl_seconds: int = 15 * 60
+    refresh_token_ttl_seconds: int = 30 * 24 * 3600
+    signup_session_ttl_seconds: int = 30 * 60
+    verify_email_token_ttl_seconds: int = 24 * 3600
+    reset_password_token_ttl_seconds: int = 3600
+    cookie_domain: str | None = None
+    cookie_secure: bool = True
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    frontend_base_url: str
+
+
 class Configs:
-    __slots__ = ("postgres", "asgi", "s3", "taskiq", "rusender")
+    __slots__ = ("postgres", "asgi", "s3", "taskiq", "rusender", "security")
 
     def __init__(
         self,
@@ -77,12 +96,14 @@ class Configs:
         s3: S3Config,
         taskiq: TaskIQConfig,
         rusender: RusenderConfig,
+        security: SecurityConfig,
     ) -> None:
         self.postgres = postgres
         self.asgi = asgi
         self.s3 = s3
         self.taskiq = taskiq
         self.rusender = rusender
+        self.security = security
 
 
 def load_configs() -> Configs:
@@ -92,4 +113,5 @@ def load_configs() -> Configs:
         s3=S3Config(),  # pyright: ignore[reportCallIssue]
         taskiq=TaskIQConfig(),  # pyright: ignore[reportCallIssue]
         rusender=RusenderConfig(),  # pyright: ignore[reportCallIssue]
+        security=SecurityConfig(),  # pyright: ignore[reportCallIssue]
     )

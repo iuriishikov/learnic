@@ -1,14 +1,26 @@
 from learnic.entities.common.value_object import ValueObject
 from learnic.entities.user.constants import (
+    EMAIL_MAX_LEN,
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
+    PASSWORD_MAX_LEN,
+    PASSWORD_MIN_LEN,
     PATRONYMIC_MAX_LEN,
 )
-from learnic.entities.user.errors import EmptyNameError, NameTooLongError
+from learnic.entities.user.errors import (
+    EmptyNameError,
+    InvalidEmailError,
+    NameTooLongError,
+    WeakPasswordError,
+)
 
 
 class Email(ValueObject):
     value: str
+
+    def __post_init__(self) -> None:
+        if "@" not in self.value or len(self.value) > EMAIL_MAX_LEN:
+            raise InvalidEmailError
 
 
 class FirstName(ValueObject):
@@ -39,3 +51,17 @@ class Patronymic(ValueObject):
             raise EmptyNameError("patronymic")
         if len(self.value) > PATRONYMIC_MAX_LEN:
             raise NameTooLongError("patronymic", PATRONYMIC_MAX_LEN)
+
+
+class RawPassword(ValueObject):
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) < PASSWORD_MIN_LEN:
+            raise WeakPasswordError("too_short")
+        if len(self.value) > PASSWORD_MAX_LEN:
+            raise WeakPasswordError("too_long")
+
+
+class PasswordHash(ValueObject):
+    value: str

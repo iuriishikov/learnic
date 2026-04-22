@@ -30,3 +30,7 @@ class TransactionAlchemy(Transaction):
     @override
     async def rollback(self) -> None:
         await self._session.rollback()
+
+    @override
+    async def flush(self) -> None:
+        await self._session.flush()

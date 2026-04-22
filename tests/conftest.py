@@ -13,6 +13,7 @@ from learnic.infrastructure.configs import (
     PostgresConfig,
     RusenderConfig,
     S3Config,
+    SecurityConfig,
     TaskIQConfig,
 )
 from learnic.web import create_app_tests
@@ -41,6 +42,11 @@ def configs() -> Configs:
             api_key="test",
             from_email="test@test.local",
             from_name="Test",
+        ),
+        security=SecurityConfig(
+            jwt_secret="test-secret-at-least-32-bytes-long!",
+            frontend_base_url="http://0.0.0.0:8000",
+            cookie_secure=False,
         ),
     )
 

@@ -1,3 +1,3 @@
-from learnic.infrastructure.tasks.handlers import email, example
+from learnic.infrastructure.tasks.handlers import auth_email, email, example
 
-__all__ = ["email", "example"]
+__all__ = ["auth_email", "email", "example"]

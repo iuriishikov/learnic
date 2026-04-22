@@ -4,10 +4,24 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from learnic.infrastructure.configs import load_configs
-from learnic.infrastructure.persistence.models import user as _user_model
+from learnic.infrastructure.persistence.models import (
+    email_token as _email_token_model,
+    file as _file_model,
+    refresh_token as _refresh_token_model,
+    signup_session as _signup_session_model,
+    token_denylist as _token_denylist_model,
+    user as _user_model,
+)
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
-_ = _user_model  # ensure tables register on mapper_registry.metadata
+_ = (
+    _user_model,
+    _refresh_token_model,
+    _email_token_model,
+    _signup_session_model,
+    _token_denylist_model,
+    _file_model,
+)  # ensure tables register on mapper_registry.metadata
 
 config = context.config
 

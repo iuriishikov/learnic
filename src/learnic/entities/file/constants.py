@@ -1,0 +1,7 @@
+from typing import Final
+
+STORAGE_NAME_MAX_LEN: Final = 255
+STORAGE_BUCKET_MAX_LEN: Final = 63
+CONTENT_TYPE_MAX_LEN: Final = 64
+
+MAX_FILE_SIZE_BYTES: Final = 5 * 1024 * 1024  # 5 MB

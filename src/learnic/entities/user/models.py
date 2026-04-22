@@ -3,10 +3,12 @@ from dataclasses import dataclass
 from typing import NewType, Self
 
 from learnic.entities.common.base_entity import BaseEntity
+from learnic.entities.file.ids import FileID
 from learnic.entities.user.value_objects import (
     Email,
     FirstName,
     LastName,
+    PasswordHash,
     Patronymic,
 )
 
@@ -19,9 +21,14 @@ class User(BaseEntity[UserID]):
     first_name: FirstName
     last_name: LastName
     patronymic: Patronymic | None
+    password_hash: PasswordHash
+    email_verified: bool
+    avatar_file_id: FileID | None = None
+    cover_file_id: FileID | None = None
 
     def change_email(self, new_email: Email) -> None:
         self.email = new_email
+        self.email_verified = False
 
     def change_first_name(self, new_first_name: FirstName) -> None:
         self.first_name = new_first_name
@@ -32,12 +39,40 @@ class User(BaseEntity[UserID]):
     def change_patronymic(self, new_patronymic: Patronymic | None) -> None:
         self.patronymic = new_patronymic
 
+    def change_password(self, new_hash: PasswordHash) -> None:
+        self.password_hash = new_hash
+
+    def mark_email_verified(self) -> None:
+        self.email_verified = True
+
+    def set_avatar(self, file_id: FileID) -> FileID | None:
+        """Attach ``file_id`` as avatar, returning the previous one (if any)."""
+        previous = self.avatar_file_id
+        self.avatar_file_id = file_id
+        return previous
+
+    def remove_avatar(self) -> FileID | None:
+        previous = self.avatar_file_id
+        self.avatar_file_id = None
+        return previous
+
+    def set_cover(self, file_id: FileID) -> FileID | None:
+        previous = self.cover_file_id
+        self.cover_file_id = file_id
+        return previous
+
+    def remove_cover(self) -> FileID | None:
+        previous = self.cover_file_id
+        self.cover_file_id = None
+        return previous
+
     @classmethod
     def create_user(
         cls,
         email: Email,
         first_name: FirstName,
         last_name: LastName,
+        password_hash: PasswordHash,
         patronymic: Patronymic | None = None,
     ) -> Self:
         return cls(
@@ -46,4 +81,8 @@ class User(BaseEntity[UserID]):
             first_name=first_name,
             last_name=last_name,
             patronymic=patronymic,
+            password_hash=password_hash,
+            email_verified=False,
+            avatar_file_id=None,
+            cover_file_id=None,
         )

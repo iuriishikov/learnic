@@ -27,3 +27,31 @@ class TaskScheduler(Protocol):
             text: Optional plain-text alternative.
         """
         ...
+
+    async def schedule_send_verification_email(
+        self,
+        to: str,
+        raw_token: str,
+    ) -> None:
+        """Enqueue delivery of an email-verification link.
+
+        Args:
+            to: Recipient email address.
+            raw_token: Single-use token; the worker builds the verify
+                URL from the configured frontend base URL.
+        """
+        ...
+
+    async def schedule_send_password_reset_email(
+        self,
+        to: str,
+        raw_token: str,
+    ) -> None:
+        """Enqueue delivery of a password-reset link.
+
+        Args:
+            to: Recipient email address.
+            raw_token: Single-use token; the worker builds the reset URL
+                from the configured frontend base URL.
+        """
+        ...

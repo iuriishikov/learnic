@@ -18,10 +18,44 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from learnic.application.commands.user.create import (
-    CreateUserCommandHandler,
+from learnic.application.commands.auth.login import LoginCommandHandler
+from learnic.application.commands.auth.logout import LogoutCommandHandler
+from learnic.application.commands.auth.logout_all import (
+    LogoutAllCommandHandler,
+)
+from learnic.application.commands.auth.refresh import RefreshCommandHandler
+from learnic.application.commands.auth.register import (
+    RegisterCommandHandler,
+)
+from learnic.application.commands.auth.request_password_reset import (
+    RequestPasswordResetCommandHandler,
+)
+from learnic.application.commands.auth.reset_password import (
+    ResetPasswordCommandHandler,
+)
+from learnic.application.commands.auth.verify_email import (
+    VerifyEmailCommandHandler,
+)
+from learnic.application.commands.auth.verify_wait import (
+    VerifyWaitCommandHandler,
+)
+from learnic.application.commands.user.avatar.remove import (
+    RemoveUserAvatarCommandHandler,
+)
+from learnic.application.commands.user.avatar.set import (
+    SetUserAvatarCommandHandler,
+)
+from learnic.application.commands.user.cover.remove import (
+    RemoveUserCoverCommandHandler,
+)
+from learnic.application.commands.user.cover.set import (
+    SetUserCoverCommandHandler,
 )
 from learnic.application.common.email.sender import EmailSender
+from learnic.application.common.persistence.file import (
+    FilesGateway,
+    FilesReader,
+)
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
@@ -30,6 +64,18 @@ from learnic.application.common.persistence.user import (
     UserGateway,
     UserReader,
 )
+from learnic.application.common.security.access_tokens import (
+    AccessTokenService,
+)
+from learnic.application.common.security.email_tokens import EmailTokenStore
+from learnic.application.common.security.passwords import PasswordHasher
+from learnic.application.common.security.refresh_tokens import (
+    RefreshTokenStore,
+)
+from learnic.application.common.security.signup_sessions import (
+    SignupSessionStore,
+)
+from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.queries.user.get import GetUserQueryHandler
@@ -39,10 +85,27 @@ from learnic.infrastructure.configs import (
     PostgresConfig,
     RusenderConfig,
     S3Config,
+    SecurityConfig,
     TaskIQConfig,
 )
 from learnic.infrastructure.email.adapters.rusender import (
     RusenderEmailSender,
+)
+from learnic.infrastructure.persistence.adapters.email_token import (
+    EmailTokenStoreAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.file import (
+    FilesMapperAlchemy,
+    FilesReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.refresh_token import (
+    RefreshTokenStoreAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.signup_session import (
+    SignupSessionStoreAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.token_denylist import (
+    TokenDenylistAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.transaction import (
     EntitySaverAlchemy,
@@ -52,6 +115,10 @@ from learnic.infrastructure.persistence.adapters.user import (
     UserMapperAlchemy,
     UserReaderAlchemy,
 )
+from learnic.infrastructure.security.argon2_hasher import (
+    Argon2PasswordHasher,
+)
+from learnic.infrastructure.security.jwt_access import JwtAccessTokenService
 from learnic.infrastructure.storage.adapters.s3 import S3FileStorage
 from learnic.infrastructure.tasks.scheduler import TaskSchedulerTaskIQ
 
@@ -80,6 +147,10 @@ class ConfigsProvider(Provider):
     @provide
     def rusender_config(self, configs: Configs) -> RusenderConfig:
         return configs.rusender
+
+    @provide
+    def security_config(self, configs: Configs) -> SecurityConfig:
+        return configs.security
 
 
 class DBProvider(Provider):
@@ -119,6 +190,37 @@ class GatewaysProvider(Provider):
     entity_saver = provide(EntitySaverAlchemy, provides=EntitySaver)
     user_gateway = provide(UserMapperAlchemy, provides=UserGateway)
     user_reader = provide(UserReaderAlchemy, provides=UserReader)
+    files_gateway = provide(FilesMapperAlchemy, provides=FilesGateway)
+    files_reader = provide(FilesReaderAlchemy, provides=FilesReader)
+
+
+class SecurityProvider(Provider):
+    hasher = provide(Argon2PasswordHasher, provides=PasswordHasher, scope=Scope.APP)
+    access_tokens = provide(
+        JwtAccessTokenService,
+        provides=AccessTokenService,
+        scope=Scope.APP,
+    )
+    refresh_store = provide(
+        RefreshTokenStoreAlchemy,
+        provides=RefreshTokenStore,
+        scope=Scope.REQUEST,
+    )
+    email_tokens = provide(
+        EmailTokenStoreAlchemy,
+        provides=EmailTokenStore,
+        scope=Scope.REQUEST,
+    )
+    signup_sessions = provide(
+        SignupSessionStoreAlchemy,
+        provides=SignupSessionStore,
+        scope=Scope.REQUEST,
+    )
+    denylist = provide(
+        TokenDenylistAlchemy,
+        provides=TokenDenylist,
+        scope=Scope.REQUEST,
+    )
 
 
 class S3Provider(Provider):
@@ -147,9 +249,8 @@ class S3Provider(Provider):
     def file_storage(
         self,
         client: AioBaseClient,
-        s3: S3Config,
     ) -> FileStorage:
-        return S3FileStorage(client, s3.bucket)
+        return S3FileStorage(client)
 
 
 class TasksProvider(Provider):
@@ -161,8 +262,22 @@ class TasksProvider(Provider):
 class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
-    create_user = provide(CreateUserCommandHandler)
     get_user = provide(GetUserQueryHandler)
+
+    register = provide(RegisterCommandHandler)
+    login = provide(LoginCommandHandler)
+    refresh = provide(RefreshCommandHandler)
+    logout = provide(LogoutCommandHandler)
+    logout_all = provide(LogoutAllCommandHandler)
+    verify_email = provide(VerifyEmailCommandHandler)
+    verify_wait = provide(VerifyWaitCommandHandler)
+    request_password_reset = provide(RequestPasswordResetCommandHandler)
+    reset_password = provide(ResetPasswordCommandHandler)
+
+    set_user_avatar = provide(SetUserAvatarCommandHandler)
+    remove_user_avatar = provide(RemoveUserAvatarCommandHandler)
+    set_user_cover = provide(SetUserCoverCommandHandler)
+    remove_user_cover = provide(RemoveUserCoverCommandHandler)
 
 
 class EmailProvider(Provider):
@@ -195,6 +310,7 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         ConfigsProvider(),
         DBProvider(),
         GatewaysProvider(),
+        SecurityProvider(),
         S3Provider(),
         TasksProvider(),
         EmailProvider(),

@@ -5,6 +5,7 @@ from learnic.entities.user.constants import (
     EMAIL_MAX_LEN,
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
+    PASSWORD_HASH_MAX_LEN,
     PATRONYMIC_MAX_LEN,
 )
 from learnic.entities.user.models import User
@@ -12,6 +13,7 @@ from learnic.entities.user.value_objects import (
     Email,
     FirstName,
     LastName,
+    PasswordHash,
     Patronymic,
 )
 from learnic.infrastructure.persistence.models.registry import mapper_registry
@@ -39,6 +41,39 @@ users_table = sa.Table(
     sa.Column(
         "patronymic",
         sa.String(PATRONYMIC_MAX_LEN),
+        nullable=True,
+    ),
+    sa.Column(
+        "password_hash",
+        sa.String(PASSWORD_HASH_MAX_LEN),
+        nullable=False,
+    ),
+    sa.Column(
+        "email_verified",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
+        "avatar_file_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "files.oid",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_users_avatar_file_id",
+        ),
+        nullable=True,
+    ),
+    sa.Column(
+        "cover_file_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "files.oid",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_users_cover_file_id",
+        ),
         nullable=True,
     ),
 )
@@ -69,6 +104,13 @@ def map_user_table() -> None:
                 Patronymic.of_optional,
                 users_table.c.patronymic,
             ),
+            "password_hash": composite(
+                PasswordHash,
+                users_table.c.password_hash,
+            ),
+            "email_verified": users_table.c.email_verified,
+            "avatar_file_id": users_table.c.avatar_file_id,
+            "cover_file_id": users_table.c.cover_file_id,
         },
         column_prefix="_col_",
     )

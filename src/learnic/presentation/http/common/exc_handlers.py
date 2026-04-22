@@ -1,9 +1,16 @@
 from http import HTTPStatus
+from typing import Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from learnic.application.common.errors import EntityNotFoundError
+from learnic.application.common.errors import (
+    EmailAlreadyRegisteredError,
+    EmailNotVerifiedError,
+    EntityNotFoundError,
+    InvalidCredentialsError,
+    InvalidTokenError,
+)
 from learnic.entities.common.errors import FieldError
 
 
@@ -12,9 +19,7 @@ async def _field_error_handler(
     exc: Exception,
 ) -> JSONResponse:
     # Registered for FieldError, so the runtime type is guaranteed.
-    fields = {
-        k: v for k, v in exc.__dict__.items() if not k.startswith("_")
-    }
+    fields = {k: v for k, v in exc.__dict__.items() if not k.startswith("_")}
     return JSONResponse(
         status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
         content={"error": type(exc).__name__, **fields},
@@ -35,6 +40,15 @@ async def _entity_not_found_handler(
     )
 
 
+def _status_handler(
+    status: HTTPStatus, error: str
+) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
+    async def handler(_: Request, __: Exception) -> JSONResponse:
+        return JSONResponse(status_code=status, content={"error": error})
+
+    return handler
+
+
 def map_exc_handlers(app: FastAPI) -> None:
     """Translate domain/application errors into HTTP responses.
 
@@ -44,3 +58,19 @@ def map_exc_handlers(app: FastAPI) -> None:
     """
     app.add_exception_handler(FieldError, _field_error_handler)
     app.add_exception_handler(EntityNotFoundError, _entity_not_found_handler)
+    app.add_exception_handler(
+        InvalidCredentialsError,
+        _status_handler(HTTPStatus.UNAUTHORIZED, "InvalidCredentials"),
+    )
+    app.add_exception_handler(
+        InvalidTokenError,
+        _status_handler(HTTPStatus.UNAUTHORIZED, "InvalidToken"),
+    )
+    app.add_exception_handler(
+        EmailAlreadyRegisteredError,
+        _status_handler(HTTPStatus.CONFLICT, "EmailAlreadyRegistered"),
+    )
+    app.add_exception_handler(
+        EmailNotVerifiedError,
+        _status_handler(HTTPStatus.FORBIDDEN, "EmailNotVerified"),
+    )

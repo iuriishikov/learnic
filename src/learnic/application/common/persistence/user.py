@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from learnic.application.common.persistence.file import FileView
 from learnic.entities.user.models import User, UserID
 
 
@@ -13,6 +14,8 @@ class UserView:
     first_name: str
     last_name: str
     patronymic: str | None
+    avatar: FileView | None
+    cover: FileView | None
 
 
 class UserGateway(Protocol):
