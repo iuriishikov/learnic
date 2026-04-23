@@ -14,6 +14,7 @@ class UserView:
     first_name: str
     last_name: str
     patronymic: str | None
+    description: str | None
     avatar: FileView | None
     cover: FileView | None
 

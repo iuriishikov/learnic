@@ -6,7 +6,6 @@ from fastapi import FastAPI
 
 from learnic.bootstrap import (
     setup_configs,
-    setup_exc_handlers,
     setup_map_tables,
     setup_routes,
 )
@@ -28,7 +27,6 @@ def _create_app(configs: Configs) -> FastAPI:
     setup_map_tables()
     app = FastAPI(lifespan=_lifespan)
     setup_routes(app)
-    setup_exc_handlers(app)
     container = setup_providers(configs)
     setup_dishka(container, app)
     return app

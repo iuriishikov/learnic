@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Final, final
 
 from fastapi import Request
 
@@ -20,31 +21,39 @@ class AccessContext:
     expires_at: datetime
 
 
-async def authenticate(
-    request: Request,
-    access_tokens: AccessTokenService,
-    denylist: TokenDenylist,
-) -> AccessContext:
-    """Decode the access cookie and check it isn't denylisted.
+@final
+class Authenticator:
+    """Injectable façade for reading and validating the access cookie.
 
-    Plain async function (not a FastAPI ``Depends``) — dishka's
-    ``FromDishka`` annotations are resolved by the route class, and
-    FastAPI's sub-dependency analysis doesn't understand them. Call
-    this directly from route handlers with ``FromDishka``-injected
-    services.
-
-    Raises:
-        InvalidTokenError: cookie missing, malformed, expired or
-            denylisted.
+    Routes depend on ``FromDishka[Authenticator]`` and call
+    ``await auth.authenticate(request)`` instead of juggling
+    ``AccessTokenService`` + ``TokenDenylist`` by hand. Kept in the
+    presentation layer because it knows about FastAPI's ``Request``.
     """
-    token = request.cookies.get(ACCESS_COOKIE)
-    if not token:
-        raise InvalidTokenError
-    payload = access_tokens.decode(token)
-    if await denylist.is_denied(payload.jti):
-        raise InvalidTokenError
-    return AccessContext(
-        user_id=payload.user_id,
-        jti=payload.jti,
-        expires_at=payload.expires_at,
-    )
+
+    def __init__(
+        self,
+        access_tokens: AccessTokenService,
+        denylist: TokenDenylist,
+    ) -> None:
+        self._access_tokens: Final = access_tokens
+        self._denylist: Final = denylist
+
+    async def authenticate(self, request: Request) -> AccessContext:
+        """Decode the access cookie and check it isn't denylisted.
+
+        Raises:
+            InvalidTokenError: cookie missing, malformed, expired or
+                denylisted.
+        """
+        token = request.cookies.get(ACCESS_COOKIE)
+        if not token:
+            raise InvalidTokenError
+        payload = self._access_tokens.decode(token)
+        if await self._denylist.is_denied(payload.jti):
+            raise InvalidTokenError
+        return AccessContext(
+            user_id=payload.user_id,
+            jti=payload.jti,
+            expires_at=payload.expires_at,
+        )

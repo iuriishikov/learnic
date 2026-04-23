@@ -15,6 +15,7 @@ from learnic.entities.user.value_objects import (
     LastName,
     PasswordHash,
     Patronymic,
+    UserDescription,
 )
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
@@ -53,6 +54,11 @@ users_table = sa.Table(
         sa.Boolean(),
         nullable=False,
         server_default=sa.false(),
+    ),
+    sa.Column(
+        "description",
+        sa.Text(),
+        nullable=True,
     ),
     sa.Column(
         "avatar_file_id",
@@ -109,6 +115,10 @@ def map_user_table() -> None:
                 users_table.c.password_hash,
             ),
             "email_verified": users_table.c.email_verified,
+            "description": composite(
+                UserDescription.of_optional,
+                users_table.c.description,
+            ),
             "avatar_file_id": users_table.c.avatar_file_id,
             "cover_file_id": users_table.c.cover_file_id,
         },

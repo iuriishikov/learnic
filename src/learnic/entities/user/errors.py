@@ -23,3 +23,9 @@ class WeakPasswordError(FieldError):
     """
 
     reason: str
+
+
+class InvalidDescriptionError(FieldError):
+    """Raised when a user description is empty or exceeds the length limit."""
+
+    limit: int

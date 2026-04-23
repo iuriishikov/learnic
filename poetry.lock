@@ -470,6 +470,24 @@ toml = ["tomli (>=1.1.0) ; python_version < \"3.11\""]
 yaml = ["PyYAML"]
 
 [[package]]
+name = "bleach"
+version = "6.3.0"
+description = "An easy safelist-based HTML-sanitizing tool."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "bleach-6.3.0-py3-none-any.whl", hash = "sha256:fe10ec77c93ddf3d13a73b035abaac7a9f5e436513864ccdad516693213c65d6"},
+    {file = "bleach-6.3.0.tar.gz", hash = "sha256:6f3b91b1c0a02bb9a78b5a454c92506aa0fdf197e1d5e114d2e00c6f64306d22"},
+]
+
+[package.dependencies]
+webencodings = "*"
+
+[package.extras]
+css = ["tinycss2 (>=1.1.0,<1.5)"]
+
+[[package]]
 name = "boltons"
 version = "21.0.0"
 description = "When they're not builtins, they're boltons."
@@ -984,6 +1002,22 @@ typing-inspection = ">=0.4.2"
 all = ["email-validator (>=2.0.0)", "fastapi-cli[standard] (>=0.0.8)", "httpx (>=0.23.0,<1.0.0)", "itsdangerous (>=1.1.0)", "jinja2 (>=3.1.5)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.18)", "pyyaml (>=5.3.1)", "uvicorn[standard] (>=0.12.0)"]
 standard = ["email-validator (>=2.0.0)", "fastapi-cli[standard] (>=0.0.8)", "fastar (>=0.9.0)", "httpx (>=0.23.0,<1.0.0)", "jinja2 (>=3.1.5)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.18)", "uvicorn[standard] (>=0.12.0)"]
 standard-no-fastapi-cloud-cli = ["email-validator (>=2.0.0)", "fastapi-cli[standard-no-fastapi-cloud-cli] (>=0.0.8)", "httpx (>=0.23.0,<1.0.0)", "jinja2 (>=3.1.5)", "pydantic-extra-types (>=2.0.0)", "pydantic-settings (>=2.0.0)", "python-multipart (>=0.0.18)", "uvicorn[standard] (>=0.12.0)"]
+
+[[package]]
+name = "fastapi-error-map"
+version = "0.9.10"
+description = "Elegant per-endpoint error handling for FastAPI that keeps OpenAPI in sync"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "fastapi_error_map-0.9.10-py3-none-any.whl", hash = "sha256:5bf727bf7de3a4aabdcb5107e29281b812060c6c198a16264e7fee20aa3c4c89"},
+    {file = "fastapi_error_map-0.9.10.tar.gz", hash = "sha256:38a62f48981515e5e861691d70c06675bb021e1c5be347d03518b09699d27ad4"},
+]
+
+[package.dependencies]
+fastapi = ">=0.100,<1.0"
+packaging = ">=21.0"
 
 [[package]]
 name = "frozenlist"
@@ -3979,6 +4013,18 @@ files = [
 bracex = ">=2.1.1"
 
 [[package]]
+name = "webencodings"
+version = "0.5.1"
+description = "Character encoding aliases for legacy web content"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78"},
+    {file = "webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923"},
+]
+
+[[package]]
 name = "websockets"
 version = "16.0"
 description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
@@ -4306,4 +4352,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<4.0"
-content-hash = "58aae69462ac5fa057519f32f9ddb170d761c0e178dcb61fec4e1396c5b4b3a9"
+content-hash = "faf8230c3afc33041de855f0d3170ddcd41ebda7d937fa86f0d81a70f0f52181"

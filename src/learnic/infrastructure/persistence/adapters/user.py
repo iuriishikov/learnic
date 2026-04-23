@@ -49,6 +49,7 @@ class UserReaderAlchemy(UserReader):
                 users_table.c.first_name,
                 users_table.c.last_name,
                 users_table.c.patronymic,
+                users_table.c.description,
                 avatar.c.oid.label("avatar_oid"),
                 avatar.c.storage_name.label("avatar_storage_name"),
                 avatar.c.bucket.label("avatar_bucket"),
@@ -85,6 +86,7 @@ class UserReaderAlchemy(UserReader):
             first_name=row.first_name,
             last_name=row.last_name,
             patronymic=row.patronymic,
+            description=row.description,
             avatar=(
                 FileView(
                     oid=FileID(row.avatar_oid),

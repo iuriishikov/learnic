@@ -1,10 +1,12 @@
 import pytest
 
 from learnic.entities.user.constants import (
+    DESCRIPTION_MAX_LEN,
     PASSWORD_MAX_LEN,
     PASSWORD_MIN_LEN,
 )
 from learnic.entities.user.errors import (
+    InvalidDescriptionError,
     InvalidEmailError,
     WeakPasswordError,
 )
@@ -12,6 +14,7 @@ from learnic.entities.user.value_objects import (
     Email,
     PasswordHash,
     RawPassword,
+    UserDescription,
 )
 
 
@@ -51,3 +54,20 @@ class TestPasswordHash:
         # PasswordHash is a storage VO, not validating here.
         ph = PasswordHash("$argon2id$v=19$m=65536,t=3,p=4$abc$xyz")
         assert ph.value.startswith("$argon2id$")
+
+
+class TestUserDescription:
+    def test_accepts_non_empty_within_limit(self) -> None:
+        desc = UserDescription("<p>hello</p>")
+        assert desc.value == "<p>hello</p>"
+
+    def test_accepts_exactly_at_limit(self) -> None:
+        assert UserDescription("x" * DESCRIPTION_MAX_LEN).value.startswith("x")
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(InvalidDescriptionError):
+            UserDescription("")
+
+    def test_rejects_over_limit(self) -> None:
+        with pytest.raises(InvalidDescriptionError):
+            UserDescription("x" * (DESCRIPTION_MAX_LEN + 1))

@@ -14,13 +14,16 @@ class GetUserQuery:
 
 @dataclass(slots=True, frozen=True)
 class UserOutput:
-    """Query result with media URLs already resolved."""
+    """Query result with media URLs already resolved.
+
+    ``email`` is deliberately omitted from the public profile projection.
+    """
 
     oid: UserID
-    email: str
     first_name: str
     last_name: str
     patronymic: str | None
+    description: str | None
     avatar_url: str | None
     cover_url: str | None
 
@@ -52,10 +55,10 @@ class GetUserQueryHandler:
 
         return UserOutput(
             oid=view.oid,
-            email=view.email,
             first_name=view.first_name,
             last_name=view.last_name,
             patronymic=view.patronymic,
+            description=view.description,
             avatar_url=avatar_url,
             cover_url=cover_url,
         )

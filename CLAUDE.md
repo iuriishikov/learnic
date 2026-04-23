@@ -43,7 +43,15 @@ invoices, payments.">
     never hardcode a URL elsewhere.
   - Table types may use PostgreSQL-specific features (`sa.Uuid`, `JSONB`,
     arrays, `ON CONFLICT`) freely — portability is not a goal.
-- dishka for DI (`make_async_container`, `setup_dishka`, `FromDishka`, `DishkaRoute`)
+- dishka for DI (`make_async_container`, `setup_dishka`, `FromDishka`) — routes use
+  a custom `DishkaErrorAwareRoute` class (see below) that combines dishka's
+  auto-inject with `fastapi-error-map` per-route error maps. Do **not** use
+  bare `DishkaRoute` in new routes.
+- **fastapi-error-map** for HTTP error responses — per-route `error_map={ExceptionType: RULE}`
+  declares which domain/application exceptions translate to which status codes, and
+  auto-populates OpenAPI. Translators live in `presentation/http/common/errors/translators.py`,
+  reusable rule constants in `presentation/http/common/errors/rules.py`. There is no
+  global `exc_handlers.py` — every route declares its full error surface.
 - **TaskIQ + Redis** for background tasks — `taskiq-redis` broker (`ListQueueBroker`)
   + `RedisAsyncResultBackend`. The producer side (FastAPI) talks to the broker
   through a `TaskScheduler` Protocol; the consumer side is a separate process
@@ -227,13 +235,29 @@ infrastructure ───────┘   (implements application protocols)
   - `configs.py` — `BaseSettings` subclasses (`PostgresConfig`, `ASGIConfig`,
     `S3Config`, `TaskIQConfig`) aggregated by a `Configs` class.
 
-- `src/<project>/presentation/http/` — FastAPI routes, Pydantic schemas,
-  exception handlers. Routes convert schemas to command/query DTOs and delegate
-  to handlers.
+- `src/<project>/presentation/http/` — FastAPI routes and Pydantic schemas.
+  Routes convert schemas to command/query DTOs and delegate to handlers.
+  Error-to-HTTP mapping is per-route via `error_map={...}` (see below) — there
+  is no global exception handler file.
+  - `common/router.py` — `DishkaErrorAwareRoute` route class combining
+    `ErrorAwareRoute` (from `fastapi-error-map`) with dishka auto-inject. Every
+    `ErrorAwareRouter(...)` in routes passes `route_class=DishkaErrorAwareRoute`
+    so handlers get `FromDishka[...]` resolved without manual `@inject`.
+  - `common/errors/translators.py` — `NamedErrorTranslator` (strips `Error`
+    suffix, emits `{"error": "<ClassName>"}`), `FieldErrorTranslator` (includes
+    VO public attrs like `field`/`limit`/`reason`), `EntityNotFoundTranslator`
+    (includes `entity_id`). Add a new translator here if a new error family
+    needs a different response shape.
+  - `common/errors/rules.py` — pre-composed `Rule` constants (`FIELD_ERROR_RULE`,
+    `INVALID_TOKEN_RULE`, etc.) bundling status code + translator. Routes
+    reference these constants in their `error_map` to stay consistent.
+  - `common/schemas.py` — cross-route schemas (`FileSchema` etc.) shared
+    between multiple routers.
 
 - `src/<project>/bootstrap.py` — wiring functions: `setup_configs`,
-  `setup_routes`, `setup_middlewares`, `setup_exc_handlers`, `setup_map_tables`,
-  `setup_observability`.
+  `setup_routes`, `setup_middlewares`, `setup_map_tables`,
+  `setup_observability`. No `setup_exc_handlers` — error mapping lives on
+  individual routes.
 
 - `src/<project>/ioc.py` — dishka providers (`ConfigsProvider`, `DBProvider`,
   `GatewaysProvider`, `S3Provider`, `TasksProvider`, `InteractorsProvider`,
@@ -494,16 +518,32 @@ class <Aggregate>MapperAlchemy(<Aggregate>Gateway):
 ### FastAPI route
 
 ```python
-from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, status
+from dishka.integrations.fastapi import FromDishka
+from fastapi import status
+from fastapi_error_map import ErrorAwareRouter
 
-router = APIRouter(
+from <project>.entities.common.errors import FieldError
+from <project>.application.common.errors import EntityNotFoundError
+from <project>.presentation.http.common.errors.rules import (
+    ENTITY_NOT_FOUND_RULE,
+    FIELD_ERROR_RULE,
+)
+from <project>.presentation.http.common.router import DishkaErrorAwareRoute
+
+router = ErrorAwareRouter(
     prefix="/<aggregate>s",
     tags=["<Aggregate>"],
-    route_class=DishkaRoute,  # no need for @inject on every handler
+    route_class=DishkaErrorAwareRoute,  # auto @inject + error_map support
 )
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    status_code=status.HTTP_201_CREATED,
+    error_map={
+        FieldError: FIELD_ERROR_RULE,
+        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+    },
+)
 async def add(
     command_data: <Action><Aggregate>Command,
     interactor: FromDishka[<Action><Aggregate>CommandHandler],
@@ -520,12 +560,27 @@ async def add(
 
     Raises:
         FieldError: One of the value-object invariants was violated;
-            mapped to HTTP 422 by the global exception handler.
+            mapped to HTTP 422 via FIELD_ERROR_RULE.
         EntityNotFoundError: A referenced related entity does not
-            exist; mapped to HTTP 404.
+            exist; mapped to HTTP 404 via ENTITY_NOT_FOUND_RULE.
     """
     return await interactor.run(command_data)
 ```
+
+**Rules for `error_map`:**
+- Every exception the handler (or anything it awaits — including shared helpers
+  like `authenticate(...)`) can raise **must** appear in `error_map`. Unmapped
+  exceptions become `RuntimeError("No rule defined for ...")` at request time —
+  the loud failure is intentional, fix the map.
+- Prefer the shared constants in `rules.py` over ad-hoc `rule(status=..., translator=...)`
+  so the same error has the same response shape across routes.
+- If a route needs an exception mapped **differently** from other routes, inline
+  `rule(...)` with a custom status or translator. That's the whole point of
+  per-route maps — don't try to work around the shared constants.
+- `InvalidTokenError`, `EntityNotFoundError`, `InvalidCredentialsError`,
+  `EmailAlreadyRegisteredError`, `EmailNotVerifiedError`, `FieldError` already
+  have constants. Add new constants only when a new error appears in multiple
+  routes.
 
 ### Background task (TaskIQ)
 
@@ -576,13 +631,32 @@ class TaskSchedulerTaskIQ(TaskScheduler):
         await <action>_<aggregate>_task.kiq(<id>)
 ```
 
-### Exception handler mapping
+### Error → HTTP mapping (per-route)
 
-Domain `FieldError` → 422; application `EntityNotFoundError` → 404;
-generic `Exception` → 500. Mapping lives in
-`presentation/http/common/exc_handlers.py::map_exc_handlers(app)`.
+There is **no global exception handler file**. Each route declares its full
+error surface in `error_map={...}` on its decorator, and the
+`fastapi-error-map` runtime catches exceptions from the handler chain and
+translates them through the rule's `translator` to a JSON response.
+
+Pre-composed rules live in
+`presentation/http/common/errors/rules.py`:
+
+| Rule | Status | Translator output |
+|---|---|---|
+| `FIELD_ERROR_RULE` | 422 | `{"error": "<ClassName>", ...public VO attrs}` |
+| `ENTITY_NOT_FOUND_RULE` | 404 | `{"error": "EntityNotFound", "entity_id": "..."}` |
+| `INVALID_CREDENTIALS_RULE` | 401 | `{"error": "InvalidCredentials"}` |
+| `INVALID_TOKEN_RULE` | 401 | `{"error": "InvalidToken"}` |
+| `EMAIL_ALREADY_REGISTERED_RULE` | 409 | `{"error": "EmailAlreadyRegistered"}` |
+| `EMAIL_NOT_VERIFIED_RULE` | 403 | `{"error": "EmailNotVerified"}` |
+
 **Do not raise `HTTPException` from handlers** — raise domain/application
-errors instead, let the exception handlers translate them.
+errors instead, let the route's `error_map` translate them.
+
+**Exceptions not listed** in a route's `error_map` bubble up as
+`RuntimeError("No rule defined for X")` (because `warn_on_unmapped=True` is
+the library default), which Starlette turns into a 500. This is a **deliberate
+loud failure** — fix the `error_map` instead of silencing it.
 
 ## Adding a new use case (checklist)
 
@@ -594,7 +668,18 @@ errors instead, let the exception handlers translate them.
 4. **Register the handler** in `ioc.interactors_provider` — add it to `provide_all(...)`.
 5. Expose via a route in `presentation/http/routes/<aggregate>.py`, using
    a Pydantic schema for input validation if needed. Use `FromDishka[Handler]`.
-6. Map any new domain errors to HTTP codes in `exc_handlers.py`.
+   The router must be `ErrorAwareRouter(route_class=DishkaErrorAwareRoute)`;
+   the decorator must carry an `error_map={...}` covering every exception
+   the handler (and anything it awaits) can raise.
+6. If the handler introduces a **new** domain error:
+   - Decide if it fits an existing rule (e.g. any new `FieldError` subclass
+     is automatically covered by `FIELD_ERROR_RULE` via MRO matching — no
+     new rule needed).
+   - If not, add a `Rule` constant to
+     `presentation/http/common/errors/rules.py`, reusing an existing
+     translator if the response shape matches, or adding a new translator
+     to `translators.py` if a bespoke shape is required.
+   - Reference the new rule in the route's `error_map`.
 7. Unit test in `tests/unit/application/...` using Mock-based fixtures
    (see `tests/unit/application/conftest.py` for the pattern).
 8. Integration test in `tests/integrations/http/...` if the route is new.
@@ -636,20 +721,20 @@ the same in local shells, Docker, and CI.
 
 ```bash
 just bootstrap      # copy .env.dist to .env, poetry install
-just serve          # dev-up, alembic upgrade head, then uvicorn + taskiq worker in parallel
-just worker         # run the TaskIQ worker only (debugging tasks without the API)
-just lint           # poetry run ruff check + ruff format + codespell
-just static         # poetry run mypy + bandit + semgrep
-just dev-up         # bring up Postgres, MinIO, Redis via docker-compose.dev
-just dev-down       # tear down dev containers
-just prod-up        # docker compose up for the full production-like stack
-just prod-down      # tear down the production-like stack
+just dev            # bring up dev infra, apply migrations, run uvicorn + taskiq worker with reload
+just prod           # docker compose up for the full production-like stack
+just check          # ruff check + ruff format + codespell + mypy + bandit + semgrep
+just dev-infra-up   # bring up Postgres, MinIO, Redis via docker-compose.dev (low-level)
+just dev-infra-down # tear down dev containers (low-level)
 ```
 
-`just serve` is the single daily-use recipe: it boots the dev dependencies,
+`just dev` is the single daily-use recipe: it boots the dev dependencies,
 applies migrations, and runs API + worker together with `--reload` on both.
-Keep heavy/rare operations (tests, coverage) as ad-hoc `poetry run ...` calls
-until the test suite grows enough to justify a dedicated recipe again.
+`just check` bundles every static quality gate (linting, formatting,
+typechecking, security scanners) into one command so CI and local runs
+never diverge. Keep heavy/rare operations (tests, coverage) as ad-hoc
+`poetry run ...` calls until the test suite grows enough to justify a
+dedicated recipe again.
 
 Inside a recipe, prefer:
 
@@ -676,8 +761,18 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
   through `asyncpg`. The split is: **app → asyncpg (async)**,
   **Alembic → psycopg (sync)**. Don't mix.
 - ❌ Return Pydantic models from application handlers. Use dataclasses / `NamedTuple`.
-- ❌ Raise `HTTPException` from handlers. Raise domain/application errors;
-  let `exc_handlers.py` translate them.
+- ❌ Raise `HTTPException` from handlers or routes. Raise domain/application
+  errors and list them in the route's `error_map={...}`; the
+  `fastapi-error-map` runtime translates them into the configured JSON.
+- ❌ Reintroduce a global exception-handler file or
+  `app.add_exception_handler(...)`. Error-to-HTTP mapping is strictly
+  per-route via `error_map`.
+- ❌ Use bare `APIRouter(route_class=DishkaRoute)`. New routers are
+  `ErrorAwareRouter(route_class=DishkaErrorAwareRoute)` so that both
+  `FromDishka[...]` injection and `error_map` work.
+- ❌ Silently swallow an unmapped exception by setting
+  `warn_on_unmapped=False` — the noisy `RuntimeError("No rule defined for
+  ...")` is a feature; fix the `error_map` of the offending route.
 - ❌ Call `session.commit()` / `session.flush()` from gateways or readers.
   Only `TransactionAlchemy` manages transactions.
 - ❌ Merge `Gateway` and `Reader` into one protocol. The CQRS split is load-bearing.

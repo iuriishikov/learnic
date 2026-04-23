@@ -6,7 +6,6 @@ from fastapi.staticfiles import StaticFiles
 from learnic.infrastructure.configs import Configs, load_configs
 from learnic.infrastructure.persistence.models.file import map_file_table
 from learnic.infrastructure.persistence.models.user import map_user_table
-from learnic.presentation.http.common.exc_handlers import map_exc_handlers
 from learnic.presentation.http.routes.auth import router as auth_router
 from learnic.presentation.http.routes.root import router as root_router
 from learnic.presentation.http.routes.user import router as user_router
@@ -27,10 +26,6 @@ def setup_routes(app: FastAPI) -> None:
         StaticFiles(directory=_STATIC_DIR),
         name="static",
     )
-
-
-def setup_exc_handlers(app: FastAPI) -> None:
-    map_exc_handlers(app)
 
 
 def setup_map_tables() -> None:

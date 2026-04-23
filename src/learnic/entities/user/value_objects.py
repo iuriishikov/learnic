@@ -1,5 +1,6 @@
 from learnic.entities.common.value_object import ValueObject
 from learnic.entities.user.constants import (
+    DESCRIPTION_MAX_LEN,
     EMAIL_MAX_LEN,
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
@@ -9,6 +10,7 @@ from learnic.entities.user.constants import (
 )
 from learnic.entities.user.errors import (
     EmptyNameError,
+    InvalidDescriptionError,
     InvalidEmailError,
     NameTooLongError,
     WeakPasswordError,
@@ -65,3 +67,22 @@ class RawPassword(ValueObject):
 
 class PasswordHash(ValueObject):
     value: str
+
+
+class UserDescription(ValueObject):
+    """Profile description — already-sanitized HTML.
+
+    The VO enforces only length/emptiness invariants; HTML sanitization
+    happens in the command handler via the ``HtmlSanitizer`` Protocol
+    before the VO is constructed. To clear the description, set the
+    user's ``description`` to ``None`` rather than constructing an
+    empty VO.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value:
+            raise InvalidDescriptionError(DESCRIPTION_MAX_LEN)
+        if len(self.value) > DESCRIPTION_MAX_LEN:
+            raise InvalidDescriptionError(DESCRIPTION_MAX_LEN)

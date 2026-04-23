@@ -45,6 +45,18 @@ from learnic.application.commands.user.avatar.remove import (
 from learnic.application.commands.user.avatar.set import (
     SetUserAvatarCommandHandler,
 )
+from learnic.application.commands.user.change_description import (
+    ChangeUserDescriptionCommandHandler,
+)
+from learnic.application.commands.user.change_first_name import (
+    ChangeUserFirstNameCommandHandler,
+)
+from learnic.application.commands.user.change_last_name import (
+    ChangeUserLastNameCommandHandler,
+)
+from learnic.application.commands.user.change_patronymic import (
+    ChangeUserPatronymicCommandHandler,
+)
 from learnic.application.commands.user.cover.remove import (
     RemoveUserCoverCommandHandler,
 )
@@ -68,6 +80,7 @@ from learnic.application.common.security.access_tokens import (
     AccessTokenService,
 )
 from learnic.application.common.security.email_tokens import EmailTokenStore
+from learnic.application.common.security.html import HtmlSanitizer
 from learnic.application.common.security.passwords import PasswordHasher
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
@@ -79,6 +92,12 @@ from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.queries.user.get import GetUserQueryHandler
+from learnic.application.queries.user.get_avatar import (
+    GetUserAvatarQueryHandler,
+)
+from learnic.application.queries.user.get_cover import (
+    GetUserCoverQueryHandler,
+)
 from learnic.infrastructure.configs import (
     ASGIConfig,
     Configs,
@@ -118,9 +137,13 @@ from learnic.infrastructure.persistence.adapters.user import (
 from learnic.infrastructure.security.argon2_hasher import (
     Argon2PasswordHasher,
 )
+from learnic.infrastructure.security.bleach_html_sanitizer import (
+    BleachHtmlSanitizer,
+)
 from learnic.infrastructure.security.jwt_access import JwtAccessTokenService
 from learnic.infrastructure.storage.adapters.s3 import S3FileStorage
 from learnic.infrastructure.tasks.scheduler import TaskSchedulerTaskIQ
+from learnic.presentation.http.common.auth_deps import Authenticator
 
 
 class ConfigsProvider(Provider):
@@ -221,6 +244,12 @@ class SecurityProvider(Provider):
         provides=TokenDenylist,
         scope=Scope.REQUEST,
     )
+    html_sanitizer = provide(
+        BleachHtmlSanitizer,
+        provides=HtmlSanitizer,
+        scope=Scope.APP,
+    )
+    authenticator = provide(Authenticator, scope=Scope.REQUEST)
 
 
 class S3Provider(Provider):
@@ -263,6 +292,8 @@ class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
     get_user = provide(GetUserQueryHandler)
+    get_user_avatar = provide(GetUserAvatarQueryHandler)
+    get_user_cover = provide(GetUserCoverQueryHandler)
 
     register = provide(RegisterCommandHandler)
     login = provide(LoginCommandHandler)
@@ -278,6 +309,11 @@ class InteractorsProvider(Provider):
     remove_user_avatar = provide(RemoveUserAvatarCommandHandler)
     set_user_cover = provide(SetUserCoverCommandHandler)
     remove_user_cover = provide(RemoveUserCoverCommandHandler)
+
+    change_user_first_name = provide(ChangeUserFirstNameCommandHandler)
+    change_user_last_name = provide(ChangeUserLastNameCommandHandler)
+    change_user_patronymic = provide(ChangeUserPatronymicCommandHandler)
+    change_user_description = provide(ChangeUserDescriptionCommandHandler)
 
 
 class EmailProvider(Provider):

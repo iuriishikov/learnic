@@ -1,8 +1,8 @@
 from http import HTTPStatus
-from uuid import UUID
 
-from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, Request, Response, status
+from dishka.integrations.fastapi import FromDishka
+from fastapi import Request, Response, status
+from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel
 
 from learnic.application.commands.auth.login import (
@@ -41,17 +41,19 @@ from learnic.application.commands.auth.verify_wait import (
     VerifyWaitCommand,
     VerifyWaitCommandHandler,
 )
-from learnic.application.common.errors import InvalidTokenError
-from learnic.application.common.security.access_tokens import (
-    AccessTokenService,
+from learnic.application.common.errors import (
+    EmailAlreadyRegisteredError,
+    EmailNotVerifiedError,
+    InvalidCredentialsError,
+    InvalidTokenError,
 )
-from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
 )
+from learnic.entities.common.errors import FieldError
 from learnic.infrastructure.configs import SecurityConfig
-from learnic.presentation.http.common.auth_deps import authenticate
+from learnic.presentation.http.common.auth_deps import Authenticator
 from learnic.presentation.http.common.cookies import (
     REFRESH_COOKIE,
     SIGNUP_SESSION_COOKIE,
@@ -60,11 +62,21 @@ from learnic.presentation.http.common.cookies import (
     set_auth_cookies,
     set_signup_session_cookie,
 )
+from learnic.presentation.http.common.errors.rules import (
+    AUTHENTICATED_MAP,
+    EMAIL_ALREADY_REGISTERED_RULE,
+    EMAIL_NOT_VERIFIED_RULE,
+    FIELD_ERROR_RULE,
+    INVALID_CREDENTIALS_RULE,
+    INVALID_TOKEN_RULE,
+)
+from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.common.schemas import UserSchema
 
-router = APIRouter(
+router = ErrorAwareRouter(
     prefix="/auth",
     tags=["Auth"],
-    route_class=DishkaRoute,
+    route_class=DishkaErrorAwareRoute,
 )
 
 
@@ -94,17 +106,14 @@ class ResetPasswordSchema(BaseModel):
     new_password: str
 
 
-class UserSchema(BaseModel):
-    oid: UUID
-    email: str
-    first_name: str
-    last_name: str
-    patronymic: str | None
-    avatar_url: str | None
-    cover_url: str | None
-
-
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    error_map={
+        FieldError: FIELD_ERROR_RULE,
+        EmailAlreadyRegisteredError: EMAIL_ALREADY_REGISTERED_RULE,
+    },
+)
 async def register(
     payload: RegisterSchema,
     response: Response,
@@ -127,9 +136,8 @@ async def register(
         tells the SPA it is in the "wait for verification" state.
 
     Raises:
-        FieldError: One of the value-object invariants was violated
-            (invalid email, weak password, empty/too long name);
-            mapped to HTTP 422.
+        FieldError: VO invariant violated (invalid email, weak password,
+            empty/too long name); mapped to HTTP 422.
         EmailAlreadyRegisteredError: Another user already owns this
             email; mapped to HTTP 409.
     """
@@ -145,7 +153,15 @@ async def register(
     set_signup_session_cookie(response, result.signup_session_token, cfg)
 
 
-@router.post("/login", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/login",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={
+        FieldError: FIELD_ERROR_RULE,
+        InvalidCredentialsError: INVALID_CREDENTIALS_RULE,
+        EmailNotVerifiedError: EMAIL_NOT_VERIFIED_RULE,
+    },
+)
 async def login(
     payload: LoginSchema,
     response: Response,
@@ -165,10 +181,9 @@ async def login(
         ``204 No Content`` with auth cookies set.
 
     Raises:
-        InvalidCredentialsError: No user or wrong password; mapped to
-            HTTP 401.
-        EmailNotVerifiedError: User has not confirmed the email yet;
-            mapped to HTTP 403.
+        InvalidCredentialsError: No user or wrong password; HTTP 401.
+        EmailNotVerifiedError: Email not confirmed; HTTP 403.
+        FieldError: VO violated during password/email parse; HTTP 422.
     """
     pair = await interactor.run(
         LoginCommand(email=payload.email, password=payload.password),
@@ -176,7 +191,11 @@ async def login(
     set_auth_cookies(response, pair, cfg)
 
 
-@router.post("/refresh", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/refresh",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
 async def refresh(
     request: Request,
     response: Response,
@@ -196,7 +215,7 @@ async def refresh(
 
     Raises:
         InvalidTokenError: Cookie missing, expired, revoked, or reused
-            (reuse also revokes the entire family); mapped to HTTP 401.
+            (reuse also revokes the entire family); HTTP 401.
     """
     raw = request.cookies.get(REFRESH_COOKIE)
     if not raw:
@@ -205,33 +224,34 @@ async def refresh(
     set_auth_cookies(response, pair, cfg)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
 async def logout(
     request: Request,
     response: Response,
     interactor: FromDishka[LogoutCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
     cfg: FromDishka[SecurityConfig],
 ) -> None:
     """Revoke this device's refresh family and deny the current access jti.
 
     Args:
-        request: Source of the ``refresh_token`` and ``access_token``
-            cookies.
+        request: Source of ``refresh_token`` and ``access_token`` cookies.
         response: Used to clear auth cookies.
         interactor: Injected logout command handler.
-        access_tokens: Injected access-token service for cookie decode.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
         cfg: Injected security config driving cookie flags.
 
     Returns:
         ``204 No Content`` after cleanup.
 
     Raises:
-        InvalidTokenError: No valid access cookie; mapped to HTTP 401.
+        InvalidTokenError: No valid access cookie; HTTP 401.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
+    ctx = await auth.authenticate(request)
     await interactor.run(
         LogoutCommand(
             refresh_token=request.cookies.get(REFRESH_COOKIE),
@@ -242,13 +262,16 @@ async def logout(
     clear_auth_cookies(response, cfg)
 
 
-@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout-all",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
 async def logout_all(
     request: Request,
     response: Response,
     interactor: FromDishka[LogoutAllCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
     cfg: FromDishka[SecurityConfig],
 ) -> None:
     """Revoke every refresh session for the current user.
@@ -257,22 +280,25 @@ async def logout_all(
         request: Source of the access cookie used to authenticate.
         response: Used to clear this device's auth cookies.
         interactor: Injected logout-all command handler.
-        access_tokens: Injected access-token service for cookie decode.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
         cfg: Injected security config driving cookie flags.
 
     Returns:
         ``204 No Content`` after cleanup.
 
     Raises:
-        InvalidTokenError: No valid access cookie; mapped to HTTP 401.
+        InvalidTokenError: No valid access cookie; HTTP 401.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
+    ctx = await auth.authenticate(request)
     await interactor.run(LogoutAllCommand(user_id=ctx.user_id))
     clear_auth_cookies(response, cfg)
 
 
-@router.post("/email-verification/verify", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/email-verification/verify",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
 async def email_verification_verify(
     payload: VerifyEmailSchema,
     interactor: FromDishka[VerifyEmailCommandHandler],
@@ -288,12 +314,15 @@ async def email_verification_verify(
 
     Raises:
         InvalidTokenError: Token unknown, expired, already consumed,
-            or issued for a different purpose; mapped to HTTP 401.
+            or issued for a different purpose; HTTP 401.
     """
     await interactor.run(VerifyEmailCommand(token=payload.token))
 
 
-@router.get("/email-verification/wait")
+@router.get(
+    "/email-verification/wait",
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
 async def email_verification_wait(
     request: Request,
     interactor: FromDishka[VerifyWaitCommandHandler],
@@ -305,7 +334,7 @@ async def email_verification_wait(
         - ``signup_session`` cookie missing or expired: 401.
         - Email not yet verified: 204 (keep polling).
         - Email verified: 200 with auth cookies set and the
-          ``signup_session`` cookie cleared. Body is empty; the status
+          ``signup_session`` cookie cleared. Body empty; the status
           code alone tells the SPA to transition.
 
     Args:
@@ -331,7 +360,11 @@ async def email_verification_wait(
     return response
 
 
-@router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/password-reset/request",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={FieldError: FIELD_ERROR_RULE},
+)
 async def password_reset_request(
     payload: RequestPasswordResetSchema,
     interactor: FromDishka[RequestPasswordResetCommandHandler],
@@ -347,11 +380,22 @@ async def password_reset_request(
 
     Returns:
         ``204 No Content``.
+
+    Raises:
+        FieldError: Email VO invariant violated (empty / too long);
+            HTTP 422.
     """
     await interactor.run(RequestPasswordResetCommand(email=payload.email))
 
 
-@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/password-reset/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map={
+        FieldError: FIELD_ERROR_RULE,
+        InvalidTokenError: INVALID_TOKEN_RULE,
+    },
+)
 async def password_reset_confirm(
     payload: ResetPasswordSchema,
     interactor: FromDishka[ResetPasswordCommandHandler],
@@ -376,37 +420,30 @@ async def password_reset_confirm(
     )
 
 
-@router.get("/me", response_model=UserSchema)
+@router.get(
+    "/me",
+    response_model=UserSchema,
+    error_map=AUTHENTICATED_MAP,
+)
 async def me(
     request: Request,
     interactor: FromDishka[GetUserQueryHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
 ) -> UserSchema:
     """Return the currently authenticated user's profile.
 
     Args:
         request: Source of the access cookie used to authenticate.
         interactor: Injected get-user query handler.
-        access_tokens: Injected access-token service for cookie decode.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
 
     Returns:
         ``UserSchema`` with the user's public profile fields.
 
     Raises:
         InvalidTokenError: No valid access cookie; HTTP 401.
-        EntityNotFoundError: User row vanished (e.g. deleted mid-session);
-            HTTP 404.
+        EntityNotFoundError: User row vanished; HTTP 404.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
+    ctx = await auth.authenticate(request)
     view = await interactor.run(GetUserQuery(oid=ctx.user_id))
-    return UserSchema(
-        oid=view.oid,
-        email=view.email,
-        first_name=view.first_name,
-        last_name=view.last_name,
-        patronymic=view.patronymic,
-        avatar_url=view.avatar_url,
-        cover_url=view.cover_url,
-    )
+    return UserSchema.from_view(view)

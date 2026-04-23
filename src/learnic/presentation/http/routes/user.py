@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, Request, UploadFile, status
-from pydantic import BaseModel
+from dishka.integrations.fastapi import FromDishka
+from fastapi import Request, UploadFile, status
+from fastapi.responses import RedirectResponse
+from fastapi_error_map import ErrorAwareRouter
 
 from learnic.application.commands.user.avatar.remove import (
     RemoveUserAvatarCommand,
@@ -12,6 +13,22 @@ from learnic.application.commands.user.avatar.set import (
     SetUserAvatarCommand,
     SetUserAvatarCommandHandler,
 )
+from learnic.application.commands.user.change_description import (
+    ChangeUserDescriptionCommand,
+    ChangeUserDescriptionCommandHandler,
+)
+from learnic.application.commands.user.change_first_name import (
+    ChangeUserFirstNameCommand,
+    ChangeUserFirstNameCommandHandler,
+)
+from learnic.application.commands.user.change_last_name import (
+    ChangeUserLastNameCommand,
+    ChangeUserLastNameCommandHandler,
+)
+from learnic.application.commands.user.change_patronymic import (
+    ChangeUserPatronymicCommand,
+    ChangeUserPatronymicCommandHandler,
+)
 from learnic.application.commands.user.cover.remove import (
     RemoveUserCoverCommand,
     RemoveUserCoverCommandHandler,
@@ -20,53 +37,48 @@ from learnic.application.commands.user.cover.set import (
     SetUserCoverCommand,
     SetUserCoverCommandHandler,
 )
-from learnic.application.common.security.access_tokens import (
-    AccessTokenService,
-)
-from learnic.application.common.security.token_denylist import TokenDenylist
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
 )
-from learnic.entities.file.constants import MAX_FILE_SIZE_BYTES
-from learnic.entities.file.errors import FileTooLargeError
+from learnic.application.queries.user.get_avatar import (
+    GetUserAvatarQuery,
+    GetUserAvatarQueryHandler,
+)
+from learnic.application.queries.user.get_cover import (
+    GetUserCoverQuery,
+    GetUserCoverQueryHandler,
+)
 from learnic.entities.user.models import UserID
-from learnic.presentation.http.common.auth_deps import authenticate
-from learnic.presentation.http.common.schemas import FileSchema
+from learnic.presentation.http.common.auth_deps import Authenticator
+from learnic.presentation.http.common.errors.rules import (
+    AUTHENTICATED_MAP,
+    AUTHENTICATED_WITH_FIELD_MAP,
+    ENTITY_NOT_FOUND_RULE,
+)
+from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.common.schemas import (
+    FileSchema,
+    NullableStringFieldSchema,
+    StringFieldSchema,
+    UserAvatarSchema,
+    UserCoverSchema,
+    UserSchema,
+)
+from learnic.presentation.http.common.uploads import read_image_upload
 
-router = APIRouter(
+router = ErrorAwareRouter(
     prefix="/users",
     tags=["Users"],
-    route_class=DishkaRoute,
+    route_class=DishkaErrorAwareRoute,
 )
 
 
-class UserSchema(BaseModel):
-    oid: UUID
-    email: str
-    first_name: str
-    last_name: str
-    patronymic: str | None
-    avatar_url: str | None
-    cover_url: str | None
-
-
-async def _read_image_upload(file: UploadFile) -> tuple[bytes, str]:
-    """Read the body and return ``(bytes, content_type)``.
-
-    Aborts early if the body is bigger than the VO limit — avoids
-    buffering arbitrary user uploads into memory.
-    """
-    data = await file.read(MAX_FILE_SIZE_BYTES + 1)
-    # Enforce size ceiling at the HTTP layer; the ``FileSize`` VO
-    # re-checks inside the handler.
-    if len(data) > MAX_FILE_SIZE_BYTES:
-        raise FileTooLargeError(MAX_FILE_SIZE_BYTES)
-    content_type = file.content_type or "application/octet-stream"
-    return data, content_type
-
-
-@router.get("/{user_id}")
+@router.get(
+    "/{user_id}",
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+)
 async def get(
     user_id: UUID,
     interactor: FromDishka[GetUserQueryHandler],
@@ -79,20 +91,238 @@ async def get(
 
     Returns:
         ``UserSchema`` with profile fields and short-lived presigned
-        URLs for avatar/cover (``null`` if not set).
+        URLs for avatar/cover (``null`` if not set). ``email`` is
+        deliberately omitted.
 
     Raises:
         EntityNotFoundError: No user with the given id; HTTP 404.
     """
     view = await interactor.run(GetUserQuery(oid=UserID(user_id)))
-    return UserSchema(
-        oid=view.oid,
-        email=view.email,
-        first_name=view.first_name,
-        last_name=view.last_name,
-        patronymic=view.patronymic,
-        avatar_url=view.avatar_url,
-        cover_url=view.cover_url,
+    return UserSchema.from_view(view)
+
+
+@router.get(
+    "/{user_id}/avatar",
+    response_model=UserAvatarSchema,
+    responses={
+        status.HTTP_302_FOUND: {
+            "description": "Redirect to the presigned storage URL.",
+        },
+    },
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+)
+async def get_avatar(
+    user_id: UUID,
+    interactor: FromDishka[GetUserAvatarQueryHandler],
+) -> UserAvatarSchema | RedirectResponse:
+    """Return the user's avatar as a redirect to presigned storage.
+
+    When the user has no avatar attached, responds with JSON
+    ``{"avatar": null}`` so clients can branch without following a
+    redirect; otherwise issues a short-lived 302 to the presigned
+    storage URL.
+
+    Args:
+        user_id: Target user's UUID, parsed from the URL path.
+        interactor: Injected get-avatar query handler.
+
+    Returns:
+        :class:`UserAvatarSchema` with ``avatar = null`` when the user
+        has no avatar, or a 302 ``RedirectResponse`` to the presigned
+        storage URL when an avatar is attached.
+
+    Raises:
+        EntityNotFoundError: No user with the given id; HTTP 404.
+    """
+    output = await interactor.run(
+        GetUserAvatarQuery(oid=UserID(user_id))
+    )
+    if output.url is None:
+        return UserAvatarSchema.from_view(output)
+    return RedirectResponse(
+        url=output.url,
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.get(
+    "/{user_id}/cover",
+    response_model=UserCoverSchema,
+    responses={
+        status.HTTP_302_FOUND: {
+            "description": "Redirect to the presigned storage URL.",
+        },
+    },
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+)
+async def get_cover(
+    user_id: UUID,
+    interactor: FromDishka[GetUserCoverQueryHandler],
+) -> UserCoverSchema | RedirectResponse:
+    """Return the user's cover as a redirect to presigned storage.
+
+    When the user has no cover attached, responds with JSON
+    ``{"cover": null}`` so clients can branch without following a
+    redirect; otherwise issues a short-lived 302 to the presigned
+    storage URL.
+
+    Args:
+        user_id: Target user's UUID, parsed from the URL path.
+        interactor: Injected get-cover query handler.
+
+    Returns:
+        :class:`UserCoverSchema` with ``cover = null`` when the user
+        has no cover, or a 302 ``RedirectResponse`` to the presigned
+        storage URL when a cover is attached.
+
+    Raises:
+        EntityNotFoundError: No user with the given id; HTTP 404.
+    """
+    output = await interactor.run(
+        GetUserCoverQuery(oid=UserID(user_id))
+    )
+    if output.url is None:
+        return UserCoverSchema.from_view(output)
+    return RedirectResponse(
+        url=output.url,
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.put(
+    "/me/first-name",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_first_name(
+    request: Request,
+    payload: StringFieldSchema,
+    interactor: FromDishka[ChangeUserFirstNameCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace the current user's first name.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "<new first name>"}``.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``FirstName`` VO invariants violated; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserFirstNameCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.put(
+    "/me/last-name",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_last_name(
+    request: Request,
+    payload: StringFieldSchema,
+    interactor: FromDishka[ChangeUserLastNameCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace the current user's last name.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "<new last name>"}``.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``LastName`` VO invariants violated; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserLastNameCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.put(
+    "/me/patronymic",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_patronymic(
+    request: Request,
+    payload: NullableStringFieldSchema,
+    interactor: FromDishka[ChangeUserPatronymicCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace the current user's patronymic (or clear it with ``null``).
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "<new patronymic>" | null}``.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``Patronymic`` VO invariants violated; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserPatronymicCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.put(
+    "/me/description",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_description(
+    request: Request,
+    payload: NullableStringFieldSchema,
+    interactor: FromDishka[ChangeUserDescriptionCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace (or clear) the current user's HTML description.
+
+    Incoming HTML is sanitized server-side through the configured
+    ``HtmlSanitizer`` — unsafe tags and attributes are stripped before
+    the value reaches the domain.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "<html>..." | null}``. ``null`` clears it.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: Sanitized description is empty or exceeds the
+            length limit; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserDescriptionCommand(user_id=ctx.user_id, html=payload.value)
     )
 
 
@@ -100,13 +330,13 @@ async def get(
     "/me/avatar",
     status_code=status.HTTP_201_CREATED,
     response_model=FileSchema,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def upload_avatar(
     request: Request,
     file: UploadFile,
     interactor: FromDishka[SetUserAvatarCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
 ) -> FileSchema:
     """Upload (or replace) the current user's avatar.
 
@@ -115,46 +345,49 @@ async def upload_avatar(
         file: ``multipart/form-data`` field ``file`` with any payload
             up to 5 MB.
         interactor: Injected set-avatar command handler.
-        access_tokens: Injected access-token service.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
 
     Returns:
         :class:`FileSchema` with the new file's id.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
         FileTooLargeError: Payload over 5 MB; HTTP 422.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
-    data, content_type = await _read_image_upload(file)
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_image_upload(file)
     file_id = await interactor.run(
         SetUserAvatarCommand(user_id=ctx.user_id, data=data, content_type=content_type)
     )
     return FileSchema(oid=file_id)
 
 
-@router.delete("/me/avatar", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/me/avatar",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_MAP,
+)
 async def delete_avatar(
     request: Request,
     interactor: FromDishka[RemoveUserAvatarCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
 ) -> None:
     """Detach the current user's avatar.
 
     Args:
         request: Source of the access-token cookie.
         interactor: Injected remove-avatar command handler.
-        access_tokens: Injected access-token service.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
 
     Returns:
         ``204 No Content``.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
+    ctx = await auth.authenticate(request)
     await interactor.run(RemoveUserAvatarCommand(user_id=ctx.user_id))
 
 
@@ -162,13 +395,13 @@ async def delete_avatar(
     "/me/cover",
     status_code=status.HTTP_201_CREATED,
     response_model=FileSchema,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def upload_cover(
     request: Request,
     file: UploadFile,
     interactor: FromDishka[SetUserCoverCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
 ) -> FileSchema:
     """Upload (or replace) the current user's cover.
 
@@ -177,44 +410,47 @@ async def upload_cover(
         file: ``multipart/form-data`` field ``file`` with any payload
             up to 5 MB.
         interactor: Injected set-cover command handler.
-        access_tokens: Injected access-token service.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
 
     Returns:
         :class:`FileSchema` with the new file's id.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
         FileTooLargeError: Payload over 5 MB; HTTP 422.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
-    data, content_type = await _read_image_upload(file)
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_image_upload(file)
     file_id = await interactor.run(
         SetUserCoverCommand(user_id=ctx.user_id, data=data, content_type=content_type)
     )
     return FileSchema(oid=file_id)
 
 
-@router.delete("/me/cover", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/me/cover",
+    status_code=status.HTTP_204_NO_CONTENT,
+    error_map=AUTHENTICATED_MAP,
+)
 async def delete_cover(
     request: Request,
     interactor: FromDishka[RemoveUserCoverCommandHandler],
-    access_tokens: FromDishka[AccessTokenService],
-    denylist: FromDishka[TokenDenylist],
+    auth: FromDishka[Authenticator],
 ) -> None:
     """Detach the current user's cover.
 
     Args:
         request: Source of the access-token cookie.
         interactor: Injected remove-cover command handler.
-        access_tokens: Injected access-token service.
-        denylist: Injected access-token denylist.
+        auth: Injected authenticator that validates the access cookie.
 
     Returns:
         ``204 No Content``.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
     """
-    ctx = await authenticate(request, access_tokens, denylist)
+    ctx = await auth.authenticate(request)
     await interactor.run(RemoveUserCoverCommand(user_id=ctx.user_id))
