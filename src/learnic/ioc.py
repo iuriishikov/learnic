@@ -2,7 +2,6 @@ from collections.abc import AsyncIterator
 
 import aioboto3
 import httpx
-from aiobotocore.client import AioBaseClient
 from dishka import (
     AsyncContainer,
     Provider,
@@ -17,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from types_aiobotocore_s3 import S3Client
 
 from learnic.application.commands.auth.login import LoginCommandHandler
 from learnic.application.commands.auth.logout import LogoutCommandHandler
@@ -264,7 +264,7 @@ class S3Provider(Provider):
         self,
         session: aioboto3.Session,
         s3: S3Config,
-    ) -> AsyncIterator[AioBaseClient]:
+    ) -> AsyncIterator[S3Client]:
         async with session.client(
             "s3",
             endpoint_url=s3.endpoint,
@@ -277,7 +277,7 @@ class S3Provider(Provider):
     @provide(scope=Scope.REQUEST)
     def file_storage(
         self,
-        client: AioBaseClient,
+        client: S3Client,
     ) -> FileStorage:
         return S3FileStorage(client)
 

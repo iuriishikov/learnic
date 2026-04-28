@@ -1,13 +1,13 @@
-from typing import Any, Final
+from typing import Final
 
-from aiobotocore.client import AioBaseClient
+from types_aiobotocore_s3 import S3Client
 from typing_extensions import override
 
 from learnic.application.common.storage.file_storage import FileStorage
 
 
 class S3FileStorage(FileStorage):
-    def __init__(self, client: AioBaseClient) -> None:
+    def __init__(self, client: S3Client) -> None:
         self._client: Final = client
 
     @override
@@ -18,14 +18,19 @@ class S3FileStorage(FileStorage):
         data: bytes,
         content_type: str | None = None,
     ) -> None:
-        kwargs: dict[str, Any] = {
-            "Bucket": bucket,
-            "Key": name,
-            "Body": data,
-        }
         if content_type is not None:
-            kwargs["ContentType"] = content_type
-        await self._client.put_object(**kwargs)
+            await self._client.put_object(
+                Bucket=bucket,
+                Key=name,
+                Body=data,
+                ContentType=content_type,
+            )
+        else:
+            await self._client.put_object(
+                Bucket=bucket,
+                Key=name,
+                Body=data,
+            )
 
     @override
     async def get(self, bucket: str, name: str) -> bytes | None:

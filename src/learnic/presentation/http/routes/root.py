@@ -1,24 +1,45 @@
 from fastapi import APIRouter, status
 
+from learnic.presentation.http.common.schemas import (
+    HealthSchema,
+    WelcomeSchema,
+)
+
 router = APIRouter(tags=["Root"])
 
 
-@router.get("/", status_code=status.HTTP_200_OK)
-async def root() -> dict[str, str]:
+@router.get(
+    "/",
+    summary="Welcome banner",
+    operation_id="getRoot",
+    status_code=status.HTTP_200_OK,
+    response_model=WelcomeSchema,
+)
+async def root() -> WelcomeSchema:
     """Greet the caller at the API root.
 
     Returns:
-        A welcome message confirming the service is reachable.
+        :class:`WelcomeSchema` with a stable welcome message confirming
+        the service is reachable.
     """
-    return {"message": "Welcome to Learnic's API"}
+    return WelcomeSchema(message="Welcome to Learnic's API")
 
 
-@router.get("/healthcheck", status_code=status.HTTP_200_OK)
-async def healthcheck() -> dict[str, str]:
+@router.get(
+    "/healthcheck",
+    summary="Liveness probe",
+    operation_id="healthcheck",
+    status_code=status.HTTP_200_OK,
+    response_model=HealthSchema,
+)
+async def healthcheck() -> HealthSchema:
     """Report liveness for Docker and Caddy probes.
 
     Returns:
-        A status indicator consumed by the ``HEALTHCHECK`` directive in
-        ``Dockerfile`` and by Caddy's ``health_uri`` in ``Caddyfile``.
+        :class:`HealthSchema` consumed by the ``HEALTHCHECK`` directive
+        in ``Dockerfile`` and by Caddy's ``health_uri`` in
+        ``Caddyfile``. Always ``{"status": "ok"}`` when the API
+        process is up; container orchestration treats anything else
+        as a failure.
     """
-    return {"status": "ok"}
+    return HealthSchema(status="ok")

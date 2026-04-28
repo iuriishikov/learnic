@@ -5,6 +5,8 @@ from learnic.application.common.errors.errors import (
     EntityNotFoundError,
     InvalidCredentialsError,
     InvalidTokenError,
+    UserAvatarNotFoundError,
+    UserCoverNotFoundError,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "EntityNotFoundError",
     "InvalidCredentialsError",
     "InvalidTokenError",
+    "UserAvatarNotFoundError",
+    "UserCoverNotFoundError",
 ]

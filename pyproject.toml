@@ -60,3 +60,8 @@ testpaths = ["tests"]
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+lint = [
+    "types-aioboto3[s3] (>=13.0.0,<14.0.0)"
+]

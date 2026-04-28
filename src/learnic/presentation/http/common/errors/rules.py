@@ -60,6 +60,16 @@ EMAIL_NOT_VERIFIED_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
+USER_AVATAR_NOT_FOUND_RULE: Final[Rule] = rule(
+    status=HTTPStatus.NOT_FOUND,
+    translator=_named,
+)
+
+USER_COVER_NOT_FOUND_RULE: Final[Rule] = rule(
+    status=HTTPStatus.NOT_FOUND,
+    translator=_named,
+)
+
 AUTHENTICATED_MAP: Final[dict[type[Exception], int | Rule]] = {
     InvalidTokenError: INVALID_TOKEN_RULE,
     EntityNotFoundError: ENTITY_NOT_FOUND_RULE,

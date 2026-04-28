@@ -6,7 +6,7 @@ response shape matches what the previous global exception handlers
 produced so clients keep seeing the same payload.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import override
 
 from fastapi_error_map import ErrorTranslator, SimpleErrorResponseModel
@@ -40,14 +40,39 @@ class NamedErrorTranslator(ErrorTranslator[SimpleErrorResponseModel]):
 class FieldErrorResponseModel(BaseModel):
     """Response for a value-object invariant violation.
 
-    ``error`` is the raw class name (``WeakPasswordError``, ``NameTooLongError``,
-    ...). Subclass-specific public attributes (e.g. ``reason``, ``field``,
-    ``limit``) come through as extra fields.
+    ``error`` is the raw class name (``WeakPasswordError``,
+    ``NameTooLongError``, ...). Subclass-specific public attributes
+    (e.g. ``reason``, ``field``, ``limit``) come through as extra
+    fields — clients should treat the body as ``{"error": str, ...}``
+    and read whatever extras the specific error class documents.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "examples": [
+                {
+                    "error": "FirstNameTooLongError",
+                    "field": "first_name",
+                    "limit": 100,
+                },
+                {
+                    "error": "WeakPasswordError",
+                    "reason": "missing_digit",
+                },
+                {"error": "InvalidEmailError"},
+            ],
+        },
+    )
 
-    error: str
+    error: str = Field(
+        description=(
+            "Raw class name of the violated value-object invariant "
+            "(e.g. `WeakPasswordError`, `FirstNameTooLongError`). "
+            "Always present."
+        ),
+        examples=["WeakPasswordError"],
+    )
 
 
 class FieldErrorTranslator(ErrorTranslator[FieldErrorResponseModel]):
@@ -68,8 +93,31 @@ class FieldErrorTranslator(ErrorTranslator[FieldErrorResponseModel]):
 
 
 class EntityNotFoundResponseModel(BaseModel):
-    error: str
-    entity_id: str
+    """Response for a missing aggregate lookup."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "error": "EntityNotFound",
+                    "entity_id": "550e8400-e29b-41d4-a716-446655440000",
+                },
+            ],
+        },
+    )
+
+    error: str = Field(
+        description='Always the literal string `"EntityNotFound"`.',
+        examples=["EntityNotFound"],
+    )
+    entity_id: str = Field(
+        description=(
+            "String form of the missing entity's id. UUID for "
+            "domain aggregates; empty string when the underlying "
+            "exception didn't carry an id."
+        ),
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
 
 
 class EntityNotFoundTranslator(ErrorTranslator[EntityNotFoundResponseModel]):

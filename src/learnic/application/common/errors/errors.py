@@ -24,3 +24,11 @@ class EmailAlreadyRegisteredError(ApplicationError):
 
 class EmailNotVerifiedError(ApplicationError):
     """Raised when a user attempts to authenticate before verifying email."""
+
+
+class UserAvatarNotFoundError(ApplicationError):
+    """Raised when a user exists but has no avatar attached."""
+
+
+class UserCoverNotFoundError(ApplicationError):
+    """Raised when a user exists but has no cover attached."""

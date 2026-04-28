@@ -1,9 +1,11 @@
+from typing import Final
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Request, UploadFile, status
+from fastapi import Depends, Path, Request, UploadFile, status
 from fastapi.responses import RedirectResponse
 from fastapi_error_map import ErrorAwareRouter
+from pydantic import BaseModel, ConfigDict, Field
 
 from learnic.application.commands.user.avatar.remove import (
     RemoveUserAvatarCommand,
@@ -37,7 +39,11 @@ from learnic.application.commands.user.cover.set import (
     SetUserCoverCommand,
     SetUserCoverCommandHandler,
 )
-from learnic.application.common.errors import EntityNotFoundError
+from learnic.application.common.errors import (
+    EntityNotFoundError,
+    UserAvatarNotFoundError,
+    UserCoverNotFoundError,
+)
 from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
@@ -50,20 +56,27 @@ from learnic.application.queries.user.get_cover import (
     GetUserCoverQuery,
     GetUserCoverQueryHandler,
 )
+from learnic.entities.user.constants import (
+    DESCRIPTION_MAX_LEN,
+    FIRST_NAME_MAX_LEN,
+    LAST_NAME_MAX_LEN,
+    PATRONYMIC_MAX_LEN,
+)
 from learnic.entities.user.models import UserID
-from learnic.presentation.http.common.auth_deps import Authenticator
+from learnic.presentation.http.common.auth_deps import (
+    Authenticator,
+    access_cookie_scheme,
+)
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
+    USER_AVATAR_NOT_FOUND_RULE,
+    USER_COVER_NOT_FOUND_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
     FileSchema,
-    NullableStringFieldSchema,
-    StringFieldSchema,
-    UserAvatarSchema,
-    UserCoverSchema,
     UserSchema,
 )
 from learnic.presentation.http.common.uploads import read_image_upload
@@ -74,14 +87,115 @@ router = ErrorAwareRouter(
     route_class=DishkaErrorAwareRoute,
 )
 
+_AUTH_SECURITY: Final = [Depends(access_cookie_scheme)]
+
+
+class ChangeFirstNameSchema(BaseModel):
+    """Body for `PUT /users/me/first-name`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"value": "Ada"}]},
+    )
+
+    value: str = Field(
+        description=(
+            "New first name. Required, non-empty after trimming. "
+            f"Max length is {FIRST_NAME_MAX_LEN} characters "
+            "(`FIRST_NAME_MAX_LEN`)."
+        ),
+        min_length=1,
+        max_length=FIRST_NAME_MAX_LEN,
+        examples=["Ada"],
+    )
+
+
+class ChangeLastNameSchema(BaseModel):
+    """Body for `PUT /users/me/last-name`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"value": "Lovelace"}]},
+    )
+
+    value: str = Field(
+        description=(
+            "New last name. Required, non-empty after trimming. "
+            f"Max length is {LAST_NAME_MAX_LEN} characters "
+            "(`LAST_NAME_MAX_LEN`)."
+        ),
+        min_length=1,
+        max_length=LAST_NAME_MAX_LEN,
+        examples=["Lovelace"],
+    )
+
+
+class ChangePatronymicSchema(BaseModel):
+    """Body for `PUT /users/me/patronymic`.
+
+    Pass `null` to clear the field.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"value": "Augusta"}, {"value": None}],
+        },
+    )
+
+    value: str | None = Field(
+        description=(
+            "New patronymic, or `null` to clear it. "
+            f"Max length is {PATRONYMIC_MAX_LEN} characters "
+            "(`PATRONYMIC_MAX_LEN`)."
+        ),
+        max_length=PATRONYMIC_MAX_LEN,
+        examples=["Augusta", None],
+    )
+
+
+class ChangeDescriptionSchema(BaseModel):
+    """Body for `PUT /users/me/description`.
+
+    Pass `null` to clear the field. Incoming HTML is sanitized
+    server-side; unsafe tags and attributes are stripped before the
+    value reaches the domain.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"value": "<p>Hello world.</p>"},
+                {"value": None},
+            ],
+        },
+    )
+
+    value: str | None = Field(
+        description=(
+            "New profile description as HTML, or `null` to clear it. "
+            f"Max length is {DESCRIPTION_MAX_LEN} characters "
+            "(`DESCRIPTION_MAX_LEN`) measured **after** sanitization. "
+            "The server strips unsafe tags/attrs before storage."
+        ),
+        max_length=DESCRIPTION_MAX_LEN,
+        examples=["<p>Hello world.</p>", None],
+    )
+
+
+_USER_ID_PATH: Final = Path(
+    description="Target user's UUID.",
+    examples=["550e8400-e29b-41d4-a716-446655440000"],
+)
+
 
 @router.get(
     "/{user_id}",
+    summary="Get a user's public profile",
+    operation_id="getUserById",
+    response_model=UserSchema,
     error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
 async def get(
-    user_id: UUID,
     interactor: FromDishka[GetUserQueryHandler],
+    user_id: UUID = _USER_ID_PATH,
 ) -> UserSchema:
     """Return a user by id with presigned URLs for avatar/cover.
 
@@ -103,42 +217,53 @@ async def get(
 
 @router.get(
     "/{user_id}/avatar",
-    response_model=UserAvatarSchema,
+    summary="Get a user's avatar (redirect)",
+    operation_id="getUserAvatar",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
     responses={
         status.HTTP_302_FOUND: {
-            "description": "Redirect to the presigned storage URL.",
+            "description": (
+                "Redirect to a short-lived presigned storage URL for "
+                "the avatar image. Browser clients will follow the "
+                "redirect transparently; non-browser clients should "
+                "either follow redirects or read the `Location` "
+                "header without following."
+            ),
+            "headers": {
+                "Location": {
+                    "description": ("Presigned URL pointing at the avatar object."),
+                    "schema": {"type": "string", "format": "uri"},
+                },
+            },
         },
     },
-    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+    error_map={
+        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+        UserAvatarNotFoundError: USER_AVATAR_NOT_FOUND_RULE,
+    },
 )
 async def get_avatar(
-    user_id: UUID,
     interactor: FromDishka[GetUserAvatarQueryHandler],
-) -> UserAvatarSchema | RedirectResponse:
+    user_id: UUID = _USER_ID_PATH,
+) -> RedirectResponse:
     """Return the user's avatar as a redirect to presigned storage.
-
-    When the user has no avatar attached, responds with JSON
-    ``{"avatar": null}`` so clients can branch without following a
-    redirect; otherwise issues a short-lived 302 to the presigned
-    storage URL.
 
     Args:
         user_id: Target user's UUID, parsed from the URL path.
         interactor: Injected get-avatar query handler.
 
     Returns:
-        :class:`UserAvatarSchema` with ``avatar = null`` when the user
-        has no avatar, or a 302 ``RedirectResponse`` to the presigned
-        storage URL when an avatar is attached.
+        ``302 Found`` ``RedirectResponse`` to the short-lived presigned
+        storage URL for the avatar image.
 
     Raises:
-        EntityNotFoundError: No user with the given id; HTTP 404.
+        EntityNotFoundError: No user with the given id; HTTP 404 via
+            ``ENTITY_NOT_FOUND_RULE``.
+        UserAvatarNotFoundError: The user exists but has no avatar
+            attached; HTTP 404 via ``USER_AVATAR_NOT_FOUND_RULE``.
     """
-    output = await interactor.run(
-        GetUserAvatarQuery(oid=UserID(user_id))
-    )
-    if output.url is None:
-        return UserAvatarSchema.from_view(output)
+    output = await interactor.run(GetUserAvatarQuery(oid=UserID(user_id)))
     return RedirectResponse(
         url=output.url,
         status_code=status.HTTP_302_FOUND,
@@ -147,42 +272,53 @@ async def get_avatar(
 
 @router.get(
     "/{user_id}/cover",
-    response_model=UserCoverSchema,
+    summary="Get a user's cover (redirect)",
+    operation_id="getUserCover",
+    status_code=status.HTTP_302_FOUND,
+    response_class=RedirectResponse,
     responses={
         status.HTTP_302_FOUND: {
-            "description": "Redirect to the presigned storage URL.",
+            "description": (
+                "Redirect to a short-lived presigned storage URL for "
+                "the cover image. Browser clients will follow the "
+                "redirect transparently; non-browser clients should "
+                "either follow redirects or read the `Location` "
+                "header without following."
+            ),
+            "headers": {
+                "Location": {
+                    "description": ("Presigned URL pointing at the cover object."),
+                    "schema": {"type": "string", "format": "uri"},
+                },
+            },
         },
     },
-    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+    error_map={
+        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+        UserCoverNotFoundError: USER_COVER_NOT_FOUND_RULE,
+    },
 )
 async def get_cover(
-    user_id: UUID,
     interactor: FromDishka[GetUserCoverQueryHandler],
-) -> UserCoverSchema | RedirectResponse:
+    user_id: UUID = _USER_ID_PATH,
+) -> RedirectResponse:
     """Return the user's cover as a redirect to presigned storage.
-
-    When the user has no cover attached, responds with JSON
-    ``{"cover": null}`` so clients can branch without following a
-    redirect; otherwise issues a short-lived 302 to the presigned
-    storage URL.
 
     Args:
         user_id: Target user's UUID, parsed from the URL path.
         interactor: Injected get-cover query handler.
 
     Returns:
-        :class:`UserCoverSchema` with ``cover = null`` when the user
-        has no cover, or a 302 ``RedirectResponse`` to the presigned
-        storage URL when a cover is attached.
+        ``302 Found`` ``RedirectResponse`` to the short-lived presigned
+        storage URL for the cover image.
 
     Raises:
-        EntityNotFoundError: No user with the given id; HTTP 404.
+        EntityNotFoundError: No user with the given id; HTTP 404 via
+            ``ENTITY_NOT_FOUND_RULE``.
+        UserCoverNotFoundError: The user exists but has no cover
+            attached; HTTP 404 via ``USER_COVER_NOT_FOUND_RULE``.
     """
-    output = await interactor.run(
-        GetUserCoverQuery(oid=UserID(user_id))
-    )
-    if output.url is None:
-        return UserCoverSchema.from_view(output)
+    output = await interactor.run(GetUserCoverQuery(oid=UserID(user_id)))
     return RedirectResponse(
         url=output.url,
         status_code=status.HTTP_302_FOUND,
@@ -191,12 +327,15 @@ async def get_cover(
 
 @router.put(
     "/me/first-name",
+    summary="Change the current user's first name",
+    operation_id="changeMyFirstName",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def change_first_name(
     request: Request,
-    payload: StringFieldSchema,
+    payload: ChangeFirstNameSchema,
     interactor: FromDishka[ChangeUserFirstNameCommandHandler],
     auth: FromDishka[Authenticator],
 ) -> None:
@@ -204,7 +343,9 @@ async def change_first_name(
 
     Args:
         request: Source of the access-token cookie.
-        payload: ``{"value": "<new first name>"}``.
+        payload: ``{"value": "<new first name>"}``; constrained to
+            ``FIRST_NAME_MAX_LEN`` chars by the request schema and
+            re-validated by the ``FirstName`` value object.
         interactor: Injected command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -224,12 +365,15 @@ async def change_first_name(
 
 @router.put(
     "/me/last-name",
+    summary="Change the current user's last name",
+    operation_id="changeMyLastName",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def change_last_name(
     request: Request,
-    payload: StringFieldSchema,
+    payload: ChangeLastNameSchema,
     interactor: FromDishka[ChangeUserLastNameCommandHandler],
     auth: FromDishka[Authenticator],
 ) -> None:
@@ -237,7 +381,9 @@ async def change_last_name(
 
     Args:
         request: Source of the access-token cookie.
-        payload: ``{"value": "<new last name>"}``.
+        payload: ``{"value": "<new last name>"}``; constrained to
+            ``LAST_NAME_MAX_LEN`` chars by the request schema and
+            re-validated by the ``LastName`` value object.
         interactor: Injected command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -257,12 +403,15 @@ async def change_last_name(
 
 @router.put(
     "/me/patronymic",
+    summary="Change or clear the current user's patronymic",
+    operation_id="changeMyPatronymic",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def change_patronymic(
     request: Request,
-    payload: NullableStringFieldSchema,
+    payload: ChangePatronymicSchema,
     interactor: FromDishka[ChangeUserPatronymicCommandHandler],
     auth: FromDishka[Authenticator],
 ) -> None:
@@ -270,7 +419,9 @@ async def change_patronymic(
 
     Args:
         request: Source of the access-token cookie.
-        payload: ``{"value": "<new patronymic>" | null}``.
+        payload: ``{"value": "<new patronymic>" | null}``; constrained
+            to ``PATRONYMIC_MAX_LEN`` chars by the request schema and
+            re-validated by the ``Patronymic`` value object.
         interactor: Injected command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -290,12 +441,15 @@ async def change_patronymic(
 
 @router.put(
     "/me/description",
+    summary="Change or clear the current user's HTML description",
+    operation_id="changeMyDescription",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def change_description(
     request: Request,
-    payload: NullableStringFieldSchema,
+    payload: ChangeDescriptionSchema,
     interactor: FromDishka[ChangeUserDescriptionCommandHandler],
     auth: FromDishka[Authenticator],
 ) -> None:
@@ -307,7 +461,9 @@ async def change_description(
 
     Args:
         request: Source of the access-token cookie.
-        payload: ``{"value": "<html>..." | null}``. ``null`` clears it.
+        payload: ``{"value": "<html>..." | null}``; constrained to
+            ``DESCRIPTION_MAX_LEN`` chars **after sanitization**.
+            ``null`` clears the description.
         interactor: Injected command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -328,7 +484,10 @@ async def change_description(
 
 @router.post(
     "/me/avatar",
+    summary="Upload (or replace) the current user's avatar",
+    operation_id="uploadMyAvatar",
     status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
     response_model=FileSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
@@ -342,8 +501,11 @@ async def upload_avatar(
 
     Args:
         request: Source of the access-token cookie.
-        file: ``multipart/form-data`` field ``file`` with any payload
-            up to 5 MB.
+        file: ``multipart/form-data`` field ``file`` carrying the image
+            bytes. Capped at ``MAX_FILE_SIZE_BYTES``
+            (``5 MB``); the server reads `Content-Type` from the
+            upload and rejects payloads above the limit with a 422
+            ``FileTooLargeError``.
         interactor: Injected set-avatar command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -353,19 +515,26 @@ async def upload_avatar(
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: Authenticated user vanished; HTTP 404.
-        FileTooLargeError: Payload over 5 MB; HTTP 422.
+        FileTooLargeError: Payload over ``MAX_FILE_SIZE_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
     data, content_type = await read_image_upload(file)
     file_id = await interactor.run(
-        SetUserAvatarCommand(user_id=ctx.user_id, data=data, content_type=content_type)
+        SetUserAvatarCommand(
+            user_id=ctx.user_id,
+            data=data,
+            content_type=content_type,
+        )
     )
     return FileSchema(oid=file_id)
 
 
 @router.delete(
     "/me/avatar",
+    summary="Detach the current user's avatar",
+    operation_id="deleteMyAvatar",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_MAP,
 )
 async def delete_avatar(
@@ -393,7 +562,10 @@ async def delete_avatar(
 
 @router.post(
     "/me/cover",
+    summary="Upload (or replace) the current user's cover",
+    operation_id="uploadMyCover",
     status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
     response_model=FileSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
@@ -407,8 +579,11 @@ async def upload_cover(
 
     Args:
         request: Source of the access-token cookie.
-        file: ``multipart/form-data`` field ``file`` with any payload
-            up to 5 MB.
+        file: ``multipart/form-data`` field ``file`` carrying the image
+            bytes. Capped at ``MAX_FILE_SIZE_BYTES``
+            (``5 MB``); the server reads `Content-Type` from the
+            upload and rejects payloads above the limit with a 422
+            ``FileTooLargeError``.
         interactor: Injected set-cover command handler.
         auth: Injected authenticator that validates the access cookie.
 
@@ -418,19 +593,26 @@ async def upload_cover(
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: Authenticated user vanished; HTTP 404.
-        FileTooLargeError: Payload over 5 MB; HTTP 422.
+        FileTooLargeError: Payload over ``MAX_FILE_SIZE_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
     data, content_type = await read_image_upload(file)
     file_id = await interactor.run(
-        SetUserCoverCommand(user_id=ctx.user_id, data=data, content_type=content_type)
+        SetUserCoverCommand(
+            user_id=ctx.user_id,
+            data=data,
+            content_type=content_type,
+        )
     )
     return FileSchema(oid=file_id)
 
 
 @router.delete(
     "/me/cover",
+    summary="Detach the current user's cover",
+    operation_id="deleteMyCover",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_MAP,
 )
 async def delete_cover(

@@ -1,37 +1,130 @@
-"""Schemas shared between multiple routers at the HTTP boundary."""
+"""Schemas shared between multiple routers at the HTTP boundary.
+
+Every field carries an OpenAPI-visible ``description`` and at least one
+``example``. Length limits mirror the ``constants.py`` of the matching
+aggregate so the generated client validates the same invariants the
+domain enforces.
+"""
 
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Self
 
 from learnic.application.queries.user.get import UserOutput
-from learnic.application.queries.user.get_avatar import UserAvatarOutput
-from learnic.application.queries.user.get_cover import UserCoverOutput
+from learnic.entities.user.constants import (
+    DESCRIPTION_MAX_LEN,
+    FIRST_NAME_MAX_LEN,
+    LAST_NAME_MAX_LEN,
+    PATRONYMIC_MAX_LEN,
+)
 
 
 class FileSchema(BaseModel):
-    """Reference to a file resource.
+    """Reference to a file resource owned by the API.
 
     Returned whenever an endpoint produces or owns a file — avatar and
-    cover uploads today, course banners, message attachments, etc. in
+    cover uploads today; course banners, message attachments, etc. in
     the future. Start with just the identifier; grow with extra fields
     (URL, MIME, size) as concrete endpoints need them.
     """
 
-    oid: UUID
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"oid": "550e8400-e29b-41d4-a716-446655440000"},
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description=(
+            "Server-generated UUID identifying the stored file. Use it "
+            "to fetch presigned download URLs from the appropriate "
+            "aggregate endpoint (e.g. `GET /users/{user_id}/avatar`)."
+        ),
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
 
 
 class UserSchema(BaseModel):
-    """Public user profile. ``email`` is intentionally not exposed."""
+    """Public user profile.
 
-    oid: UUID
-    first_name: str
-    last_name: str
-    patronymic: str | None
-    description: str | None
-    avatar_url: str | None
-    cover_url: str | None
+    `email` is intentionally omitted — it is private to the account
+    owner and never returned by user-facing endpoints.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "patronymic": None,
+                    "description": "<p>Mathematician.</p>",
+                    "avatar_url": "https://s3.example.com/avatars/...",
+                    "cover_url": None,
+                },
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description="User's stable identifier (UUID v4).",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    first_name: str = Field(
+        description="User's given name. Required, non-empty.",
+        min_length=1,
+        max_length=FIRST_NAME_MAX_LEN,
+        examples=["Ada"],
+    )
+    last_name: str = Field(
+        description="User's family name. Required, non-empty.",
+        min_length=1,
+        max_length=LAST_NAME_MAX_LEN,
+        examples=["Lovelace"],
+    )
+    patronymic: str | None = Field(
+        description=(
+            "User's middle/patronymic name. `null` when the user has not set one."
+        ),
+        max_length=PATRONYMIC_MAX_LEN,
+        examples=[None, "Augusta"],
+    )
+    description: str | None = Field(
+        description=(
+            "User-authored profile description as sanitized HTML. "
+            "`null` when the user has not set one. The server "
+            "sanitizes the markup before storage; clients can render "
+            "the value directly."
+        ),
+        max_length=DESCRIPTION_MAX_LEN,
+        examples=[None, "<p>Hello world.</p>"],
+    )
+    avatar_url: str | None = Field(
+        description=(
+            "Short-lived presigned URL for the user's avatar, or "
+            "`null` when no avatar is attached. The URL expires; "
+            "re-fetch the user resource to get a fresh one."
+        ),
+        examples=[
+            None,
+            "https://s3.example.com/avatars/user.png?X-Amz-Signature=...",
+        ],
+    )
+    cover_url: str | None = Field(
+        description=(
+            "Short-lived presigned URL for the user's cover image, or "
+            "`null` when no cover is attached. The URL expires; "
+            "re-fetch the user resource to get a fresh one."
+        ),
+        examples=[
+            None,
+            "https://s3.example.com/covers/user.png?X-Amz-Signature=...",
+        ],
+    )
 
     @classmethod
     def from_view(cls, view: UserOutput) -> Self:
@@ -47,50 +140,29 @@ class UserSchema(BaseModel):
         )
 
 
-class UserAvatarSchema(BaseModel):
-    """Avatar link for a user.
+class HealthSchema(BaseModel):
+    """Liveness response for `GET /healthcheck`."""
 
-    ``avatar`` is ``null`` when the user has no avatar attached. The
-    ``/users/{user_id}/avatar`` endpoint returns this shape only on the
-    ``null`` path; when the avatar exists, the endpoint redirects to the
-    presigned storage URL instead.
-    """
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"status": "ok"}]},
+    )
 
-    avatar: str | None
-
-    @classmethod
-    def from_view(cls, view: UserAvatarOutput) -> Self:
-        """Build the schema from a ``GetUserAvatarQueryHandler`` output."""
-        return cls(avatar=view.url)
+    status: str = Field(
+        description='Always the literal string `"ok"` when the API is up.',
+        examples=["ok"],
+    )
 
 
-class UserCoverSchema(BaseModel):
-    """Cover link for a user.
+class WelcomeSchema(BaseModel):
+    """Welcome banner for `GET /`."""
 
-    ``cover`` is ``null`` when the user has no cover attached. The
-    ``/users/{user_id}/cover`` endpoint returns this shape only on the
-    ``null`` path; when the cover exists, the endpoint redirects to the
-    presigned storage URL instead.
-    """
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"message": "Welcome to Learnic's API"}],
+        },
+    )
 
-    cover: str | None
-
-    @classmethod
-    def from_view(cls, view: UserCoverOutput) -> Self:
-        """Build the schema from a ``GetUserCoverQueryHandler`` output."""
-        return cls(cover=view.url)
-
-
-class StringFieldSchema(BaseModel):
-    """Payload for endpoints that replace a single required string field."""
-
-    value: str
-
-
-class NullableStringFieldSchema(BaseModel):
-    """Payload for endpoints that replace a single optional field.
-
-    ``value = null`` clears the field.
-    """
-
-    value: str | None
+    message: str = Field(
+        description="Human-readable welcome string. Stable for monitoring.",
+        examples=["Welcome to Learnic's API"],
+    )

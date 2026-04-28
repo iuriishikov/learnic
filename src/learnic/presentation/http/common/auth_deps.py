@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Final, final
 
 from fastapi import Request
+from fastapi.security import APIKeyCookie
 
 from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.security.access_tokens import (
@@ -11,7 +12,46 @@ from learnic.application.common.security.access_tokens import (
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.entities.user.models import UserID
-from learnic.presentation.http.common.cookies import ACCESS_COOKIE
+from learnic.presentation.http.common.cookies import (
+    ACCESS_COOKIE,
+    REFRESH_COOKIE,
+    SIGNUP_SESSION_COOKIE,
+)
+
+access_cookie_scheme: Final = APIKeyCookie(
+    name=ACCESS_COOKIE,
+    scheme_name="accessCookie",
+    description=(
+        "HttpOnly cookie issued by `POST /auth/login` (or by "
+        "`GET /auth/email-verification/wait` once the email is "
+        "confirmed). Sent automatically by browsers on every request "
+        "to a protected endpoint."
+    ),
+    auto_error=False,
+)
+
+refresh_cookie_scheme: Final = APIKeyCookie(
+    name=REFRESH_COOKIE,
+    scheme_name="refreshCookie",
+    description=(
+        "HttpOnly cookie scoped to `/auth/refresh`. Sent automatically "
+        "by browsers when calling `POST /auth/refresh` or "
+        "`POST /auth/logout`."
+    ),
+    auto_error=False,
+)
+
+signup_session_cookie_scheme: Final = APIKeyCookie(
+    name=SIGNUP_SESSION_COOKIE,
+    scheme_name="signupSessionCookie",
+    description=(
+        "HttpOnly cookie scoped to `/auth`. Issued by "
+        "`POST /auth/register` and consumed by "
+        "`GET /auth/email-verification/wait` to auto-login the same "
+        "browser tab once the user clicks the verification link."
+    ),
+    auto_error=False,
+)
 
 
 @dataclass(slots=True, frozen=True)

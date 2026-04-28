@@ -342,6 +342,67 @@ infrastructure ───────┘   (implements application protocols)
     In-process execution via `InMemoryBroker` is allowed ONLY when
     `TASKIQ_IN_MEMORY=true` is set (tests, throwaway local dev).
 
+11. **`openapi.json` is the public frontend contract.** The generated schema
+    must be sufficient on its own for an unfamiliar developer to build a
+    fully working SPA (or a typed SDK via `openapi-generator` /
+    `openapi-typescript`) without reading any backend source. Concretely,
+    every new or modified route MUST satisfy:
+    - **Operation metadata.** Pass `summary="..."` (short, becomes the
+      OpenAPI `summary`) and a stable `operation_id="camelCaseVerb"`
+      (becomes the SDK method name) on every `@router.<verb>(...)`. Never
+      rely on FastAPI's auto-derived `register_auth_register_post`-style
+      ids — they break SDK regeneration the moment a route is renamed.
+    - **Tags.** Every router carries `tags=["<Aggregate>"]`. The
+      human-readable description for the tag lives in `OPENAPI_TAGS` in
+      `web.py`; add a new entry there when you introduce a new aggregate
+      router.
+    - **Request schemas.** Every Pydantic body model lives next to the
+      route (or in `presentation/http/common/schemas.py` if shared) and
+      every field uses `Field(description=..., examples=[...], ...)` with
+      length / range constraints sourced from the aggregate's
+      `entities/<aggregate>/constants.py` (see rule 12). Add a
+      `model_config = ConfigDict(json_schema_extra={"examples": [...]})`
+      with at least one full-body example.
+    - **Response schemas.** Always declare `response_model=` (or a typed
+      return annotation FastAPI can introspect). For routes with multiple
+      success codes (e.g. 200 + 302), document the alternates via
+      `responses={...}` including a `description` and, where relevant, a
+      `headers={"Location": {...}}` block so codegen can produce the
+      typed redirect path.
+    - **Error responses.** Every exception the handler (or anything it
+      awaits) can raise appears in `error_map={...}`. `fastapi-error-map`
+      auto-populates the OpenAPI `responses` table with the matching
+      response model — that's how 401/404/409/422 surface in
+      `openapi.json`. Don't reach for `responses={...}` to add error
+      codes manually; fix the `error_map` instead.
+    - **Authentication.** Protected routes pass
+      `dependencies=[Depends(access_cookie_scheme)]` (and/or the refresh
+      / signup-session schemes from `auth_deps.py`). The `APIKeyCookie`
+      dependency is a no-op at runtime (`auto_error=False`); its sole job
+      is to register the cookie in OpenAPI's `securitySchemes` and tag
+      the operation with the right `security:` requirement so generated
+      clients know which cookie to send.
+    - **Docstring.** Same Google-style rules as before (summary, `Args:`,
+      `Returns:`, `Raises:`); the docstring becomes the operation
+      `description` and is the long-form companion to `summary`.
+
+    If `openapi.json` lacks any of the above, the contract is incomplete —
+    fix the route, not the SPA.
+
+12. **Schema length/range limits come from `entities/<aggregate>/constants.py`.**
+    Every Pydantic request schema field that maps to a value object whose
+    invariant references a `Final` constant (e.g. `FIRST_NAME_MAX_LEN`,
+    `PASSWORD_MIN_LEN`, `DESCRIPTION_MAX_LEN`) MUST import that constant
+    and pass it to `Field(min_length=..., max_length=..., ge=..., le=...)`.
+    Mention the constant by name in the field's `description` so the
+    OpenAPI doc tells the frontend dev where the limit comes from. The
+    schema constraints are not a substitute for VO validation — the VO is
+    still the source of truth and re-validates server-side — but they
+    let the frontend reject bad input before a network round-trip and let
+    `openapi-generator` produce client-side validators automatically.
+    Inlining magic numbers in schemas (or duplicating limit values across
+    `constants.py`, the VO, and the schema) is forbidden.
+
 ## Code Style
 
 - Python 3.10+ syntax: `X | Y`, `list[T]`, `dict[K, V]`.
@@ -376,15 +437,30 @@ infrastructure ───────┘   (implements application protocols)
   the public API surface — their docstrings feed directly into the OpenAPI
   schema and `/docs` (FastAPI uses the docstring as the operation
   `description`). Required sections:
-  - One-line summary (becomes the OpenAPI `summary`).
+  - One-line imperative description (the route decorator's `summary=...`
+    is the short OpenAPI `summary`; this docstring summary is the long
+    `description` line).
   - `Args:` — every path/query/body/dependency parameter, what it means.
     Skip `interactor: FromDishka[...]` since it is not a public input.
-  - `Returns:` — the response shape, in human terms (not just the type).
+  - `Returns:` — the response shape AND the relevant status codes / set
+    cookies / `Location` headers. A frontend developer reading
+    `openapi.json` should know whether to expect a body, a redirect, or
+    just a status code.
   - `Raises:` — every domain/application error the handler can propagate
     (e.g. `EntityNotFoundError`, `FieldError` subclasses), plus the HTTP
     status the exception handler maps it to.
   Docstrings on application handlers, gateways, readers, and entities are
   encouraged but optional. Docstrings on routes are non-negotiable.
+- **Every Pydantic schema at the HTTP boundary MUST carry OpenAPI
+  metadata.** Each field uses `Field(description=..., examples=[...])`
+  with constraints (`min_length`, `max_length`, `ge`, `le`) sourced from
+  `entities/<aggregate>/constants.py` (see core rule 12). Each model
+  attaches at least one full-body example via
+  `model_config = ConfigDict(json_schema_extra={"examples": [...]})`.
+  The model's class docstring describes what the schema represents and
+  which route(s) consume it. This applies equally to request bodies,
+  response bodies, and error response models — anything that ends up in
+  `openapi.json`.
 
 ## Canonical examples (copy these patterns)
 
@@ -519,12 +595,16 @@ class <Aggregate>MapperAlchemy(<Aggregate>Gateway):
 
 ```python
 from dishka.integrations.fastapi import FromDishka
-from fastapi import status
+from fastapi import Depends, status
 from fastapi_error_map import ErrorAwareRouter
+from pydantic import BaseModel, ConfigDict, Field
 
-from <project>.entities.common.errors import FieldError
 from <project>.application.common.errors import EntityNotFoundError
+from <project>.entities.<aggregate>.constants import <FIELD>_MAX_LEN
+from <project>.entities.common.errors import FieldError
+from <project>.presentation.http.common.auth_deps import access_cookie_scheme
 from <project>.presentation.http.common.errors.rules import (
+    AUTHENTICATED_WITH_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
     FIELD_ERROR_RULE,
 )
@@ -536,36 +616,75 @@ router = ErrorAwareRouter(
     route_class=DishkaErrorAwareRoute,  # auto @inject + error_map support
 )
 
+
+class Add<Aggregate>Schema(BaseModel):
+    """Body for `POST /<aggregate>s`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"<field>": "<example>"}]},
+    )
+
+    <field>: str = Field(
+        description=(
+            "Human-readable description of <field>. "
+            f"Max length is {<FIELD>_MAX_LEN} characters "
+            "(`<FIELD>_MAX_LEN`)."
+        ),
+        min_length=1,
+        max_length=<FIELD>_MAX_LEN,
+        examples=["<example>"],
+    )
+
+
 @router.post(
     "/",
+    summary="Create a new <aggregate>",
+    operation_id="add<Aggregate>",
     status_code=status.HTTP_201_CREATED,
-    error_map={
-        FieldError: FIELD_ERROR_RULE,
-        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+    dependencies=[Depends(access_cookie_scheme)],  # required when protected
+    error_map=AUTHENTICATED_WITH_FIELD_MAP | {
+        # add aggregate-specific errors here
     },
 )
 async def add(
-    command_data: <Action><Aggregate>Command,
+    payload: Add<Aggregate>Schema,
     interactor: FromDishka[<Action><Aggregate>CommandHandler],
 ) -> <ReturnType>:
     """Create a new <aggregate>.
 
     Args:
-        command_data: Payload describing the <aggregate> to create
-            (validated by Pydantic at the HTTP boundary).
+        payload: Payload describing the <aggregate> to create
+            (validated by Pydantic at the HTTP boundary; length
+            limits come from `entities/<aggregate>/constants.py`).
 
     Returns:
-        The created <aggregate>'s identifier (or full view, as the
-        handler defines).
+        ``201 Created`` with `<ReturnType>` describing the new
+        <aggregate>.
 
     Raises:
-        FieldError: One of the value-object invariants was violated;
-            mapped to HTTP 422 via FIELD_ERROR_RULE.
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: A referenced related entity does not
-            exist; mapped to HTTP 404 via ENTITY_NOT_FOUND_RULE.
+            exist; HTTP 404 via `ENTITY_NOT_FOUND_RULE`.
+        FieldError: One of the value-object invariants was violated;
+            HTTP 422 via `FIELD_ERROR_RULE`.
     """
-    return await interactor.run(command_data)
+    return await interactor.run(<Action><Aggregate>Command(**payload.model_dump()))
 ```
+
+**Why each piece is non-optional:**
+- `summary` + `operation_id` → readable Swagger and clean SDK method
+  names from `openapi-generator` / `openapi-typescript`.
+- `dependencies=[Depends(access_cookie_scheme)]` → registers the
+  `accessCookie` security scheme on the operation in `openapi.json`
+  without changing runtime behavior (the scheme is `auto_error=False`;
+  `Authenticator` still does the actual validation).
+- `Field(description=, examples=, min_length=, max_length=)` with
+  constants from `entities/<aggregate>/constants.py` → frontend gets
+  validators for free; constants stay the single source of truth for
+  domain limits (rule 12).
+- Body example via `model_config = ConfigDict(json_schema_extra=...)`
+  → Swagger "Try it out" works with one click; SDK fixtures can copy
+  the example verbatim.
 
 **Rules for `error_map`:**
 - Every exception the handler (or anything it awaits — including shared helpers
@@ -671,6 +790,21 @@ loud failure** — fix the `error_map` instead of silencing it.
    The router must be `ErrorAwareRouter(route_class=DishkaErrorAwareRoute)`;
    the decorator must carry an `error_map={...}` covering every exception
    the handler (and anything it awaits) can raise.
+   **OpenAPI completeness checklist (core rule 11):**
+   - `summary="..."` and a stable `operation_id="camelCaseVerb"` on the
+     decorator.
+   - `dependencies=[Depends(access_cookie_scheme)]` (and/or refresh /
+     signup-session schemes) on every protected route.
+   - `response_model=...` (or a typed return annotation) and any
+     non-default success codes documented in `responses={...}`.
+   - The request schema fields use `Field(description=, examples=, ...)`
+     with length/range limits imported from
+     `entities/<aggregate>/constants.py` (core rule 12).
+   - The schema class has a docstring naming the route(s) it serves and
+     a full body example via
+     `model_config = ConfigDict(json_schema_extra={"examples": [...]})`.
+   - The route docstring covers `Args:` / `Returns:` / `Raises:` per the
+     code-style rule above.
 6. If the handler introduces a **new** domain error:
    - Decide if it fits an existing rule (e.g. any new `FieldError` subclass
      is automatically covered by `FIELD_ERROR_RULE` via MRO matching — no
@@ -683,20 +817,35 @@ loud failure** — fix the `error_map` instead of silencing it.
 7. Unit test in `tests/unit/application/...` using Mock-based fixtures
    (see `tests/unit/application/conftest.py` for the pattern).
 8. Integration test in `tests/integrations/http/...` if the route is new.
+9. **Verify the OpenAPI contract.** After wiring the route, regenerate
+   `openapi.json` (e.g. `poetry run python -c "import json; from
+   learnic.web import create_app_production; print(json.dumps(
+   create_app_production().openapi()))"`) and confirm the new operation
+   has: `summary`, `operationId`, request/response schemas with field
+   `description` + `examples`, `security` (if protected), and an entry
+   under `responses` for every error in `error_map`. If any of the above
+   is missing, the contract is incomplete — fix the route, not the SPA.
 
 ## Adding a new aggregate (checklist)
 
 Beyond the use-case checklist, also:
 
 1. `entities/<aggregate>/` with `models.py`, `value_objects.py`, `errors.py`, `__init__.py`.
-2. `application/common/persistence/<aggregate>.py` with `Gateway` and `Reader` protocols
+2. `entities/<aggregate>/constants.py` for every length/range limit
+   referenced by the aggregate's value-object invariants. These same
+   constants are imported by request schemas (core rule 12), so add them
+   here even if the first VO only uses one.
+3. `application/common/persistence/<aggregate>.py` with `Gateway` and `Reader` protocols
    and any view models / filters specific to the aggregate.
-3. `infrastructure/persistence/models/<aggregate>.py` with `sa.Table` + `map_<aggregate>_table()`.
-4. Call the new `map_<aggregate>_table()` inside `bootstrap.setup_map_tables()`.
-5. `infrastructure/persistence/adapters/<aggregate>.py` with `*MapperAlchemy` + `*ReaderAlchemy`.
-6. Register mapper + reader in `ioc.gateways_provider` with explicit `provides=...`.
-7. Alembic: `poetry run alembic revision --autogenerate -m "add <aggregate>"`,
+4. `infrastructure/persistence/models/<aggregate>.py` with `sa.Table` + `map_<aggregate>_table()`.
+5. Call the new `map_<aggregate>_table()` inside `bootstrap.setup_map_tables()`.
+6. `infrastructure/persistence/adapters/<aggregate>.py` with `*MapperAlchemy` + `*ReaderAlchemy`.
+7. Register mapper + reader in `ioc.gateways_provider` with explicit `provides=...`.
+8. Alembic: `poetry run alembic revision --autogenerate -m "add <aggregate>"`,
    then `poetry run alembic upgrade head`.
+9. **Add a tag entry in `OPENAPI_TAGS`** in `web.py` so the new aggregate's
+   router shows up under a human-readable section in `openapi.json` and
+   Swagger.
 
 ## Testing
 
@@ -790,9 +939,36 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
   even "just for tests" or "just for local dev". Use a real PostgreSQL
   instance — via `docker-compose.dev` locally, a dedicated test DB in CI.
 - ❌ Inline magic numbers (max lengths, bounded ranges, etc.) inside VO
-  `__post_init__` or entity methods. They live in the aggregate's
-  `constants.py` as `Final` values and are imported by the VOs and any
-  adapter that needs the same limit (e.g. `sa.String(FIRST_NAME_MAX_LEN)`).
+  `__post_init__`, entity methods, **or Pydantic schemas**. They live in
+  the aggregate's `constants.py` as `Final` values and are imported by
+  the VOs, by any adapter that needs the same limit (e.g.
+  `sa.String(FIRST_NAME_MAX_LEN)`), and by every Pydantic request/response
+  schema field that mirrors the same invariant (e.g.
+  `Field(max_length=FIRST_NAME_MAX_LEN)` — see core rule 12).
+- ❌ Define a route without `summary=` and `operation_id=` on the
+  decorator. Auto-derived `register_auth_register_post`-style ids break
+  client SDK regeneration the moment the route is renamed (rule 11).
+- ❌ Use `tags=[...]` on a router without adding a matching entry in
+  `OPENAPI_TAGS` in `web.py`. Untagged or undocumented tags produce a
+  Swagger UI without aggregate descriptions.
+- ❌ Define a Pydantic schema field as a bare type (`email: str`,
+  `value: str | None`) at the HTTP boundary. Every field needs
+  `Field(description=, examples=[...], min_length=/max_length=/...)`
+  using constants from `entities/<aggregate>/constants.py` so OpenAPI
+  carries the same constraints the domain enforces.
+- ❌ Hand-roll `responses={401: {...}, 422: {...}}` on a route to
+  document errors. `fastapi-error-map` does that automatically from
+  `error_map={...}`. If a status is missing from `openapi.json`, the
+  fix is in `error_map` — not in `responses`.
+- ❌ Use a route's `responses={...}` to document error shapes that should
+  belong to a `Rule` constant. Routes share rules through
+  `presentation/http/common/errors/rules.py`; ad-hoc `responses` entries
+  drift over time.
+- ❌ Mark a route protected without
+  `dependencies=[Depends(access_cookie_scheme)]` (or the relevant cookie
+  scheme). The `Authenticator` will still raise `InvalidTokenError` at
+  runtime, but `openapi.json` won't list the cookie under
+  `securitySchemes` and generated SDKs won't know to send it.
 - ❌ Read config values with `os.environ` directly — use `BaseSettings` subclasses
   in `infrastructure/configs.py`; pydantic-settings handles parsing and validation.
 - ❌ Use `poetry shell` — it was removed from core in Poetry 2.x. Use
