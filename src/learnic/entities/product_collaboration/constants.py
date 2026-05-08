@@ -1,0 +1,7 @@
+from typing import Final
+
+INVITE_TOKEN_BYTES: Final = 32
+INVITE_TOKEN_MAX_LEN: Final = 128
+INVITE_TOKEN_HASH_LEN: Final = 64
+
+INVITE_TOKEN_TTL_DAYS: Final = 14

@@ -345,8 +345,49 @@ infrastructure ───────┘   (implements application protocols)
 11. **`openapi.json` is the public frontend contract.** The generated schema
     must be sufficient on its own for an unfamiliar developer to build a
     fully working SPA (or a typed SDK via `openapi-generator` /
-    `openapi-typescript`) without reading any backend source. Concretely,
-    every new or modified route MUST satisfy:
+    `openapi-typescript`) without reading any backend source. The contract
+    has two halves — operation-level metadata on every route (the checklist
+    below) and `info.description`, the SPA's **operating manual** for
+    everything cross-cutting that does not fit on a single operation.
+
+    **Required `## ...` sections in `API_DESCRIPTION`** (`web.py`):
+
+    - `## Authentication` — cookie names (`accessCookie`,
+      `refreshCookie`, `signupSessionCookie`), their paths and
+      lifetimes, and the rotation flow (when to call
+      `POST /auth/refresh`, what `signupSessionCookie` is for).
+    - `## Error responses` — every error envelope shape the API can
+      produce (`FieldError`, `EntityNotFound`, named-error 401/403/409,
+      Pydantic 422) and how the SPA should branch on them.
+    - `## WebSocket channels` — see core rule 13. Every WS endpoint
+      has its full protocol (auth, close codes, lifecycle, message
+      shapes, `kind` enum) documented there because OpenAPI 3 does
+      not model WebSockets natively.
+
+    **Add a new `## ...` section whenever a new cross-cutting concept
+    lands** — anything an SPA developer would otherwise have to infer
+    by reading multiple route examples. Likely candidates as the API
+    grows:
+
+    - Pagination — the project's offset/limit convention lives in
+      `application/common/pagination.py` (`DEFAULT_LIMIT = 20`,
+      `MAX_LIMIT = 100`). The first list endpoint that ships with a
+      paginated response is the trigger for a `## Pagination` section.
+    - File uploads — the multipart flow in
+      `presentation/http/common/uploads.py` plus the `MAX_FILE_SIZE_BYTES`
+      cap. A `## File uploads` section should land alongside the first
+      route that accepts user uploads.
+    - Datetime serialization — ISO 8601 with timezone, server emits
+      UTC. Document explicitly so SPAs do not parse naive strings.
+    - Money / decimals, idempotency keys, rate limits, file formats,
+      and any other concept the SPA must respect end-to-end.
+
+    The bar: an unfamiliar SPA developer reading only `openapi.json`
+    should be able to ship a working client — including WS channels —
+    without asking the backend team a single question. If the SPA
+    would need to ask, the answer belongs in `info.description`.
+
+    Concretely, every new or modified route MUST satisfy:
     - **Operation metadata.** Pass `summary="..."` (short, becomes the
       OpenAPI `summary`) and a stable `operation_id="camelCaseVerb"`
       (becomes the SDK method name) on every `@router.<verb>(...)`. Never
@@ -402,6 +443,132 @@ infrastructure ───────┘   (implements application protocols)
     `openapi-generator` produce client-side validators automatically.
     Inlining magic numbers in schemas (or duplicating limit values across
     `constants.py`, the VO, and the schema) is forbidden.
+
+13. **WebSocket channels are part of the SPA contract too.** OpenAPI 3
+    has no native model for WebSockets, but the SPA still needs the
+    same kind of contract for them — paths, auth, message shapes,
+    close codes, lifecycle. The single source of truth is the
+    `## WebSocket channels` section inside `API_DESCRIPTION` in
+    `web.py`. Every WS endpoint added under
+    `presentation/http/routes/` MUST have a sub-section there.
+    Concretely, each entry documents:
+
+    - **Path** in the form `WS /path/{params}`.
+    - **Direction** — read-only push (server → client), client-only
+      send, or bidirectional.
+    - **Authentication** — cookie scheme used (`accessCookie`, etc.).
+      The same names registered under `securitySchemes` apply on the
+      WS handshake; browsers send the cookie automatically.
+    - **Close codes** — every WS-layer code the server may emit
+      (`4401` for missing/denied auth, `4403` for authorisation
+      failure, `4404` for missing or wrong-type resource, plus any
+      channel-specific codes), each paired with the condition that
+      triggers it.
+    - **Lifecycle and replay policy** — when the connection closes
+      naturally, whether events are buffered while the client is
+      offline, what the client does on reconnect. The project's
+      default is **no replay** — the client refetches initial state
+      via REST and re-subscribes; explicitly call this out so the
+      SPA does not assume otherwise.
+    - **Bootstrap** — the REST endpoint(s) the client must fetch
+      first to load initial state before opening the socket
+      (e.g. `GET /products/{id}/content/draft` for the
+      course-content channel).
+    - **Server → client envelope** as a concrete JSON example.
+    - **Client → server messages** (JSON shapes) if the channel is
+      bidirectional. If the server currently ignores client
+      messages, say so explicitly — silence is read as "may break in
+      future" by SPA teams.
+    - **`kind` value list** drawn directly from the relevant
+      `<Aggregate>EventKind` enum in
+      `application/common/.../events.py`. The enum is the source of
+      truth — adding a new variant means updating the enum **and**
+      this OpenAPI section in the same change.
+    - **Payload semantics** — which `kind` values carry enough state
+      to be applied directly versus which require a REST refetch.
+      The SPA cannot guess this from the envelope alone.
+
+    Tag descriptions of any aggregate that owns a WS channel
+    (`Products`, `CourseContent`, `Presence`, etc.) MUST point at
+    `## WebSocket channels` so a reader browsing Swagger UI by tag
+    discovers the channel rather than missing it. The route module's
+    docstring should be a brief pointer to the same section, never a
+    duplicate of the protocol — duplicates drift.
+
+    If the team later commits to typed payloads per `kind`, this rule
+    still applies; a sibling `asyncapi.yaml` would supplement (not
+    replace) the prose, the same way `openapi.json` supplements the
+    `info.description` intro for HTTP.
+
+14. **REST URL hierarchy: sub-resources live under their parent.** A
+    resource that only exists in the context of an aggregate root is a
+    sub-resource and its URL path must reflect that. Compound top-level
+    paths like `/webinar-sessions`, `/webinar-schedules`,
+    `/webinar-enrollments`, `/course-enrollments`, `/product-qa` are
+    forbidden — they advertise a flat collection that does not exist
+    in the domain (you cannot have a session without a cohort, an
+    enrollment without a parent, a Q&A entry without a product). The
+    correct shape is:
+
+    ```
+    /cohorts/{cohort_id}/sessions/{session_id}/...
+    /cohorts/{cohort_id}/schedules/{schedule_id}
+    /cohorts/{cohort_id}/enrollments/{enrollment_id}/...
+    /courses/{course_id}/enrollments/{enrollment_id}/...
+    /products/{product_id}/qa/{qa_id}/...
+    ```
+
+    Concrete consequences:
+
+    - **Routers carry the parent path-parameter in their `prefix`.**
+      `prefix="/cohorts/{cohort_id}/sessions"` (not `/webinar-sessions`).
+      Every handler in such a router accepts the parent id as a path
+      parameter (`cohort_id: UUID = _COHORT_ID_PATH`) — even when the
+      command/query handler does not use it. The id is part of the
+      URL contract; FastAPI parses and validates it, the SPA passes
+      it, generated SDKs type-check it. Suffix unused parent params
+      with `# noqa: ARG001` so ruff does not flag them.
+    - **Collection-level operations (create, list) under the parent
+      can live in the parent's route module** (e.g.
+      `POST /cohorts/{cohort_id}/enrollments` lives in `cohort.py`),
+      while item-level operations (single-item GET, PATCH, POST
+      sub-actions) live in the child's own route module with the
+      nested prefix. Both routers register independently with
+      `app.include_router(...)` — FastAPI routes by full path so
+      same-prefix routers do not conflict.
+    - **The parent id is for URL framing, not enforcement.** The
+      handler still authorises on the child id alone (e.g. session
+      authorisation walks `session → cohort → product`). Validating
+      that "session X actually belongs to cohort Y in the URL" is an
+      extra DB round-trip with no security benefit — the global UUID
+      already uniquely identifies the resource. If a SPA passes a
+      mismatched parent id, the operation succeeds against the right
+      child; this is the same pragmatic stance as Stripe / global-UUID
+      REST APIs.
+    - **Caller-scoped views (`/X/mine`) belong under
+      `/users/me/...`.** A "list my enrollments across all cohorts"
+      query is conceptually a property of the current user, not of
+      a specific parent — so it lives at `/users/me/webinar-enrollments`
+      and `/users/me/course-enrollments`, alongside the existing
+      `/users/me/avatar`, `/users/me/first-name`, etc. Implement these
+      as a sibling `me_router = ErrorAwareRouter(prefix="/users/me/...")`
+      in the same file as the parent-nested router; export both, and
+      register both in `bootstrap.setup_routes`. Never expose a flat
+      `/<aggregate>/mine` endpoint. The `/users/me/...` URL space is
+      the single namespace for "everything about the authenticated
+      user."
+    - **Caveat — globally-discoverable invitations.** A small handful
+      of operations work on a child by global id without parent
+      context because the actor does not yet have access to the
+      parent (e.g. a `POST /collaborations/{id}/accept` invite the
+      recipient is accepting; they do not necessarily know the
+      product id yet). Treat these as the documented exception, not
+      the rule, and limit them to invite/accept-style flows. Every
+      other authenticated operation must nest.
+
+    The shape of the URL tree must mirror the shape of the aggregate
+    tree — if the SPA looks at `openapi.json` and cannot tell from
+    the URLs which resource is a child of which, the URLs are wrong.
 
 ## Code Style
 
@@ -817,14 +984,37 @@ loud failure** — fix the `error_map` instead of silencing it.
 7. Unit test in `tests/unit/application/...` using Mock-based fixtures
    (see `tests/unit/application/conftest.py` for the pattern).
 8. Integration test in `tests/integrations/http/...` if the route is new.
-9. **Verify the OpenAPI contract.** After wiring the route, regenerate
-   `openapi.json` (e.g. `poetry run python -c "import json; from
-   learnic.web import create_app_production; print(json.dumps(
-   create_app_production().openapi()))"`) and confirm the new operation
-   has: `summary`, `operationId`, request/response schemas with field
-   `description` + `examples`, `security` (if protected), and an entry
-   under `responses` for every error in `error_map`. If any of the above
-   is missing, the contract is incomplete — fix the route, not the SPA.
+9. If the use case introduces a **new WebSocket channel** (rare — most
+   use cases are HTTP):
+   - Place the route in `presentation/http/routes/<aggregate>_ws.py`
+     using a plain `APIRouter`. `@router.websocket(...)` is not
+     compatible with `ErrorAwareRouter`'s rule machinery — close the
+     socket with the appropriate `4xxx` code on auth/authz failure
+     instead of raising domain errors.
+   - For event-driven channels, define `<Aggregate>EventKind` (StrEnum)
+     and `<Aggregate>Event` (frozen slotted dataclass) in
+     `application/common/<topic>/events.py`, plus an
+     `<Aggregate>EventBus` Protocol next to it. Producers publish
+     **after** the request transaction commits — never inside the
+     transaction — so subscribers do not observe rolled-back mutations.
+   - Add the channel's full protocol entry to `## WebSocket channels`
+     in `API_DESCRIPTION` per core rule 13: path, direction, auth,
+     close codes, lifecycle, bootstrap REST, envelope, client→server
+     messages (or "not interpreted yet"), and the full list of `kind`
+     values mirrored from the new enum.
+   - Update the owning aggregate's tag description in `OPENAPI_TAGS`
+     to point at `## WebSocket channels`.
+10. **Verify the OpenAPI contract.** After wiring the route, regenerate
+    `openapi.json` (e.g. `poetry run python -c "import json; from
+    learnic.web import create_app_production; print(json.dumps(
+    create_app_production().openapi()))"`) and confirm the new operation
+    has: `summary`, `operationId`, request/response schemas with field
+    `description` + `examples`, `security` (if protected), and an entry
+    under `responses` for every error in `error_map`. For WS additions,
+    grep `info.description` for the new channel path and every new
+    `kind` value to confirm the prose contract is in sync. If any of
+    the above is missing, the contract is incomplete — fix the route
+    (or `API_DESCRIPTION`), not the SPA.
 
 ## Adding a new aggregate (checklist)
 
@@ -998,6 +1188,48 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
   (e.g. `host: str = "0.0.0.0"` for uvicorn). Required env values have no
   default in `BaseSettings`; defaulting in code forces every other
   environment to override it.
+- ❌ Add a WebSocket endpoint without a corresponding sub-section in
+  `## WebSocket channels` in `API_DESCRIPTION`. Module docstrings, PR
+  descriptions, and chat threads do not count — the SPA contract lives
+  in `openapi.json` and that is the only file the frontend is
+  guaranteed to read (rule 13).
+- ❌ Document a WebSocket protocol exclusively in the route's module
+  docstring. The docstring is a brief pointer; the contract — auth,
+  close codes, envelope, `kind` values, payload semantics — lives in
+  `API_DESCRIPTION` so it surfaces in `openapi.json` (rule 13).
+  Duplicating the protocol in both places guarantees drift.
+- ❌ Inline `kind` value lists in WS protocol docs that drift from the
+  `<Aggregate>EventKind` enum. The enum is the source of truth —
+  adding, renaming, or removing a variant means updating the enum
+  **and** the `## WebSocket channels` list in the same change
+  (rule 13).
+- ❌ Introduce a new cross-cutting SPA concern (a new pagination
+  convention, an upload flow, a datetime-format rule, a money format,
+  idempotency keys, rate limits) without adding a `## ...` section to
+  `API_DESCRIPTION`. If the SPA needs to know it and it does not fit
+  on a single operation, it belongs in the operating manual at the
+  top of `info.description` (rule 11).
+- ❌ Publish a domain event from inside a request transaction (i.e.
+  before `await transaction.commit()` returns). Subscribers on a WS
+  channel would observe deltas for mutations that get rolled back on
+  a later failure. Publish strictly **after** commit so the channel
+  only sees committed state (rule 13).
+- ❌ Expose a sub-resource as a flat top-level collection
+  (`/webinar-sessions`, `/webinar-schedules`, `/webinar-enrollments`,
+  `/course-enrollments`, `/product-qa`, etc.). Sub-resources nest under
+  their parent; the URL must mirror the aggregate tree. See rule 14
+  for the exact shape and the narrow invitation-flow exception.
+- ❌ Expose a `/<aggregate>/mine` (or `/<aggregate>/me`) endpoint at
+  the top level. Caller-scoped views go under `/users/me/...` —
+  define a sibling `me_router` in the same module and register it in
+  `bootstrap.setup_routes` (rule 14). The `/users/me/...` URL space
+  is the single namespace for "everything about the authenticated
+  user" alongside `/users/me/avatar`, `/users/me/first-name`, etc.
+- ❌ Drop the parent path-parameter from a nested router's prefix to
+  "save typing." `prefix="/cohorts/{cohort_id}/sessions"` is the
+  contract — the parent id appears in every operation under it, even
+  if the application handler does not consume it. The id is part of
+  the URL surface, not a runtime concern (rule 14).
 
 ## Environment & configuration
 

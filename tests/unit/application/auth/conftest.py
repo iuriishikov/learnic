@@ -110,7 +110,7 @@ def fake_access_tokens() -> MagicMock:
 def fake_refresh_store() -> AsyncMock:
     store = AsyncMock()
 
-    async def issue(user_id, family_id=None):  # noqa: ANN001
+    async def issue(user_id, family_id=None, device=None):  # noqa: ANN001
         return IssuedRefreshToken(
             token="raw-refresh",
             record=RefreshTokenRecord(
@@ -124,6 +124,7 @@ def fake_refresh_store() -> AsyncMock:
     store.issue = AsyncMock(side_effect=issue)
     store.rotate = AsyncMock()
     store.revoke_family = AsyncMock()
+    store.revoke_family_for_user = AsyncMock(return_value=True)
     store.revoke_all_for_user = AsyncMock()
     store.resolve = AsyncMock()
     return store

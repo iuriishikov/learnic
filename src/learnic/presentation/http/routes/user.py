@@ -2,7 +2,7 @@ from typing import Final
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Depends, Path, Request, UploadFile, status
+from fastapi import Depends, Path, Query, Request, UploadFile, status
 from fastapi.responses import RedirectResponse
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,6 +44,11 @@ from learnic.application.common.errors import (
     UserAvatarNotFoundError,
     UserCoverNotFoundError,
 )
+from learnic.application.common.pagination import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    Pagination,
+)
 from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
@@ -55,6 +60,10 @@ from learnic.application.queries.user.get_avatar import (
 from learnic.application.queries.user.get_cover import (
     GetUserCoverQuery,
     GetUserCoverQueryHandler,
+)
+from learnic.application.queries.user.search import (
+    SearchUsersQuery,
+    SearchUsersQueryHandler,
 )
 from learnic.entities.user.constants import (
     DESCRIPTION_MAX_LEN,
@@ -78,6 +87,7 @@ from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
     FileSchema,
     UserSchema,
+    UserSummarySchema,
 )
 from learnic.presentation.http.common.uploads import read_image_upload
 
@@ -184,6 +194,81 @@ _USER_ID_PATH: Final = Path(
     description="Target user's UUID.",
     examples=["550e8400-e29b-41d4-a716-446655440000"],
 )
+
+_SEARCH_QUERY_MAX_LEN: Final = 200
+
+
+@router.get(
+    "/search",
+    summary="Search registered users by name fields",
+    operation_id="searchUsers",
+    response_model=list[UserSummarySchema],
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_MAP,
+)
+async def search(
+    request: Request,
+    interactor: FromDishka[SearchUsersQueryHandler],
+    auth: FromDishka[Authenticator],
+    q: str = Query(
+        description=(
+            "Free-text query. Whitespace-tokenized; each token must "
+            "match (case-insensitive substring) at least one of "
+            "`first_name` / `last_name` / `patronymic`. Tokens combine "
+            "with AND so multiple words narrow the result. Empty / "
+            "whitespace-only inputs return an empty list."
+        ),
+        min_length=0,
+        max_length=_SEARCH_QUERY_MAX_LEN,
+        examples=["Ada", "Иван Иванов"],
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=(
+            f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."
+        ),
+        examples=[20],
+    ),
+) -> list[UserSummarySchema]:
+    """Return users whose name fields match every token of ``q``.
+
+    Used by the team-invite UI to look up registered users by their
+    Russian / Latin name fields. Returns the same lightweight
+    projection across all callers — ``email`` and ``description``
+    stay private; only ``avatar_url`` is resolved to a presigned URL
+    for inline display. Sorted by ``last_name``, ``first_name``,
+    ``oid`` for stable pagination.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected search query handler.
+        auth: Injected authenticator that validates the access cookie.
+        q: Free-text query against name fields.
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        List of :class:`UserSummarySchema`, possibly empty.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+    """
+    await auth.authenticate(request)
+    views = await interactor.run(
+        SearchUsersQuery(
+            query=q,
+            pagination=Pagination(limit=limit, offset=offset),
+        ),
+    )
+    return [UserSummarySchema.from_view(view) for view in views]
 
 
 @router.get(

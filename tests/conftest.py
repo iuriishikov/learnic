@@ -11,6 +11,7 @@ from learnic.infrastructure.configs import (
     ASGIConfig,
     Configs,
     PostgresConfig,
+    RedisConfig,
     RusenderConfig,
     S3Config,
     SecurityConfig,
@@ -38,6 +39,7 @@ def configs() -> Configs:
             region="us-east-1",
         ),
         taskiq=TaskIQConfig(in_memory=True),
+        redis=RedisConfig(url="redis://localhost:6379/15"),
         rusender=RusenderConfig(
             api_key="test",
             from_email="test@test.local",

@@ -4,10 +4,12 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
+from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user import (
     UserGateway,
     UserReader,
+    UserSummaryView,
     UserView,
 )
 from learnic.entities.file.ids import FileID
@@ -108,3 +110,83 @@ class UserReaderAlchemy(UserReader):
                 else None
             ),
         )
+
+    @override
+    async def search_by_name(
+        self,
+        tokens: tuple[str, ...],
+        pagination: Pagination,
+    ) -> list[UserSummaryView]:
+        if not tokens:
+            return []
+
+        avatar = files_table.alias("avatar")
+
+        stmt = (
+            sa.select(
+                users_table.c.oid,
+                users_table.c.first_name,
+                users_table.c.last_name,
+                users_table.c.patronymic,
+                avatar.c.oid.label("avatar_oid"),
+                avatar.c.storage_name.label("avatar_storage_name"),
+                avatar.c.bucket.label("avatar_bucket"),
+                avatar.c.content_type.label("avatar_content_type"),
+            )
+            .select_from(
+                users_table.outerjoin(
+                    avatar,
+                    sa.and_(
+                        users_table.c.avatar_file_id == avatar.c.oid,
+                        avatar.c.deleted_at.is_(None),
+                    ),
+                )
+            )
+        )
+
+        # Each token must match at least one of the three name fields
+        # (substring, case-insensitive). Tokens combine with AND so the
+        # caller can narrow with multiple words ("ivan ivanov").
+        for token in tokens:
+            pattern = f"%{token}%"
+            stmt = stmt.where(
+                sa.or_(
+                    users_table.c.first_name.ilike(pattern),
+                    users_table.c.last_name.ilike(pattern),
+                    sa.and_(
+                        users_table.c.patronymic.is_not(None),
+                        users_table.c.patronymic.ilike(pattern),
+                    ),
+                )
+            )
+
+        stmt = (
+            stmt.order_by(
+                users_table.c.last_name.asc(),
+                users_table.c.first_name.asc(),
+                users_table.c.oid.asc(),
+            )
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+        )
+
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            UserSummaryView(
+                oid=UserID(row.oid),
+                first_name=row.first_name,
+                last_name=row.last_name,
+                patronymic=row.patronymic,
+                avatar=(
+                    FileView(
+                        oid=FileID(row.avatar_oid),
+                        storage_name=row.avatar_storage_name,
+                        bucket=row.avatar_bucket,
+                        content_type=row.avatar_content_type,
+                    )
+                    if row.avatar_oid is not None
+                    else None
+                ),
+            )
+            for row in rows
+        ]

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, final
 
-from fastapi import Request
+from fastapi import Request, WebSocket
 from fastapi.security import APIKeyCookie
 
 from learnic.application.common.errors import InvalidTokenError
@@ -87,6 +87,34 @@ class Authenticator:
                 denylisted.
         """
         token = request.cookies.get(ACCESS_COOKIE)
+        if not token:
+            raise InvalidTokenError
+        payload = self._access_tokens.decode(token)
+        if await self._denylist.is_denied(payload.jti):
+            raise InvalidTokenError
+        return AccessContext(
+            user_id=payload.user_id,
+            jti=payload.jti,
+            expires_at=payload.expires_at,
+        )
+
+    async def authenticate_websocket(
+        self,
+        websocket: WebSocket,
+    ) -> AccessContext:
+        """Authenticate a WebSocket handshake via the access cookie.
+
+        Browsers attach the same HttpOnly cookies to WS handshakes that
+        they send on HTTP requests, so the validation logic mirrors
+        :meth:`authenticate` against ``websocket.cookies`` instead of
+        ``request.cookies``. A separate method is intentional — keeps
+        the existing HTTP signature stable.
+
+        Raises:
+            InvalidTokenError: cookie missing, malformed, expired or
+                denylisted.
+        """
+        token = websocket.cookies.get(ACCESS_COOKIE)
         if not token:
             raise InvalidTokenError
         payload = self._access_tokens.decode(token)

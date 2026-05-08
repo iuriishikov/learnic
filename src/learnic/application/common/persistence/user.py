@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.file import FileView
 from learnic.entities.user.models import User, UserID
 
@@ -19,6 +20,23 @@ class UserView:
     cover: FileView | None
 
 
+@dataclass(slots=True, frozen=True)
+class UserSummaryView:
+    """Lightweight user projection used by name search.
+
+    Excludes ``email`` and ``description`` deliberately — see the
+    privacy stance documented on :class:`UserSchema`. The reader still
+    resolves the avatar so the caller can display a recognizable
+    thumbnail without a follow-up round-trip.
+    """
+
+    oid: UserID
+    first_name: str
+    last_name: str
+    patronymic: str | None
+    avatar: FileView | None
+
+
 class UserGateway(Protocol):
     """Write-side lookups for :class:`User`."""
 
@@ -31,3 +49,21 @@ class UserReader(Protocol):
     """Read-side queries returning :class:`UserView` projections."""
 
     async def with_id(self, oid: UserID) -> UserView | None: ...
+
+    async def search_by_name(
+        self,
+        tokens: tuple[str, ...],
+        pagination: Pagination,
+    ) -> list[UserSummaryView]:
+        """Return users whose name fields match every ``tokens`` entry.
+
+        Each token must match (case-insensitively, as a substring)
+        at least one of ``first_name`` / ``last_name`` / ``patronymic``;
+        a user is returned only when every token finds a hit. Tokens
+        are pre-trimmed and pre-deduplicated by the application layer.
+
+        Implementations are free to add ordering rules — e.g. surface
+        prefix matches before substring matches — but must not silently
+        widen the result beyond the stated semantics.
+        """
+        ...

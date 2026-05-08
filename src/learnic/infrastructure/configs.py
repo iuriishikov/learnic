@@ -59,6 +59,14 @@ class TaskIQConfig(BaseSettings):
     workers: int = 2
 
 
+class RedisConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="REDIS_", env_file=".env", extra="ignore"
+    )
+
+    url: str = "redis://localhost:6379/2"
+
+
 class RusenderConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RUSENDER_", env_file=".env", extra="ignore"
@@ -87,7 +95,15 @@ class SecurityConfig(BaseSettings):
 
 
 class Configs:
-    __slots__ = ("postgres", "asgi", "s3", "taskiq", "rusender", "security")
+    __slots__ = (
+        "postgres",
+        "asgi",
+        "s3",
+        "taskiq",
+        "redis",
+        "rusender",
+        "security",
+    )
 
     def __init__(
         self,
@@ -95,6 +111,7 @@ class Configs:
         asgi: ASGIConfig,
         s3: S3Config,
         taskiq: TaskIQConfig,
+        redis: RedisConfig,
         rusender: RusenderConfig,
         security: SecurityConfig,
     ) -> None:
@@ -102,6 +119,7 @@ class Configs:
         self.asgi = asgi
         self.s3 = s3
         self.taskiq = taskiq
+        self.redis = redis
         self.rusender = rusender
         self.security = security
 
@@ -112,6 +130,7 @@ def load_configs() -> Configs:
         asgi=ASGIConfig(),  # pyright: ignore[reportCallIssue]
         s3=S3Config(),  # pyright: ignore[reportCallIssue]
         taskiq=TaskIQConfig(),  # pyright: ignore[reportCallIssue]
+        redis=RedisConfig(),  # pyright: ignore[reportCallIssue]
         rusender=RusenderConfig(),  # pyright: ignore[reportCallIssue]
         security=SecurityConfig(),  # pyright: ignore[reportCallIssue]
     )

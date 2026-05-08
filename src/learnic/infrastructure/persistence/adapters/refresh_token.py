@@ -8,6 +8,7 @@ from typing_extensions import override
 
 from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.security.refresh_tokens import (
+    DeviceContext,
     IssuedRefreshToken,
     RefreshTokenRecord,
     RefreshTokenStore,
@@ -41,6 +42,7 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
         self,
         user_id: UserID,
         family_id: uuid.UUID | None = None,
+        device: DeviceContext | None = None,
     ) -> IssuedRefreshToken:
         raw = generate_raw_token()
         token_hash = hash_token(raw)
@@ -55,6 +57,9 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
                 family_id=family,
                 user_id=user_id,
                 expires_at=expires_at,
+                ip_address=device.ip_address if device is not None else None,
+                user_agent=device.user_agent if device is not None else None,
+                device_label=device.device_label if device is not None else None,
             )
         )
         return IssuedRefreshToken(
@@ -68,7 +73,11 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
         )
 
     @override
-    async def rotate(self, presented: str) -> IssuedRefreshToken:
+    async def rotate(
+        self,
+        presented: str,
+        device: DeviceContext | None = None,
+    ) -> IssuedRefreshToken:
         token_hash = hash_token(presented)
         now = datetime.now(timezone.utc)
 
@@ -101,11 +110,33 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
             .where(refresh_tokens_table.c.token_hash == token_hash)
             .values(revoked_at=now)
         )
-        return await self.issue(UserID(row.user_id), family_id=row.family_id)
+        return await self.issue(
+            UserID(row.user_id),
+            family_id=row.family_id,
+            device=device,
+        )
 
     @override
     async def revoke_family(self, family_id: uuid.UUID) -> None:
         await self._revoke_family(family_id)
+
+    @override
+    async def revoke_family_for_user(
+        self,
+        user_id: UserID,
+        family_id: uuid.UUID,
+    ) -> bool:
+        result = await self._session.execute(
+            sa.update(refresh_tokens_table)
+            .where(
+                refresh_tokens_table.c.family_id == family_id,
+                refresh_tokens_table.c.user_id == user_id,
+                refresh_tokens_table.c.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(timezone.utc))
+            .returning(refresh_tokens_table.c.token_hash)
+        )
+        return result.first() is not None
 
     @override
     async def revoke_all_for_user(self, user_id: UserID) -> None:

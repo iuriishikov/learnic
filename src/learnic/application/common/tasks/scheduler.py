@@ -1,5 +1,12 @@
 from typing import Protocol
 
+from learnic.entities.cohort.ids import WebinarScheduleID
+from learnic.entities.product.ids import ProductID
+from learnic.entities.product_collaboration.ids import (
+    ProductCollaborationID,
+)
+from learnic.entities.user.models import UserID
+
 
 class TaskScheduler(Protocol):
     """Enqueues background tasks from command handlers.
@@ -10,6 +17,24 @@ class TaskScheduler(Protocol):
     """
 
     async def schedule_example(self, payload: str) -> None: ...
+
+    async def schedule_materialize_webinar_schedule(
+        self,
+        schedule_id: WebinarScheduleID,
+    ) -> None:
+        """Enqueue materialization of upcoming webinar sessions.
+
+        The worker loads ``WebinarSchedule(schedule_id)``, picks up
+        the cursor (max ``original_starts_at`` already materialised),
+        expands the rrule and writes the next batch of
+        :class:`WebinarSession` rows.
+
+        Idempotent: re-enqueueing on an already up-to-date schedule
+        produces no new sessions thanks to the
+        ``UNIQUE(schedule_id, original_starts_at)`` constraint and
+        the cursor.
+        """
+        ...
 
     async def schedule_send_email(
         self,
@@ -54,4 +79,55 @@ class TaskScheduler(Protocol):
             raw_token: Single-use token; the worker builds the reset URL
                 from the configured frontend base URL.
         """
+        ...
+
+    async def schedule_send_collaboration_invite_email(
+        self,
+        to: str,
+        product_id: ProductID,
+        collaboration_id: ProductCollaborationID,
+        raw_token: str,
+    ) -> None:
+        """Send the collaboration invite link to ``to``.
+
+        The worker builds a URL of the shape
+        ``{frontend}/products/{product_id}/collaboration-invitation/
+        {collaboration_id}/accept?token={raw_token}`` so the SPA
+        can route to the accept page; if the user is not signed in
+        the SPA bounces through ``/login?next=...``.
+        """
+        ...
+
+    async def schedule_send_collaboration_accepted_email(
+        self,
+        to: str,
+        product_id: ProductID,
+        collaborator_id: UserID,
+    ) -> None:
+        """Notify the inviter that an invite was accepted."""
+        ...
+
+    async def schedule_send_collaboration_revoked_email(
+        self,
+        to: str,
+        product_id: ProductID,
+    ) -> None:
+        """Notify a collaborator that their access was revoked."""
+        ...
+
+    async def schedule_send_collaboration_grants_updated_email(
+        self,
+        to: str,
+        product_id: ProductID,
+    ) -> None:
+        """Notify a collaborator that their grants changed."""
+        ...
+
+    async def schedule_send_collaboration_left_email(
+        self,
+        to: str,
+        product_id: ProductID,
+        collaborator_id: UserID,
+    ) -> None:
+        """Notify the product owner that a collaborator left."""
         ...

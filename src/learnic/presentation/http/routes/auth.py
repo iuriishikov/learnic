@@ -1,8 +1,10 @@
+import uuid
+from datetime import datetime
 from http import HTTPStatus
 from typing import Final
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Depends, Request, Response, status
+from fastapi import Depends, Path, Request, Response, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,11 +44,24 @@ from learnic.application.commands.auth.verify_wait import (
     VerifyWaitCommand,
     VerifyWaitCommandHandler,
 )
+from learnic.application.commands.session.revoke import (
+    RevokeSessionCommand,
+    RevokeSessionCommandHandler,
+)
 from learnic.application.common.errors import (
     EmailAlreadyRegisteredError,
     EmailNotVerifiedError,
+    EntityNotFoundError,
     InvalidCredentialsError,
     InvalidTokenError,
+)
+from learnic.application.common.persistence.session import SessionView
+from learnic.application.common.security.refresh_tokens import (
+    RefreshTokenStore,
+)
+from learnic.application.queries.session.list_my import (
+    ListMySessionsQuery,
+    ListMySessionsQueryHandler,
 )
 from learnic.application.queries.user.get import (
     GetUserQuery,
@@ -76,10 +91,12 @@ from learnic.presentation.http.common.cookies import (
     set_auth_cookies,
     set_signup_session_cookie,
 )
+from learnic.presentation.http.common.device import device_from_request
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_MAP,
     EMAIL_ALREADY_REGISTERED_RULE,
     EMAIL_NOT_VERIFIED_RULE,
+    ENTITY_NOT_FOUND_RULE,
     FIELD_ERROR_RULE,
     INVALID_CREDENTIALS_RULE,
     INVALID_TOKEN_RULE,
@@ -339,6 +356,7 @@ async def register(
 )
 async def login(
     payload: LoginSchema,
+    request: Request,
     response: Response,
     interactor: FromDishka[LoginCommandHandler],
     cfg: FromDishka[SecurityConfig],
@@ -347,6 +365,9 @@ async def login(
 
     Args:
         payload: ``email`` + ``password`` pair.
+        request: Source of device metadata (IP, ``User-Agent``) recorded
+            on the new refresh-token row so the user can later see and
+            revoke this session under `GET /auth/sessions`.
         response: Used to set ``access_token`` and ``refresh_token``
             cookies.
         interactor: Injected login command handler.
@@ -363,7 +384,11 @@ async def login(
         FieldError: VO violated during password/email parse; HTTP 422.
     """
     pair = await interactor.run(
-        LoginCommand(email=payload.email, password=payload.password),
+        LoginCommand(
+            email=payload.email,
+            password=payload.password,
+            device=device_from_request(request),
+        ),
     )
     set_auth_cookies(response, pair, cfg)
 
@@ -401,7 +426,12 @@ async def refresh(
     raw = request.cookies.get(REFRESH_COOKIE)
     if not raw:
         raise InvalidTokenError
-    pair = await interactor.run(RefreshCommand(refresh_token=raw))
+    pair = await interactor.run(
+        RefreshCommand(
+            refresh_token=raw,
+            device=device_from_request(request),
+        ),
+    )
     set_auth_cookies(response, pair, cfg)
 
 
@@ -560,7 +590,12 @@ async def email_verification_wait(
     raw = request.cookies.get(SIGNUP_SESSION_COOKIE)
     if not raw:
         raise InvalidTokenError
-    result = await interactor.run(VerifyWaitCommand(signup_session_token=raw))
+    result = await interactor.run(
+        VerifyWaitCommand(
+            signup_session_token=raw,
+            device=device_from_request(request),
+        ),
+    )
     if not result.ready or result.token_pair is None:
         return Response(status_code=HTTPStatus.NO_CONTENT)
     response = Response(status_code=HTTPStatus.OK)
@@ -667,3 +702,238 @@ async def me(
     ctx = await auth.authenticate(request)
     view = await interactor.run(GetUserQuery(oid=ctx.user_id))
     return UserSchema.from_view(view)
+
+
+class SessionSchema(BaseModel):
+    """One active refresh-token session for the authenticated user."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "11111111-2222-3333-4444-555555555555",
+                    "created_at": "2026-05-01T08:00:00+00:00",
+                    "last_used_at": "2026-05-08T07:42:11+00:00",
+                    "expires_at": "2026-05-31T08:00:00+00:00",
+                    "ip_address": "203.0.113.42",
+                    "user_agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
+                        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                        "Version/17.5 Safari/605.1.15"
+                    ),
+                    "device_label": "Safari on macOS",
+                    "is_current": True,
+                },
+            ],
+        },
+    )
+
+    id: uuid.UUID = Field(
+        description=(
+            "Public session id. Equals the refresh-token family id — "
+            "the SPA passes it to `DELETE /auth/sessions/{id}` to "
+            "remotely sign out that specific device."
+        ),
+    )
+    created_at: datetime = Field(
+        description=(
+            "When the session was first opened (i.e. when the user "
+            "logged in on this device). UTC, ISO 8601."
+        ),
+    )
+    last_used_at: datetime = Field(
+        description=(
+            "When the session was last refreshed (rotation moment). "
+            "Use this as the user-facing 'last activity' timestamp. "
+            "UTC, ISO 8601."
+        ),
+    )
+    expires_at: datetime = Field(
+        description=(
+            "When the active refresh cookie naturally dies if no "
+            "refresh occurs first. UTC, ISO 8601."
+        ),
+    )
+    ip_address: str | None = Field(
+        default=None,
+        description=(
+            "Best-known originating IP for this session. May be "
+            "`null` for legacy sessions that pre-date the device-"
+            "metadata feature, or when the request had no usable "
+            "client address."
+        ),
+    )
+    user_agent: str | None = Field(
+        default=None,
+        description=(
+            "Raw `User-Agent` header captured at the most recent "
+            "refresh, truncated to 512 chars. May be `null`. The SPA "
+            "should prefer `device_label` for display."
+        ),
+    )
+    device_label: str | None = Field(
+        default=None,
+        description=(
+            "Short human-readable label parsed from `user_agent` "
+            "(e.g. `\"Chrome on Windows\"`). Best-effort; may be "
+            "`null` when no heuristic matched."
+        ),
+    )
+    is_current: bool = Field(
+        description=(
+            "`true` when this session matches the refresh cookie sent "
+            "with the request. The SPA can highlight it as 'this "
+            "device' and warn before letting the user revoke it."
+        ),
+    )
+
+    @classmethod
+    def from_view(cls, view: SessionView, *, is_current: bool) -> "SessionSchema":
+        return cls(
+            id=view.family_id,
+            created_at=view.created_at,
+            last_used_at=view.last_used_at,
+            expires_at=view.expires_at,
+            ip_address=view.ip_address,
+            user_agent=view.user_agent,
+            device_label=view.device_label,
+            is_current=is_current,
+        )
+
+
+@router.get(
+    "/sessions",
+    summary="List the current user's active sessions",
+    operation_id="listMySessions",
+    response_model=list[SessionSchema],
+    dependencies=_ACCESS_SECURITY,
+    error_map=AUTHENTICATED_MAP,
+)
+async def list_sessions(
+    request: Request,
+    interactor: FromDishka[ListMySessionsQueryHandler],
+    refresh_store: FromDishka[RefreshTokenStore],
+    auth: FromDishka[Authenticator],
+) -> list[SessionSchema]:
+    """List every active refresh-token session for the caller.
+
+    Each entry carries the device/location metadata captured at issue
+    or last rotation: IP, raw `User-Agent`, a short parsed
+    `device_label`, plus the `created_at` / `last_used_at` /
+    `expires_at` timestamps. The session that matches the caller's
+    own `refreshCookie` (when present) is flagged with
+    `is_current = true` so the SPA can render it as 'this device'.
+
+    Args:
+        request: Source of the access cookie (auth) and — when
+            available — the refresh cookie used to flag the current
+            session.
+        interactor: Injected list-my-sessions query handler.
+        refresh_store: Used to resolve the caller's refresh cookie to
+            the family id powering the `is_current` flag.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        Active sessions ordered by `last_used_at` descending.
+
+    Raises:
+        InvalidTokenError: No valid access cookie; HTTP 401.
+    """
+    ctx = await auth.authenticate(request)
+    views = await interactor.run(ListMySessionsQuery(user_id=ctx.user_id))
+
+    current_family_id: uuid.UUID | None = None
+    raw_refresh = request.cookies.get(REFRESH_COOKIE)
+    if raw_refresh:
+        record = await refresh_store.resolve(raw_refresh)
+        if record is not None and record.user_id == ctx.user_id:
+            current_family_id = record.family_id
+
+    return [
+        SessionSchema.from_view(view, is_current=view.family_id == current_family_id)
+        for view in views
+    ]
+
+
+_SESSION_REVOKE_MAP: Final = AUTHENTICATED_MAP | {
+    EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+}
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    summary="Revoke a specific session of the current user",
+    operation_id="revokeMySession",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_ACCESS_SECURITY,
+    error_map=_SESSION_REVOKE_MAP,
+)
+async def revoke_session(
+    request: Request,
+    response: Response,
+    interactor: FromDishka[RevokeSessionCommandHandler],
+    refresh_store: FromDishka[RefreshTokenStore],
+    auth: FromDishka[Authenticator],
+    cfg: FromDishka[SecurityConfig],
+    session_id: uuid.UUID = Path(
+        description=(
+            "Public session id (refresh-token family id) returned by "
+            "`GET /auth/sessions`."
+        ),
+    ),
+) -> None:
+    """Revoke one of the caller's active sessions.
+
+    Used to remotely sign out a specific device from the
+    active-sessions list. If the targeted session belongs to the
+    caller's own refresh cookie, the cookie pair is cleared on this
+    response and the in-flight access JTI is added to the denylist
+    so the access cookie cannot outlive the refresh family.
+
+    Args:
+        request: Source of the access cookie (auth) and the refresh
+            cookie used to detect self-revocation.
+        response: Used to clear auth cookies on self-revocation.
+        interactor: Injected revoke-session command handler.
+        refresh_store: Used to resolve the caller's refresh cookie to
+            its family id for the self-revocation check.
+        auth: Injected authenticator that validates the access cookie.
+        cfg: Injected security config driving cookie flags.
+        session_id: Session (refresh-token family) to revoke. Must
+            belong to the caller; cross-user or unknown ids return
+            HTTP 404 `EntityNotFound` without leaking which case
+            applies.
+
+    Returns:
+        `204 No Content` on success. When the caller revoked their
+        own session, `Set-Cookie` headers also clear `accessCookie`
+        and `refreshCookie`.
+
+    Raises:
+        InvalidTokenError: No valid access cookie; HTTP 401.
+        EntityNotFoundError: Session does not exist for the caller;
+            HTTP 404.
+    """
+    ctx = await auth.authenticate(request)
+
+    is_current = False
+    raw_refresh = request.cookies.get(REFRESH_COOKIE)
+    if raw_refresh:
+        record = await refresh_store.resolve(raw_refresh)
+        if (
+            record is not None
+            and record.user_id == ctx.user_id
+            and record.family_id == session_id
+        ):
+            is_current = True
+
+    await interactor.run(
+        RevokeSessionCommand(
+            user_id=ctx.user_id,
+            family_id=session_id,
+            current_access_jti=ctx.jti if is_current else None,
+            current_access_expires_at=ctx.expires_at if is_current else None,
+        ),
+    )
+    if is_current:
+        clear_auth_cookies(response, cfg)

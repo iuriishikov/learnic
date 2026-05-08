@@ -9,6 +9,7 @@ from learnic.application.common.security.access_tokens import (
     AccessTokenService,
 )
 from learnic.application.common.security.refresh_tokens import (
+    DeviceContext,
     RefreshTokenStore,
 )
 from learnic.application.common.security.signup_sessions import (
@@ -19,6 +20,7 @@ from learnic.application.common.security.signup_sessions import (
 @dataclass(slots=True, frozen=True)
 class VerifyWaitCommand:
     signup_session_token: str
+    device: DeviceContext | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -64,7 +66,7 @@ class VerifyWaitCommandHandler:
             return VerifyWaitResult(ready=False)
 
         access = self._access_tokens.issue(user.oid)
-        refresh = await self._refresh_store.issue(user.oid)
+        refresh = await self._refresh_store.issue(user.oid, device=data.device)
         await self._signup_sessions.revoke(data.signup_session_token)
         await self._transaction.commit()
 

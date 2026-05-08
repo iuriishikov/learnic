@@ -12,6 +12,7 @@ from learnic.application.common.security.access_tokens import (
 )
 from learnic.application.common.security.passwords import PasswordHasher
 from learnic.application.common.security.refresh_tokens import (
+    DeviceContext,
     RefreshTokenStore,
 )
 from learnic.entities.user.value_objects import RawPassword
@@ -21,6 +22,7 @@ from learnic.entities.user.value_objects import RawPassword
 class LoginCommand:
     email: str
     password: str
+    device: DeviceContext | None = None
 
 
 @final
@@ -47,7 +49,7 @@ class LoginCommandHandler:
             raise EmailNotVerifiedError
 
         access = self._access_tokens.issue(user.oid)
-        refresh = await self._refresh_store.issue(user.oid)
+        refresh = await self._refresh_store.issue(user.oid, device=data.device)
         return TokenPair(
             access_token=access.token,
             access_expires_at=access.payload.expires_at,

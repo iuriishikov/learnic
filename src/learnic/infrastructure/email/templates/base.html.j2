@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>{{ subject }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:{{ page_background_color }};color:{{ text_color }};font-family:{{ font_family }};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ page_background_color }}" style="background-color:{{ page_background_color }};">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+
+        {# White card container #}
+        <table role="presentation" width="{{ content_max_width }}" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ background_color }}" style="max-width:{{ content_max_width }}px;width:100%;background-color:{{ background_color }};border-radius:12px;">
+          <tr>
+            <td style="padding:32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+                {# Header: logo + brand #}
+                <tr>
+                  <td style="padding-bottom:24px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="vertical-align:middle;">
+                          <img src="{{ logo_url }}" width="28" height="28" alt="{{ brand_name }}" style="display:block;border-radius:6px;">
+                        </td>
+                        <td style="vertical-align:middle;padding-left:8px;font-weight:700;font-size:16px;color:{{ text_color }};">
+                          {{ brand_name }}<span style="color:{{ brand_color }};">.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+                {# Body slot #}
+                <tr>
+                  <td style="font-size:15px;line-height:1.55;color:{{ text_color }};">
+                    {{ body_html | safe }}
+                  </td>
+                </tr>
+
+                {# Signature #}
+                <tr>
+                  <td style="padding-top:16px;font-size:15px;line-height:1.55;color:{{ text_color }};">
+                    С уважением,<br>
+                    команда {{ brand_name }}
+                  </td>
+                </tr>
+
+                {# Spacer #}
+                <tr>
+                  <td style="padding-top:32px;border-top:1px solid {{ border_color }};">&nbsp;</td>
+                </tr>
+
+                {# Footer block 1: legal text #}
+                <tr>
+                  <td style="font-size:13px;line-height:1.5;color:{{ muted_text_color }};padding-top:16px;">
+                    Это письмо отправлено на
+                    <a href="mailto:{{ recipient }}" style="color:{{ muted_text_color }};text-decoration:underline;">{{ recipient }}</a>.
+                    Если вы не хотите получать подобные письма, вы можете
+                    <a href="{{ manage_preferences_url }}" style="color:{{ muted_text_color }};text-decoration:underline;">изменить настройки уведомлений</a>.
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-size:13px;line-height:1.5;color:{{ muted_text_color }};padding-top:8px;">
+                    © {{ copyright_year }} {{ company_address }}
+                  </td>
+                </tr>
+
+                {# Footer block 2: brand + socials #}
+                <tr>
+                  <td style="padding-top:24px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td align="left" style="vertical-align:middle;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="vertical-align:middle;">
+                                <img src="{{ logo_url }}" width="20" height="20" alt="{{ brand_name }}" style="display:block;border-radius:5px;">
+                              </td>
+                              <td style="vertical-align:middle;padding-left:6px;font-weight:700;font-size:13px;color:{{ text_color }};">
+                                {{ brand_name }}<span style="color:{{ brand_color }};">.</span>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                        <td align="right" style="vertical-align:middle;font-size:13px;">
+                          <a href="{{ telegram_url }}" style="text-decoration:none;display:inline-block;line-height:0;">
+                            <img src="{{ telegram_icon_url }}" width="20" height="20" alt="Telegram" style="display:inline-block;border:0;">
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

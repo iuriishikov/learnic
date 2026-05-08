@@ -1,4 +1,5 @@
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
@@ -22,6 +23,9 @@ refresh_tokens_table = sa.Table(
     ),
     sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("ip_address", postgresql.INET(), nullable=True),
+    sa.Column("user_agent", sa.String(512), nullable=True),
+    sa.Column("device_label", sa.String(128), nullable=True),
     sa.Index(
         "ix_refresh_tokens_active_user",
         "user_id",

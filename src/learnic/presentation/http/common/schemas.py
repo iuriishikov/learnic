@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Self
 
 from learnic.application.queries.user.get import UserOutput
+from learnic.application.queries.user.search import UserSummaryOutput
 from learnic.entities.user.constants import (
     DESCRIPTION_MAX_LEN,
     FIRST_NAME_MAX_LEN,
@@ -137,6 +138,76 @@ class UserSchema(BaseModel):
             description=view.description,
             avatar_url=view.avatar_url,
             cover_url=view.cover_url,
+        )
+
+
+class UserSummarySchema(BaseModel):
+    """Lightweight user projection returned by name search.
+
+    Like :class:`UserSchema` it omits ``email`` and ``description`` —
+    the search endpoint is general-purpose, so private fields stay
+    private. ``cover_url`` is also omitted because callers display
+    a single thumbnail per hit, not a full profile card.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "patronymic": None,
+                    "avatar_url": "https://s3.example.com/avatars/...",
+                },
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description="User's stable identifier (UUID v4).",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    first_name: str = Field(
+        description="User's given name.",
+        min_length=1,
+        max_length=FIRST_NAME_MAX_LEN,
+        examples=["Ada"],
+    )
+    last_name: str = Field(
+        description="User's family name.",
+        min_length=1,
+        max_length=LAST_NAME_MAX_LEN,
+        examples=["Lovelace"],
+    )
+    patronymic: str | None = Field(
+        description=(
+            "User's middle/patronymic name. `null` when not set."
+        ),
+        max_length=PATRONYMIC_MAX_LEN,
+        examples=[None, "Augusta"],
+    )
+    avatar_url: str | None = Field(
+        description=(
+            "Short-lived presigned URL for the user's avatar, or "
+            "`null` when no avatar is attached. The URL expires; "
+            "re-issue the search to get a fresh one."
+        ),
+        examples=[
+            None,
+            "https://s3.example.com/avatars/user.png?X-Amz-Signature=...",
+        ],
+    )
+
+    @classmethod
+    def from_view(cls, view: UserSummaryOutput) -> Self:
+        """Build the schema from a ``SearchUsersQueryHandler`` hit."""
+        return cls(
+            oid=view.oid,
+            first_name=view.first_name,
+            last_name=view.last_name,
+            patronymic=view.patronymic,
+            avatar_url=view.avatar_url,
         )
 
 

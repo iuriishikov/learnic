@@ -1,0 +1,11 @@
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.55;color:{{ text_color }};">
+{%- for part in component.parts -%}
+{%- if part.__class__.__name__ == "InlineText" -%}
+{{ part.text }}
+{%- elif part.__class__.__name__ == "InlineBold" -%}
+<strong style="font-weight:700;color:{{ text_color }};">{{ part.text }}</strong>
+{%- elif part.__class__.__name__ == "InlineLink" -%}
+<a href="{{ part.url }}" style="color:{{ brand_color }};text-decoration:underline;">{{ part.text }}</a>
+{%- endif -%}
+{%- endfor -%}
+</p>

@@ -1,0 +1,12 @@
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px 0;">
+  {%- for item in component.items -%}
+  <tr>
+    <td style="padding-top:16px;border-top:1px solid {{ border_color }};">
+      <p style="margin:0 0 4px 0;font-size:15px;font-weight:700;line-height:1.4;">
+        <a href="{{ item.url }}" style="color:{{ brand_color }};text-decoration:underline;">{{ item.title }} →</a>
+      </p>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:{{ muted_text_color }};">{{ item.description }}</p>
+    </td>
+  </tr>
+  {%- endfor -%}
+</table>
