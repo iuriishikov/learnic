@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
@@ -7,6 +9,20 @@ from learnic.entities.user.models import UserID
 class EmailTokenPurpose(StrEnum):
     VERIFY = "verify"
     RESET = "reset"
+
+
+@dataclass(slots=True, frozen=True)
+class EmailTokenInfo:
+    """Metadata for a live email token.
+
+    Returned from :meth:`EmailTokenStore.peek` so callers can branch on
+    ``purpose`` without consuming the token. ``user_id`` lets resend
+    flows look up the owner.
+    """
+
+    user_id: UserID
+    purpose: EmailTokenPurpose
+    expires_at: datetime
 
 
 class EmailTokenStore(Protocol):
@@ -22,6 +38,22 @@ class EmailTokenStore(Protocol):
 
         Any previously-active tokens for ``(user_id, purpose)`` are
         invalidated so that a resend supersedes older links.
+        """
+        ...
+
+    async def peek(self, raw_token: str) -> EmailTokenInfo:
+        """Read token metadata without consuming.
+
+        Used by:
+        - the unified ``POST /auth/verify-token`` dispatcher to learn
+          which ``purpose`` the token was issued for before delegating
+          to the matching specialized handler;
+        - ``POST /auth/token-status`` to validate a link before
+          rendering a form (e.g. password-reset) or before showing the
+          generic confirm UI.
+
+        Raises:
+            InvalidTokenError: token unknown, expired, or already consumed.
         """
         ...
 

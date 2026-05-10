@@ -39,7 +39,32 @@ class RutubeVideoBlockView:
     title: str | None
 
 
-LessonBlockView = HtmlBlockView | KatexBlockView | RutubeVideoBlockView
+@dataclass(slots=True, frozen=True)
+class CodeTabView:
+    """Read-side projection of a single tab inside a code block."""
+
+    label: str
+    source: str
+    language: str
+
+
+@dataclass(slots=True, frozen=True)
+class CodeBlockView:
+    """Read-side projection of a source-code lesson block.
+
+    A code block always has at least one tab; multi-tab blocks
+    carry variant snippets (e.g. npm / pnpm / yarn).
+    """
+
+    type: Literal[BlockType.CODE]
+    oid: LessonBlockID
+    position: int
+    tabs: list[CodeTabView]
+
+
+LessonBlockView = (
+    HtmlBlockView | KatexBlockView | RutubeVideoBlockView | CodeBlockView
+)
 
 
 @dataclass(slots=True, frozen=True)

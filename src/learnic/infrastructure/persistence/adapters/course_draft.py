@@ -27,6 +27,7 @@ from learnic.application.common.persistence.course_draft import (
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_release.models import CourseRelease
 from learnic.infrastructure.persistence.models.course_block import (
+    code_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -40,6 +41,7 @@ from learnic.infrastructure.persistence.models.course_module import (
 )
 from learnic.infrastructure.persistence.models.course_release import (
     course_release_blocks_table,
+    course_release_code_blocks_table,
     course_release_html_blocks_table,
     course_release_katex_blocks_table,
     course_release_lessons_table,
@@ -168,6 +170,9 @@ class CourseDraftResetterAlchemy(CourseDraftResetter):
                     course_release_rutube_video_blocks_table.c.title.label(
                         "rutube_title",
                     ),
+                    course_release_code_blocks_table.c.tabs.label(
+                        "code_tabs",
+                    ),
                 )
                 .select_from(
                     course_release_blocks_table.outerjoin(
@@ -184,6 +189,11 @@ class CourseDraftResetterAlchemy(CourseDraftResetter):
                         course_release_rutube_video_blocks_table,
                         course_release_blocks_table.c.oid
                         == course_release_rutube_video_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_code_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_code_blocks_table.c.oid,
                     ),
                 )
                 .where(course_release_blocks_table.c.release_id == release.oid),
@@ -212,6 +222,7 @@ class CourseDraftResetterAlchemy(CourseDraftResetter):
         html_values: list[dict[str, Any]] = []
         katex_values: list[dict[str, Any]] = []
         rutube_values: list[dict[str, Any]] = []
+        code_values: list[dict[str, Any]] = []
         for row in rows:
             new_oid = block_map[row.oid]
             block_type = (
@@ -221,6 +232,13 @@ class CourseDraftResetterAlchemy(CourseDraftResetter):
                 html_values.append({"oid": new_oid, "html": row.html})
             elif block_type is BlockType.KATEX:
                 katex_values.append({"oid": new_oid, "source": row.source})
+            elif block_type is BlockType.CODE:
+                code_values.append(
+                    {
+                        "oid": new_oid,
+                        "tabs": row.code_tabs,
+                    },
+                )
             else:  # RUTUBE_VIDEO
                 rutube_values.append(
                     {
@@ -244,4 +262,9 @@ class CourseDraftResetterAlchemy(CourseDraftResetter):
             await self._session.execute(
                 sa.insert(rutube_video_blocks_table),
                 rutube_values,
+            )
+        if code_values:
+            await self._session.execute(
+                sa.insert(code_blocks_table),
+                code_values,
             )

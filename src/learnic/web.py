@@ -91,10 +91,10 @@ same status code; clients should branch on the response body.
 ## WebSocket channels
 
 OpenAPI 3 does not model WebSockets, so this section is the contract
-for the project's WS endpoints. There are three channels — they share
-authentication and close-code conventions but differ in direction and
-payload shape. None of them appear under `paths` in this schema; treat
-the prose below as authoritative.
+for the project's WS endpoints. They share authentication and
+close-code conventions but differ in direction and payload shape.
+None of them appear under `paths` in this schema; treat the prose
+below as authoritative.
 
 ### Authentication and close codes
 
@@ -116,14 +116,20 @@ emitted while disconnected are lost by design.
 
 ### `WS /products/{product_id}/events` — product-level deltas
 
-Read-only push of product-metadata and Q&A deltas to the product's
-author. Course-content events flow through a separate channel (see
-below); webinar defaults and cohorts are intentionally not covered
-yet.
+Read-only push of product-metadata, webinar-defaults, Q&A and
+collaboration-lifecycle deltas to subscribers that hold
+`read_product` on the target product — the product owner
+(short-circuited as having every permission) and any active
+collaborator whose grants transitively include `read_product`
+(every editor / manager permission does). Non-authorised callers
+get `4403`. Course-content events flow through a separate channel
+(see below); cohorts (and their schedules / sessions) are
+intentionally not covered yet.
 
-Bootstrap by fetching `GET /products/{product_id}` (and
-`GET /products/{product_id}/qa` if Q&A is shown) before opening the
-socket.
+Bootstrap by fetching `GET /products/{product_id}` (plus
+`GET /products/{product_id}/qa` if Q&A is shown and
+`GET /products/{product_id}/collaborations` if the team list is
+shown) before opening the socket.
 
 **Server → client envelope.**
 
@@ -143,19 +149,65 @@ socket.
   `duration_changed`.
 - Cover: `cover_changed`, `cover_removed`.
 - Status: `published`, `archived`, `unarchived`, `deleted`.
+- Webinar defaults: `webinar_defaults_updated`.
 - Q&A: `qa_added`, `qa_question_changed`, `qa_answer_changed`,
   `qa_reordered`, `qa_deleted`.
+- Collaboration: `collaboration_invited`,
+  `collaboration_accepted`, `collaboration_declined`,
+  `collaboration_revoked`, `collaboration_grants_updated`.
 
 `payload` carries id-level fields plus the new value when trivial
 (e.g. `name_changed` → `{"name": "..."}`); for non-trivial changes
-the client should refetch the affected resource via REST. Client →
-server messages are not interpreted yet.
+the client should refetch the affected resource via REST.
+`webinar_defaults_updated` is emitted by the PUT-style replace of
+all webinar defaults and carries the full new snapshot —
+`total_lessons` (int), `default_duration_minutes` (int),
+`allow_recording` (bool), `default_max_participants`
+(int | null), `default_stream_url` (string | null),
+`access_window_minutes` (int | null) — so the SPA can apply the
+change in place without a REST refetch.
+
+`collaboration_*` events carry
+`{"collaboration_id": "<UUID>", "collaborator_id": "<UUID | absent>",
+"invited_email": "<string | absent>"}`. `collaboration_id` is
+always present; `collaborator_id` is set on
+`collaboration_invited` for by-user invites, on every
+`collaboration_accepted`, and on `collaboration_revoked` /
+`collaboration_grants_updated` when the affected row carries one;
+`invited_email` appears only on `collaboration_invited` for
+by-email invites that have not yet been accepted. SPA action per
+kind:
+
+- `collaboration_invited` — append the row to the collaborators
+  list (refetch by id from
+  `GET /products/{product_id}/collaborations` when the row is
+  not already in cache).
+- `collaboration_accepted` — flip the row to active; if the
+  row was a by-email invite (`collaborator_id` was previously
+  absent) refetch the collaborator profile.
+- `collaboration_declined` — flip the row to declined (or
+  remove from the open list, depending on the SPA's filter);
+  no email is sent.
+- `collaboration_revoked` — remove / grey out the row; when
+  `payload.collaborator_id` matches the current user, also
+  refetch `…/collaborations/me/permissions` to drop UI gating.
+- `collaboration_grants_updated` — when
+  `payload.collaborator_id` matches the current user, refetch
+  `…/collaborations/me/permissions`.
+
+Role-catalogue mutations (create / update / delete custom role)
+are **not** broadcast on this channel — clients should re-call
+`GET /products/{product_id}/roles` on demand. Client → server
+messages are not interpreted yet.
 
 ### `WS /courses/{course_id}/events` — course-content deltas
 
 Read-only push of course-content edits (modules, lessons, blocks,
-releases, draft reset) to the course's author. Course products only
-— opening this socket on a webinar product yields a `4404` close.
+releases, draft reset) to subscribers that hold `read_product` on
+the target course — the course owner and any active collaborator
+whose grants transitively include `read_product`. Non-authorised
+callers get `4403`. Course products only — opening this socket on
+a webinar product yields a `4404` close.
 
 Bootstrap by fetching
 `GET /products/{product_id}/content/draft` before opening the socket.
@@ -179,76 +231,158 @@ affected lesson or block via REST for content-heavy changes (e.g.
 `block_updated` only carries `block_id` + `type`). Client → server
 messages are not interpreted yet.
 
-### `WS /products/{product_id}/collaboration-events` — collaboration deltas
+### `WS /users/me/notifications` — per-user notification deltas
 
-Read-only push of :class:`CollaborationEvent` instances — invite,
-accept, revoke, grants-updated — to clients that hold
-`manage_collaborators` on the product (the product author is
-short-circuited as having every permission).
+Read-only push of notification-panel deltas — new card created,
+single card flipped to read, all-read sweep — to the connecting
+user. The recipient is derived from the access cookie, so the
+client opens exactly one socket and never specifies a user id.
+
+Bootstrap by fetching `GET /users/me/notifications` (and
+`GET /users/me/notifications/counters` for the bell badge) before
+opening the socket. No replay buffer; on reconnect the client
+refetches initial state and re-subscribes.
 
 **Authentication.** Standard `accessCookie` HttpOnly cookie sent
 by the browser on the WS handshake. Failure closes with `4401`
 before `accept`.
 
-**Authorization.** The connecting user must hold
-`manage_collaborators` on the target product (typically the
-author or a Moderator). Non-authorised callers get `4403`.
+**Server → client envelopes.** The discriminator is `kind`:
 
-**Lifecycle.** Server pushes events one-way until the client
-disconnects. No client → server messages are interpreted yet —
-silence is read as "may break in future" by SPA teams, so do
-not send anything. No replay buffer; on reconnect the client
-should refetch
-`GET /products/{product_id}/collaborations` (and
-`GET /products/{product_id}/collaborations/me/permissions` for
-the affected user) and re-subscribe.
+```json
+{
+  "kind": "created",
+  "notification": {
+    "oid": "<UUID>",
+    "kind": "<NotificationKind value>",
+    "category": "<NotificationCategory value>",
+    "actor": { "oid": "<UUID>", "full_name": "<Last First Patronymic>" },
+    "created_at": "<ISO 8601>",
+    "read_at": null,
+    "details": { "type": "...", ... }
+  }
+}
+```
 
-**Bootstrap.** Before opening the socket, fetch
-`GET /products/{product_id}/collaborations` to load the current
-collaborator list — the channel only carries deltas after the
-moment of subscription.
+```json
+{
+  "kind": "updated",
+  "notification": { ... same shape as `created.notification` ... }
+}
+```
+
+```json
+{ "kind": "read", "notification_id": "<UUID>" }
+```
+
+```json
+{ "kind": "read_all" }
+```
+
+**`kind` values** (drawn from `NotificationEventKind`):
+
+- `created` — a fresh notification was persisted; the panel
+  prepends the hydrated `notification` view to its list and
+  bumps the matching tab counter.
+- `updated` — the embedded snapshot of an existing notification
+  changed (currently fired when the collaboration referenced by
+  an `invite_sent` card transitions to `active` / `declined` /
+  `revoked`); the panel replaces the card by `notification.oid`.
+  No new row is created and `created_at` is unchanged — only the
+  `details.collaboration` snapshot reflects the new state.
+- `read` — a single card was flipped to read; the panel removes
+  its blue dot by `notification_id`.
+- `read_all` — every unread card of the caller was flipped; the
+  panel clears all blue dots and zeroes the unread counters.
+
+**Notification `kind` values** (drawn from `NotificationKind`,
+inside the `created` / `updated` envelopes):
+
+- `invite_sent` — a collaborator was invited; the panel renders
+  the card with Accept / Decline buttons that call the in-app
+  endpoints (`POST /collaborations/{id}/accept-in-app` /
+  `POST /collaborations/{id}/decline-in-app`). The card's
+  `details.collaboration` snapshot is the single source of
+  truth for the resolved / unresolved UI state — the SPA does
+  not need to remember the local "I just clicked Accept"
+  status across reloads.
+- `invite_accepted` — an invitee accepted; the inviter's panel
+  shows the new collaborator's avatar + name.
+
+**`details.collaboration` snapshot.** Both `invite_sent` and
+`invite_accepted` carry an embedded snapshot of the underlying
+`product_collaboration` row at read time:
+
+```json
+{
+  "status": "pending_invite | active | declined | revoked",
+  "accepted_at": "<ISO 8601 | null>",
+  "declined_at": "<ISO 8601 | null>",
+  "revoked_at": "<ISO 8601 | null>",
+  "invite_expires_at": "<ISO 8601 | null>"
+}
+```
+
+The SPA uses `status` as the single source of truth for the
+Accept / Decline UI state — a reload (or an `updated` event)
+picks up the latest values, so the client never needs to
+remember whether the invitation was already resolved. `null`
+on the whole object means the collaboration row could not be
+hydrated — treat the invite as unavailable.
+
+`payload`-style data is carried inside `details`; the
+`details.type` field discriminates the body shape. Client →
+server messages are not interpreted yet — silence is read as
+"may break in future" by SPA teams, so do not send anything.
+
+### `WS /users/me/confirm-events` — email-confirmation deltas
+
+Read-only push of email-confirmation events to initiator tabs that
+are waiting on a single-token confirmation. Used by `/verify-email`
+during signup so the registration tab learns in real time when the
+user clicks the verification link on another device, and by future
+profile flows that wait on email-confirmed actions (change-email,
+delete-account, ...).
+
+**Authentication.** Accepts EITHER `accessCookie` (logged-in users
+on profile / danger-zone flows) OR `signupSessionCookie` (the
+registration tab that doesn't hold an access cookie yet). Failure
+closes with `4401` before `accept`. The channel is keyed by the
+resolved `user_id` regardless of which cookie validated.
+
+**Lifecycle.** No replay buffer. Open the socket *before* the
+initiator action so a fast confirm cannot land between submit and
+subscribe. On reconnect the client should refetch state via REST
+(e.g. `GET /auth/email-verification/wait` for signup) — events
+emitted while disconnected are lost by design.
+
+**Bootstrap.** None for client-state hydration; the socket reflects
+deltas, not state. For signup specifically, the legacy
+`GET /auth/email-verification/wait` long-poll endpoint stays as the
+authoritative source of "is this tab now logged in?" — it's the only
+HTTP call that can install auth cookies on the original tab. Use the
+WS push as the *trigger* to call `/wait` once instead of polling.
 
 **Server → client envelope.**
 
 ```json
 {
-  "kind": "<CollaborationEventKind value>",
-  "product_id": "<UUID>",
-  "actor_id": "<UUID>",
-  "payload": {
-    "collaboration_id": "<UUID>",
-    "collaborator_id": "<UUID | absent>",
-    "invited_email": "<string | absent>"
-  },
-  "occurred_at": "<ISO 8601>"
+  "kind": "<ConfirmEventKind value>",
+  "purpose": "<EmailTokenPurpose value>"
 }
 ```
 
-`payload.collaboration_id` is always present; `collaborator_id`
-appears once an invitee is bound (set on `INVITED` for by-user
-invites, on every `ACCEPTED`, and on `REVOKED` /
-`GRANTS_UPDATED` when the affected row carries one).
-`invited_email` appears only on `INVITED` for by-email invites
-that have not yet been accepted.
+**`kind` values** (drawn from `ConfirmEventKind`):
 
-**`kind` values** (drawn from `CollaborationEventKind`):
+- `confirmed` — a single-token email confirmation was consumed and
+  committed for the channel's user. `purpose` says which action
+  fired (`verify` for email-verification at registration; future
+  values mirror new `EmailTokenPurpose` entries). The SPA filters by
+  `purpose` and reacts: redirect, finalize signup, refresh a profile
+  field, etc.
 
-- `invited` — new pending collaboration created. The SPA
-  appends the row to the collaborators list.
-- `accepted` — invitee accepted; the SPA flips the row to
-  active and re-fetches the collaborator profile if it was a
-  by-email invite (`collaborator_id` was previously absent).
-- `revoked` — collaboration ended (manager-initiated revoke or
-  self-leave). The SPA removes / greys out the row and, when
-  `payload.collaborator_id` matches the current user, also
-  refetches `…/me/permissions` to drop UI gating.
-- `grants_updated` — the affected user's grants changed.
-  Subscribers re-fetch `…/me/permissions` if
-  `payload.collaborator_id` matches the current user.
-
-Role-catalogue events (create/update/delete custom role) are
-**not** broadcast on this channel in this phase — clients should
-re-call `GET /products/{product_id}/roles` on demand.
+Client → server messages are not interpreted — silence is read as
+"may break in future" by SPA teams, so do not send anything.
 
 ### `WS /presence/ws` — bidirectional presence
 
@@ -424,8 +558,8 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         "name": "Roles",
         "description": (
             "Per-product role catalogue used by collaboration grants. "
-            "Four system roles (Viewer, Commentor, Editor, Moderator) "
-            "are seeded by Alembic and visible inside every product. "
+            "Two system roles (Commentor, Editor) are seeded by "
+            "Alembic and visible inside every product. "
             "Custom roles live inside a single product and are managed "
             "by collaborators with `manage_roles` (HTTP 403 "
             "`InsufficientPermissions` otherwise). Deleting a role "
@@ -460,9 +594,11 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "All collaborator-side notifications (invite, accept, "
             "revoke, grant change, self-leave) are delivered by "
             "email. Real-time deltas of the collaborator list flow "
-            "over `WS /products/{product_id}/collaboration-events` "
-            "to managers — see the **WebSocket channels** section "
-            "in the API description."
+            "over the product channel "
+            "`WS /products/{product_id}/events` to anyone with "
+            "`read_product` (every collaborator) — see the "
+            "**WebSocket channels** section in the API description "
+            "for the full kind list and payload semantics."
         ),
     },
     {
@@ -479,6 +615,23 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "is documented in full in the **WebSocket channels** "
             "section of the API description above (OpenAPI 3 does not "
             "model WebSockets, so the contract lives there as prose)."
+        ),
+    },
+    {
+        "name": "Notifications",
+        "description": (
+            "In-app notification panel for the bell icon. "
+            "`GET /users/me/notifications` returns a cursor-paginated "
+            "list, optionally filtered by tab "
+            "(`?category=invites|files|jobs|other`). "
+            "`GET /users/me/notifications/counters` returns per-tab "
+            "totals + unread for the segmented control and the bell "
+            "badge. `POST /users/me/notifications/{id}/read` flips "
+            "one card to read; `POST /users/me/notifications/read-all` "
+            "is the double-check icon. Real-time deltas (new card, "
+            "single-read, read-all) flow over "
+            "`WS /users/me/notifications` — see the "
+            "**WebSocket channels** section in the API description."
         ),
     },
 ]

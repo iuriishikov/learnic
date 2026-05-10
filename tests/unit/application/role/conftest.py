@@ -67,7 +67,6 @@ def fake_role_saver() -> AsyncMock:
 def fake_role_reader() -> AsyncMock:
     reader = AsyncMock()
     reader.with_id = AsyncMock(return_value=None)
-    reader.system_roles = AsyncMock(return_value=[])
     reader.for_product = AsyncMock(return_value=[])
     reader.max_position_in_product = AsyncMock(return_value=400)
     reader.min_position_for_user = AsyncMock(return_value=None)

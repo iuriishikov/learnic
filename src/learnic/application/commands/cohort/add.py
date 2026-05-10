@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Final, final
 
+from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.errors import (
     EntityNotFoundError,
     NotAWebinarError,
-    NotResourceOwnerError,
 )
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import (
@@ -18,6 +18,7 @@ from learnic.entities.cohort.value_objects import CohortName
 from learnic.entities.product.enums import ProductType
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import ParticipantsLimit
+from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 
 
@@ -36,10 +37,9 @@ class AddCohortCommand:
 class AddCohortCommandHandler:
     """Creates a new cohort under a webinar product.
 
-    Only the product's author may create cohorts; the chosen
-    ``host_id`` is whichever user the author wants running the
-    sessions (further role checks are deferred until a roles
-    system exists).
+    Caller needs ``MANAGE_RELEASES`` on the parent product (owner
+    short-circuits inside the authorizer). The chosen ``host_id``
+    is whichever user the caller wants running the sessions.
     """
 
     def __init__(
@@ -47,17 +47,22 @@ class AddCohortCommandHandler:
         transaction: Transaction,
         entity_saver: EntitySaver,
         product_gateway: ProductGateway,
+        authorizer: Authorizer,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
         self._product_gateway: Final = product_gateway
+        self._authorizer: Final = authorizer
 
     async def run(self, data: AddCohortCommand) -> CohortID:
         product = await self._product_gateway.with_id(data.product_id)
         if product is None:
             raise EntityNotFoundError(data.product_id)
-        if product.author_id != data.actor_id:
-            raise NotResourceOwnerError(data.product_id, data.actor_id)
+        await self._authorizer.require(
+            data.actor_id,
+            AuthzTarget.for_product(data.product_id),
+            Permission.MANAGE_RELEASES,
+        )
         if product.type is not ProductType.WEBINAR:
             raise NotAWebinarError(data.product_id)
         cohort = Cohort.create(

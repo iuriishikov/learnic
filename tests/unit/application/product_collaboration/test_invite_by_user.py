@@ -18,7 +18,6 @@ from learnic.application.common.errors import (
 )
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
 from learnic.entities.role.permissions import Permission, ScopeType
@@ -30,15 +29,14 @@ from learnic.entities.role.value_objects import (
 from learnic.entities.user.models import User, UserID
 
 
-def _system_role(role_id: RoleID) -> Role:
+def _custom_role(role_id: RoleID, product: Product) -> Role:
     now = datetime.now(timezone.utc)
     return Role(
         oid=role_id,
-        product_id=None,
-        kind=RoleKind.SYSTEM,
+        product_id=product.oid,
         name=RoleName("Editor"),
         description=None,
-        position=RolePosition(200),
+        position=RolePosition(1010),
         created_by=None,
         created_at=now,
         updated_at=now,
@@ -58,6 +56,7 @@ def _build_handler(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
 ) -> InviteCollaboratorByUserCommandHandler:
     return InviteCollaboratorByUserCommandHandler(
         transaction=fake_transaction,
@@ -71,6 +70,7 @@ def _build_handler(
         lineage=fake_lineage_reader,
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
+        notifications=fake_notifications,
     )
 
 
@@ -107,6 +107,7 @@ async def test_invites_and_schedules_email(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -115,7 +116,7 @@ async def test_invites_and_schedules_email(
 ) -> None:
     fake_product_gateway.with_id.return_value = product
     fake_user_gateway.with_id.return_value = invitee_user
-    fake_role_gateway.with_id.return_value = _system_role(role_id)
+    fake_role_gateway.with_id.return_value = _custom_role(role_id, product)
 
     handler = _build_handler(
         fake_transaction,
@@ -129,6 +130,7 @@ async def test_invites_and_schedules_email(
         fake_lineage_reader,
         fake_scheduler,
         fake_event_bus,
+        fake_notifications,
     )
     oid = await handler.run(
         _command(actor_id, product.oid, invitee_id, role_id),
@@ -153,6 +155,7 @@ async def test_refuses_to_invite_owner(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product: Product,
     actor_id: UserID,
     role_id: RoleID,
@@ -171,6 +174,7 @@ async def test_refuses_to_invite_owner(
         fake_lineage_reader,
         fake_scheduler,
         fake_event_bus,
+        fake_notifications,
     )
     with pytest.raises(CannotInviteOwnerError):
         await handler.run(
@@ -192,6 +196,7 @@ async def test_refuses_when_user_missing(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -212,6 +217,7 @@ async def test_refuses_when_user_missing(
         fake_lineage_reader,
         fake_scheduler,
         fake_event_bus,
+        fake_notifications,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(
@@ -232,6 +238,7 @@ async def test_refuses_when_collaboration_exists(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -254,6 +261,7 @@ async def test_refuses_when_collaboration_exists(
         fake_lineage_reader,
         fake_scheduler,
         fake_event_bus,
+        fake_notifications,
     )
     with pytest.raises(CollaborationAlreadyExistsError):
         await handler.run(
@@ -274,6 +282,7 @@ async def test_refuses_when_role_missing(
     fake_lineage_reader: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -295,6 +304,7 @@ async def test_refuses_when_role_missing(
         fake_lineage_reader,
         fake_scheduler,
         fake_event_bus,
+        fake_notifications,
     )
     bogus_role = RoleID(uuid.uuid4())
     with pytest.raises(EntityNotFoundError):

@@ -2,6 +2,7 @@ from typing import Protocol
 
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import (
+    CodeBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
@@ -43,6 +44,10 @@ class LessonBlockGateway(Protocol):
     async def add_rutube_video(self, block: RutubeVideoBlock) -> None: ...
 
     async def update_rutube_video(self, block: RutubeVideoBlock) -> None: ...
+
+    async def add_code(self, block: CodeBlock) -> None: ...
+
+    async def update_code(self, block: CodeBlock) -> None: ...
 
     async def delete(self, oid: LessonBlockID) -> None: ...
 

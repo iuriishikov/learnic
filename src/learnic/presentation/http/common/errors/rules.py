@@ -18,6 +18,7 @@ from fastapi_error_map.rules import Rule
 from learnic.application.common.errors import (
     CannotInviteOwnerError,
     CollaborationAlreadyExistsError,
+    EmailInviteRateLimitExceededError,
     EntityNotFoundError,
     InsufficientPermissionsError,
     InvalidTokenError,
@@ -27,6 +28,9 @@ from learnic.application.common.errors import (
     RoleNameAlreadyTakenError,
 )
 from learnic.entities.common.errors import FieldError
+from learnic.entities.product_collaboration.errors import (
+    CannotRevokeInThisStatusError,
+)
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
     RoleHierarchyViolationError,
@@ -35,11 +39,13 @@ from learnic.presentation.http.common.errors.translators import (
     EntityNotFoundTranslator,
     FieldErrorTranslator,
     NamedErrorTranslator,
+    RateLimitedTranslator,
 )
 
 _named: Final = NamedErrorTranslator()
 _field: Final = FieldErrorTranslator()
 _not_found: Final = EntityNotFoundTranslator()
+_rate_limited: Final = RateLimitedTranslator()
 
 FIELD_ERROR_RULE: Final[Rule] = rule(
     status=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -219,16 +225,28 @@ AUTHENTICATED_AUTHORIZED_FIELD_MAP: Final[dict[type[Exception], int | Rule]] = {
 # still raise ``NotResourceOwnerError`` directly.
 EDIT_ROUTE_MAP: Final[dict[type[Exception], int | Rule]] = AUTHENTICATED_OWNER_FIELD_MAP
 
+EMAIL_INVITE_RATE_LIMIT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.TOO_MANY_REQUESTS,
+    translator=_rate_limited,
+)
+
 COLLABORATION_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     CannotInviteOwnerError: CANNOT_INVITE_OWNER_RULE,
     CollaborationAlreadyExistsError: COLLABORATION_ALREADY_EXISTS_RULE,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
+    EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
 }
+
+CANNOT_REVOKE_IN_THIS_STATUS_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
 
 COLLABORATION_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
+    CannotRevokeInThisStatusError: CANNOT_REVOKE_IN_THIS_STATUS_RULE,
 }
 
 ROLE_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {

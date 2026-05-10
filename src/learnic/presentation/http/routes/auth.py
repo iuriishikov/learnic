@@ -32,6 +32,10 @@ from learnic.application.commands.auth.request_password_reset import (
     RequestPasswordResetCommand,
     RequestPasswordResetCommandHandler,
 )
+from learnic.application.commands.auth.resend_verification import (
+    ResendVerificationCommand,
+    ResendVerificationCommandHandler,
+)
 from learnic.application.commands.auth.reset_password import (
     ResetPasswordCommand,
     ResetPasswordCommandHandler,
@@ -39,6 +43,10 @@ from learnic.application.commands.auth.reset_password import (
 from learnic.application.commands.auth.verify_email import (
     VerifyEmailCommand,
     VerifyEmailCommandHandler,
+)
+from learnic.application.commands.auth.verify_token import (
+    VerifyTokenCommand,
+    VerifyTokenCommandHandler,
 )
 from learnic.application.commands.auth.verify_wait import (
     VerifyWaitCommand,
@@ -58,6 +66,10 @@ from learnic.application.common.errors import (
 from learnic.application.common.persistence.session import SessionView
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
+)
+from learnic.application.queries.auth.token_status import (
+    GetTokenStatusQuery,
+    GetTokenStatusQueryHandler,
 )
 from learnic.application.queries.session.list_my import (
     ListMySessionsQuery,
@@ -234,6 +246,86 @@ class VerifyEmailSchema(BaseModel):
         ),
         min_length=1,
         examples=["8f3...d2"],
+    )
+
+
+class VerifyTokenSchema(BaseModel):
+    """Body for `POST /auth/verify-token`.
+
+    Used by the unified ``/confirm/<purpose>`` SPA page to consume any
+    routable single-token email confirmation in one call. The handler
+    looks up ``purpose`` from the token itself; the SPA does not need
+    to declare it.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"token": "8f3...d2"}],  # noqa: S105  # nosec B105
+        },
+    )
+
+    token: str = Field(
+        description=(
+            "Single-use token delivered by email. Opaque to clients; "
+            "copy verbatim from the confirmation link's query string."
+        ),
+        min_length=1,
+        examples=["8f3...d2"],
+    )
+
+
+class VerifyTokenResponse(BaseModel):
+    """Response body for `POST /auth/verify-token`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"purpose": "verify"}]},
+    )
+
+    purpose: str = Field(
+        description=(
+            "Purpose the token was issued for. Mirrors "
+            "`EmailTokenPurpose` values (`verify`, ...). The SPA may "
+            "use this to pick localized success copy or to choose a "
+            "post-confirm redirect."
+        ),
+        examples=["verify"],
+    )
+
+
+class TokenStatusSchema(BaseModel):
+    """Body for `POST /auth/token-status`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"token": "8f3...d2"}],  # noqa: S105  # nosec B105
+        },
+    )
+
+    token: str = Field(
+        description=(
+            "Single-use token delivered by email. The endpoint peeks "
+            "at the token without consuming, so the SPA can render a "
+            "form (e.g. password-reset) only when the link is still "
+            "live."
+        ),
+        min_length=1,
+        examples=["8f3...d2"],
+    )
+
+
+class TokenStatusResponse(BaseModel):
+    """Response body for `POST /auth/token-status`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"purpose": "reset"}]},
+    )
+
+    purpose: str = Field(
+        description=(
+            "Purpose the token was issued for. Mirrors "
+            "`EmailTokenPurpose` values."
+        ),
+        examples=["verify", "reset"],
     )
 
 
@@ -602,6 +694,125 @@ async def email_verification_wait(
     set_auth_cookies(response, result.token_pair, cfg)
     clear_signup_session_cookie(response, cfg)
     return response
+
+
+@router.post(
+    "/email-verification/resend",
+    summary="Re-issue the verification email for the registration tab",
+    operation_id="resendVerificationEmail",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_SIGNUP_SESSION_SECURITY,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
+async def email_verification_resend(
+    request: Request,
+    interactor: FromDishka[ResendVerificationCommandHandler],
+) -> None:
+    """Re-issue and re-send the verification email.
+
+    Identifies the pending user via the ``signup_session`` cookie set
+    on registration. Issuing a new VERIFY token implicitly invalidates
+    any previously-active VERIFY token for the same user, so older
+    links stop working after this call — exactly what resend should do.
+
+    Args:
+        request: Source of the ``signup_session`` cookie.
+        interactor: Injected resend-verification command handler.
+
+    Returns:
+        ``204 No Content`` on success or when the user is already
+        verified (the email is cosmetic at that point and we don't
+        leak verification state through error shape).
+
+    Raises:
+        InvalidTokenError: ``signup_session`` missing or expired;
+            HTTP 401.
+    """
+    raw = request.cookies.get(SIGNUP_SESSION_COOKIE)
+    if not raw:
+        raise InvalidTokenError
+    await interactor.run(
+        ResendVerificationCommand(signup_session_token=raw),
+    )
+
+
+@router.post(
+    "/verify-token",
+    summary="Confirm any single-token email action in one call",
+    operation_id="verifyToken",
+    response_model=VerifyTokenResponse,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
+async def verify_token(
+    payload: VerifyTokenSchema,
+    interactor: FromDishka[VerifyTokenCommandHandler],
+) -> VerifyTokenResponse:
+    """Consume an email-confirmation token through the unified path.
+
+    Looks up the token's purpose and delegates to the matching
+    specialized command handler. The SPA's ``/confirm/<purpose>``
+    page hits this endpoint so adding a new email-confirmed action
+    requires no frontend deploy: ship the new purpose + handler on
+    the backend, and the generic confirm page picks it up via the
+    purpose echoed back in the response.
+
+    Purposes routed here are listed in
+    ``application.commands.auth.verify_token._UNIFIED_PURPOSES``.
+    Purposes that need extra request fields (e.g. ``RESET`` needs a
+    new password) keep their own routes; this endpoint rejects them
+    with 401 to keep the response shape uniform with unknown tokens.
+
+    Args:
+        payload: Carries the raw single-use token from the email link.
+        interactor: Injected unified verify-token command handler.
+
+    Returns:
+        ``200 OK`` with ``{"purpose": "..."}`` describing the consumed
+        token. The SPA may use ``purpose`` to pick localized copy.
+
+    Raises:
+        InvalidTokenError: Token unknown / expired / already consumed,
+            or its purpose is not routable through this endpoint;
+            HTTP 401.
+    """
+    result = await interactor.run(VerifyTokenCommand(token=payload.token))
+    return VerifyTokenResponse(purpose=result.purpose)
+
+
+@router.post(
+    "/token-status",
+    summary="Peek at an email-confirmation token without consuming",
+    operation_id="getTokenStatus",
+    response_model=TokenStatusResponse,
+    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+)
+async def token_status(
+    payload: TokenStatusSchema,
+    interactor: FromDishka[GetTokenStatusQueryHandler],
+) -> TokenStatusResponse:
+    """Validate an email-confirmation token without consuming it.
+
+    Used by the SPA to gate form-based confirm screens (e.g.
+    ``/reset-password``) on a still-live link, and by the unified
+    ``/confirm/<purpose>`` page when it wants to pick localized copy
+    before the consume call.
+
+    Always POST: the token rides in the body so it cannot leak through
+    access logs / Referer headers / browser history.
+
+    Args:
+        payload: Token to peek at.
+        interactor: Injected token-status query handler.
+
+    Returns:
+        ``200 OK`` with ``{"purpose": "..."}`` if the token is live.
+
+    Raises:
+        InvalidTokenError: Token unknown / expired / already consumed;
+            HTTP 401.
+    """
+    view = await interactor.run(GetTokenStatusQuery(token=payload.token))
+    return TokenStatusResponse(purpose=view.purpose)
 
 
 @router.post(

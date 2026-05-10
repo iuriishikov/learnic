@@ -7,6 +7,7 @@ from learnic.application.common.product_events.event_bus import (
 from learnic.application.common.product_events.events import (
     ProductEvent,
     ProductEventKind,
+    make_collaboration_payload,
 )
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -42,5 +43,6 @@ __all__ = [
     "ProductEvent",
     "ProductEventBus",
     "ProductEventKind",
+    "make_collaboration_payload",
     "publish_product_event",
 ]

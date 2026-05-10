@@ -6,18 +6,22 @@ from learnic.application.common.errors import (
     InviteEmailMismatchError,
     NotResourceOwnerError,
 )
+from learnic.application.common.notifications.publisher import (
+    NotificationPublisher,
+)
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
 )
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.product_collaboration_events import (
-    CollaborationEvent,
-    CollaborationEventBus,
-    CollaborationEventKind,
-    publish_collaboration_event,
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_collaboration_payload,
+    publish_product_event,
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
@@ -54,13 +58,15 @@ class AcceptCollaborationInviteCommandHandler:
         collab_gateway: ProductCollaborationGateway,
         user_gateway: UserGateway,
         scheduler: TaskScheduler,
-        event_bus: CollaborationEventBus,
+        event_bus: ProductEventBus,
+        notifications: NotificationPublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._collab_gateway: Final = collab_gateway
         self._user_gateway: Final = user_gateway
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
+        self._notifications: Final = notifications
 
     async def run(
         self,
@@ -90,13 +96,30 @@ class AcceptCollaborationInviteCommandHandler:
                 product_id=collab.product_id,
                 collaborator_id=data.actor_id,
             )
-        await publish_collaboration_event(
+        await publish_product_event(
             self._event_bus,
-            kind=CollaborationEventKind.ACCEPTED,
+            kind=ProductEventKind.COLLABORATION_ACCEPTED,
             product_id=collab.product_id,
             actor_id=data.actor_id,
-            payload=CollaborationEvent.make_payload(
+            payload=make_collaboration_payload(
                 collaboration_id=collab.oid,
                 collaborator_id=data.actor_id,
             ),
+        )
+        await self._notifications.publish(
+            Notification.for_invite_accepted(
+                recipient_id=collab.invited_by,
+                actor_id=data.actor_id,
+                collaboration_id=collab.oid,
+                product_id=collab.product_id,
+                collaborator_id=data.actor_id,
+            ),
+        )
+        # Mirror :class:`AcceptCollaborationInAppCommandHandler`: the
+        # accepter's own ``invite_sent`` card has to flip to ACTIVE in
+        # real time, otherwise their panel keeps showing the Accept /
+        # Decline buttons until they refetch.
+        await self._notifications.republish_for_collaboration(
+            recipient_id=data.actor_id,
+            collaboration_id=collab.oid,
         )

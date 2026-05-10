@@ -23,9 +23,11 @@ class ListProductCollaboratorsQuery:
 class ListProductCollaboratorsQueryHandler:
     """Lists collaborators (and pending invites) for a product.
 
-    Caller needs ``MANAGE_COLLABORATORS`` — typically owner or
-    Moderator. Lower-permission collaborators do not see who else
-    is on the team.
+    Caller needs ``READ_PRODUCT`` — any collaborator can see who
+    else is on the team, but only those with
+    ``MANAGE_COLLABORATORS`` may invite or revoke (enforced on the
+    write commands). The team list is part of the product's
+    overview, not a privileged view.
     """
 
     def __init__(
@@ -43,7 +45,7 @@ class ListProductCollaboratorsQueryHandler:
         await self._authorizer.require(
             data.actor_id,
             AuthzTarget.for_product(data.product_id),
-            Permission.MANAGE_COLLABORATORS,
+            Permission.READ_PRODUCT,
         )
         return await self._reader.for_product(
             data.product_id,

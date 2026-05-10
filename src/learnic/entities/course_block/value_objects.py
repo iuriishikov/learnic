@@ -3,15 +3,19 @@ from typing import ClassVar, Self
 
 from learnic.entities.common.value_object import ValueObject
 from learnic.entities.course_block.constants import (
+    CODE_BLOCK_MAX_LEN,
+    CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
     VIDEO_TITLE_MAX_LEN,
 )
+from learnic.entities.course_block.enums import CodeBlockLanguage
 from learnic.entities.course_block.errors import (
     BlockContentTooLongError,
     EmptyBlockContentError,
     InvalidRutubeUrlError,
+    UnsupportedCodeLanguageError,
 )
 
 
@@ -99,3 +103,52 @@ class VideoTitle(ValueObject):
             raise EmptyBlockContentError("title")
         if len(self.value) > VIDEO_TITLE_MAX_LEN:
             raise BlockContentTooLongError("title", VIDEO_TITLE_MAX_LEN)
+
+
+class CodeSource(ValueObject):
+    """Raw source body of a :class:`CodeBlock`.
+
+    Whitespace is preserved verbatim — code is meaningful as-is —
+    so empty / blank values are accepted (an author may create the
+    block first and fill the body in the editor). Only an upper
+    length bound is enforced.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) > CODE_BLOCK_MAX_LEN:
+            raise BlockContentTooLongError("source", CODE_BLOCK_MAX_LEN)
+
+
+class CodeLanguage(ValueObject):
+    """Syntax-highlighting language tag for a code tab.
+
+    Values are bound to :class:`CodeBlockLanguage` — anything else
+    is rejected at the entity boundary so the frontend tokenizer
+    can never face an unknown token.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        try:
+            CodeBlockLanguage(self.value)
+        except ValueError as exc:
+            raise UnsupportedCodeLanguageError(self.value) from exc
+
+
+class CodeTabLabel(ValueObject):
+    """Author-facing label for a tab inside a multi-tab code block.
+
+    Empty string is allowed — single-tab blocks render without a
+    visible tab strip and don't need a label. For multi-tab blocks
+    the entity-level invariant requires every label to be non-empty
+    and unique, see :class:`CodeBlock`.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) > CODE_TAB_LABEL_MAX_LEN:
+            raise BlockContentTooLongError("label", CODE_TAB_LABEL_MAX_LEN)

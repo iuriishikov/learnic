@@ -14,11 +14,11 @@ from learnic.application.common.persistence.product_collaboration import (
 from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.product_collaboration_events import (
-    CollaborationEvent,
-    CollaborationEventBus,
-    CollaborationEventKind,
-    publish_collaboration_event,
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_collaboration_payload,
+    publish_product_event,
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration._grant_spec import (
@@ -61,7 +61,7 @@ class UpdateCollaborationGrantsCommandHandler:
         user_gateway: UserGateway,
         lineage: ResourceLineageReader,
         scheduler: TaskScheduler,
-        event_bus: CollaborationEventBus,
+        event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -112,12 +112,12 @@ class UpdateCollaborationGrantsCommandHandler:
                     to=collaborator.email.value,
                     product_id=collab.product_id,
                 )
-        await publish_collaboration_event(
+        await publish_product_event(
             self._event_bus,
-            kind=CollaborationEventKind.GRANTS_UPDATED,
+            kind=ProductEventKind.COLLABORATION_GRANTS_UPDATED,
             product_id=collab.product_id,
             actor_id=data.actor_id,
-            payload=CollaborationEvent.make_payload(
+            payload=make_collaboration_payload(
                 collaboration_id=collab.oid,
                 collaborator_id=collab.collaborator_id,
             ),

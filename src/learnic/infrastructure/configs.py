@@ -94,6 +94,31 @@ class SecurityConfig(BaseSettings):
     frontend_base_url: str
 
 
+class WebPushConfig(BaseSettings):
+    """VAPID identity for outgoing Web Push deliveries.
+
+    The keypair is generated once per environment with
+    ``vapid --gen`` (or any compliant tool) and committed to the
+    secrets store; ``public_key`` is a URL-safe Base64 raw EC point
+    on the P-256 curve. The frontend reads the public key via
+    ``GET /push/vapid-public-key`` to subscribe; the backend uses
+    the private key to sign each push request to the browser
+    vendor's push service.
+
+    ``subject`` is the contact identifier required by the VAPID
+    spec — typically a ``mailto:`` URL of the on-call address.
+    Push services include it on abuse reports.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="WEBPUSH_", env_file=".env", extra="ignore"
+    )
+
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:noreply@learnic.local"
+
+
 class Configs:
     __slots__ = (
         "postgres",
@@ -103,6 +128,7 @@ class Configs:
         "redis",
         "rusender",
         "security",
+        "web_push",
     )
 
     def __init__(
@@ -114,6 +140,7 @@ class Configs:
         redis: RedisConfig,
         rusender: RusenderConfig,
         security: SecurityConfig,
+        web_push: WebPushConfig,
     ) -> None:
         self.postgres = postgres
         self.asgi = asgi
@@ -122,6 +149,7 @@ class Configs:
         self.redis = redis
         self.rusender = rusender
         self.security = security
+        self.web_push = web_push
 
 
 def load_configs() -> Configs:
@@ -133,4 +161,5 @@ def load_configs() -> Configs:
         redis=RedisConfig(),  # pyright: ignore[reportCallIssue]
         rusender=RusenderConfig(),  # pyright: ignore[reportCallIssue]
         security=SecurityConfig(),  # pyright: ignore[reportCallIssue]
+        web_push=WebPushConfig(),  # pyright: ignore[reportCallIssue]
     )

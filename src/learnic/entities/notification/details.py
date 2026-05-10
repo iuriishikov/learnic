@@ -49,3 +49,41 @@ class InviteAcceptedDetails(NotificationDetails):
     collaboration_id: ProductCollaborationID
     product_id: ProductID
     collaborator_id: UserID
+
+
+@dataclass(slots=True)
+class InviteDeclinedDetails(NotificationDetails):
+    """Body for the ``invite_declined`` notification.
+
+    Sent to the inviter when the invitee declines a pending invite
+    in-app. Carries ``decliner_id`` so the panel can render the
+    declining user's avatar and name without re-deriving the
+    relationship. ``collaboration_id`` lets the panel offer a
+    "re-invite" action that recreates the collaboration with the
+    same target and grants.
+    """
+
+    collaboration_id: ProductCollaborationID
+    product_id: ProductID
+    decliner_id: UserID
+
+
+@dataclass(slots=True)
+class AccessRevokedDetails(NotificationDetails):
+    """Body for the ``access_revoked`` notification.
+
+    Sent to a collaborator who was kicked from an **active**
+    collaboration (status flipped from ``ACTIVE`` to ``REVOKED``).
+    Pending-invite revocations are not covered here — they surface
+    on the recipient's existing ``invite_sent`` card via the
+    snapshot republish, which already flips the row's status to
+    ``revoked``.
+
+    Carries ``revoker_id`` so the panel can render who removed
+    access; the card is read-only — there is no recovery action
+    the recipient can take from here.
+    """
+
+    collaboration_id: ProductCollaborationID
+    product_id: ProductID
+    revoker_id: UserID

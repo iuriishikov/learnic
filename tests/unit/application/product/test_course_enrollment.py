@@ -22,9 +22,11 @@ from learnic.application.commands.course_enrollment.update_progress import (
 from learnic.application.common.errors import (
     AlreadyEnrolledError,
     CannotEnrollInUnreleasedCourseError,
+    InsufficientPermissionsError,
     NotACourseError,
     NotResourceOwnerError,
 )
+from learnic.entities.role.permissions import Permission
 from learnic.entities.course_enrollment.enums import (
     CourseEnrollmentStatus,
 )
@@ -286,20 +288,19 @@ async def test_update_progress_by_other_user_raises(
     fake_transaction.commit.assert_not_called()
 
 
-async def test_complete_by_author_allowed(
+async def test_complete_by_authorized_caller_allowed(
     fake_transaction: AsyncMock,
     fake_course_enrollment_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
     course_enrollment: CourseEnrollment,
-    course_product: Product,
     author_id: UserID,
 ) -> None:
     fake_course_enrollment_gateway.with_id.return_value = course_enrollment
-    fake_product_gateway.with_id.return_value = course_product
+    authorizer = AsyncMock()
+    authorizer.require = AsyncMock(return_value=None)
     handler = CompleteCourseEnrollmentCommandHandler(
         transaction=fake_transaction,
         enrollment_gateway=fake_course_enrollment_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=authorizer,
     )
 
     await handler.run(
@@ -309,25 +310,31 @@ async def test_complete_by_author_allowed(
         ),
     )
     assert course_enrollment.status is CourseEnrollmentStatus.COMPLETED
+    authorizer.require.assert_awaited_once()
 
 
-async def test_refund_by_non_author_raises(
+async def test_refund_without_permission_raises(
     fake_transaction: AsyncMock,
     fake_course_enrollment_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
     course_enrollment: CourseEnrollment,
-    course_product: Product,
     other_user_id: UserID,
 ) -> None:
     fake_course_enrollment_gateway.with_id.return_value = course_enrollment
-    fake_product_gateway.with_id.return_value = course_product
+    authorizer = AsyncMock()
+    authorizer.require = AsyncMock(
+        side_effect=InsufficientPermissionsError(
+            user_id=other_user_id,
+            product_id=course_enrollment.product_id,
+            permission=Permission.MANAGE_RELEASES.value,
+        ),
+    )
     handler = RefundCourseEnrollmentCommandHandler(
         transaction=fake_transaction,
         enrollment_gateway=fake_course_enrollment_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=authorizer,
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             RefundCourseEnrollmentCommand(
                 actor_id=other_user_id,

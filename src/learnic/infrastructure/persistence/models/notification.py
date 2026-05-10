@@ -197,6 +197,110 @@ notification_invite_accepted_table = sa.Table(
 )
 
 
+notification_invite_declined_table = sa.Table(
+    "notification_invite_declined",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "collaboration_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "product_collaborations.oid",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "decliner_id",
+        sa.Uuid,
+        sa.ForeignKey("users.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_invite_declined_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.INVITE_DECLINED.value}'",
+        name="ck_notif_invite_declined_kind",
+    ),
+)
+
+
+notification_access_revoked_table = sa.Table(
+    "notification_access_revoked",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "collaboration_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "product_collaborations.oid",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "revoker_id",
+        sa.Uuid,
+        sa.ForeignKey("users.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_access_revoked_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.ACCESS_REVOKED.value}'",
+        name="ck_notif_access_revoked_kind",
+    ),
+)
+
+
 _mapped = False
 
 

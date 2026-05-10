@@ -22,7 +22,7 @@ from learnic.application.commands.webinar_schedule.update import (
 )
 from learnic.application.common.errors import (
     EntityNotFoundError,
-    NotResourceOwnerError,
+    InsufficientPermissionsError,
 )
 from learnic.entities.cohort.errors import InvalidRecurrenceRuleError
 from learnic.entities.cohort.ids import WebinarScheduleID
@@ -89,7 +89,7 @@ async def test_add_schedule_validates_persists_and_kicks_task(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     fake_rule_validator: MagicMock,
     fake_task_scheduler: AsyncMock,
     cohort: Cohort,
@@ -100,7 +100,7 @@ async def test_add_schedule_validates_persists_and_kicks_task(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
         rule_validator=fake_rule_validator,
         task_scheduler=fake_task_scheduler,
     )
@@ -132,7 +132,7 @@ async def test_add_schedule_rejects_invalid_rrule(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     fake_rule_validator: MagicMock,
     fake_task_scheduler: AsyncMock,
     cohort: Cohort,
@@ -146,7 +146,7 @@ async def test_add_schedule_rejects_invalid_rrule(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
         rule_validator=fake_rule_validator,
         task_scheduler=fake_task_scheduler,
     )
@@ -172,25 +172,28 @@ async def test_add_schedule_non_owner_raises(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     fake_rule_validator: MagicMock,
     fake_task_scheduler: AsyncMock,
     cohort: Cohort,
-    webinar_product: object,
     stranger_id: UserID,
 ) -> None:
     fake_cohort_gateway.with_id.return_value = cohort
-    fake_product_gateway.with_id.return_value = webinar_product
+    fake_authorizer.require.side_effect = InsufficientPermissionsError(
+        user_id=stranger_id,
+        product_id=cohort.webinar_id,
+        permission="MANAGE_RELEASES",
+    )
     handler = AddWebinarScheduleCommandHandler(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
         rule_validator=fake_rule_validator,
         task_scheduler=fake_task_scheduler,
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             AddWebinarScheduleCommand(
                 actor_id=stranger_id,
@@ -209,7 +212,7 @@ async def test_update_schedule_replaces_and_kicks_task(
     fake_transaction: AsyncMock,
     fake_schedule_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     fake_rule_validator: MagicMock,
     fake_task_scheduler: AsyncMock,
     schedule: WebinarSchedule,
@@ -222,7 +225,7 @@ async def test_update_schedule_replaces_and_kicks_task(
         transaction=fake_transaction,
         schedule_gateway=fake_schedule_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
         rule_validator=fake_rule_validator,
         task_scheduler=fake_task_scheduler,
     )
@@ -251,7 +254,7 @@ async def test_delete_schedule_calls_gateway_delete(
     fake_transaction: AsyncMock,
     fake_schedule_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     schedule: WebinarSchedule,
     cohort: Cohort,
     host_id: UserID,
@@ -262,7 +265,7 @@ async def test_delete_schedule_calls_gateway_delete(
         transaction=fake_transaction,
         schedule_gateway=fake_schedule_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(

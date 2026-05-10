@@ -11,19 +11,25 @@ from learnic.entities.user.models import UserID
 
 @dataclass(slots=True, frozen=True)
 class GetMyProductsQuery:
-    author_id: UserID
+    user_id: UserID
     pagination: Pagination
 
 
 @final
 class GetMyProductsQueryHandler:
-    """Returns products owned by ``author_id`` (any status), newest first."""
+    """Returns products the user can access (owned or active collaboration).
+
+    A product appears in the result if ``user_id`` is its author or
+    has an active collaboration on it. ``PENDING_INVITE`` and
+    ``REVOKED`` collaborations are excluded. Results are ordered by
+    ``created_at`` descending (any product status).
+    """
 
     def __init__(self, reader: ProductReader) -> None:
         self._reader: Final = reader
 
     async def run(self, data: GetMyProductsQuery) -> list[ProductView]:
-        return await self._reader.for_author(
-            data.author_id,
+        return await self._reader.accessible_to(
+            data.user_id,
             data.pagination,
         )

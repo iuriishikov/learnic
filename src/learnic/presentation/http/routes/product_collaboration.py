@@ -22,9 +22,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
 )
+from learnic.application.common.formatting import mask_email
 from learnic.application.commands.product_collaboration.accept import (
     AcceptCollaborationInviteCommand,
     AcceptCollaborationInviteCommandHandler,
+)
+from learnic.application.commands.product_collaboration.accept_in_app import (
+    AcceptCollaborationInAppCommand,
+    AcceptCollaborationInAppCommandHandler,
+)
+from learnic.application.commands.product_collaboration.decline_in_app import (
+    DeclineCollaborationInAppCommand,
+    DeclineCollaborationInAppCommandHandler,
 )
 from learnic.application.commands.product_collaboration.invite_by_email import (
     InviteCollaboratorByEmailCommand,
@@ -37,6 +46,10 @@ from learnic.application.commands.product_collaboration.invite_by_user import (
 from learnic.application.commands.product_collaboration.leave import (
     LeaveProductCommand,
     LeaveProductCommandHandler,
+)
+from learnic.application.commands.product_collaboration.reinvite import (
+    ReinviteCollaboratorCommand,
+    ReinviteCollaboratorCommandHandler,
 )
 from learnic.application.commands.product_collaboration.revoke import (
     RevokeCollaborationCommand,
@@ -91,6 +104,7 @@ from learnic.presentation.http.common.errors.rules import (
     COLLABORATION_MUTATION_MAP,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.common.schemas import UserRefSchema
 
 product_router = ErrorAwareRouter(
     prefix="/products/{product_id}/collaborations",
@@ -296,16 +310,6 @@ class UpdateGrantsSchema(BaseModel):
 # --------------------------- response schemas -------------------------- #
 
 
-class CollaboratorRefSchema(BaseModel):
-    """Embedded collaborator profile (only when the invite was accepted)."""
-
-    oid: UUID
-    email: str
-    first_name: str
-    last_name: str
-    patronymic: str | None
-
-
 class GrantSchema(BaseModel):
     """Grant projection inside a collaboration response."""
 
@@ -337,10 +341,8 @@ class CollaborationSchema(BaseModel):
                     "product_id": ("3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"),
                     "collaborator": {
                         "oid": ("550e8400-e29b-41d4-a716-446655440000"),
-                        "email": "ada@example.com",
-                        "first_name": "Ada",
-                        "last_name": "Lovelace",
-                        "patronymic": None,
+                        "full_name": "Lovelace Ada",
+                        "email": "a*****a@example.com",
                     },
                     "invited_email": None,
                     "status": "active",
@@ -348,6 +350,7 @@ class CollaborationSchema(BaseModel):
                     "invite_expires_at": None,
                     "created_at": "2026-05-07T10:00:00+00:00",
                     "accepted_at": "2026-05-07T11:00:00+00:00",
+                    "declined_at": None,
                     "revoked_at": None,
                     "grants": [
                         {
@@ -365,13 +368,14 @@ class CollaborationSchema(BaseModel):
 
     oid: UUID
     product_id: UUID
-    collaborator: CollaboratorRefSchema | None
+    collaborator: UserRefSchema | None
     invited_email: str | None
     status: CollaborationStatus
     invited_by: UUID
     invite_expires_at: datetime | None
     created_at: datetime
     accepted_at: datetime | None
+    declined_at: datetime | None
     revoked_at: datetime | None
     grants: list[GrantSchema]
 
@@ -381,22 +385,21 @@ class CollaborationSchema(BaseModel):
             oid=view.oid,
             product_id=view.product_id,
             collaborator=(
-                CollaboratorRefSchema(
-                    oid=view.collaborator.oid,
-                    email=view.collaborator.email,
-                    first_name=view.collaborator.first_name,
-                    last_name=view.collaborator.last_name,
-                    patronymic=view.collaborator.patronymic,
-                )
+                UserRefSchema.from_view(view.collaborator)
                 if view.collaborator is not None
                 else None
             ),
-            invited_email=view.invited_email,
+            invited_email=(
+                mask_email(view.invited_email)
+                if view.invited_email is not None
+                else None
+            ),
             status=view.status,
             invited_by=view.invited_by,
             invite_expires_at=view.invite_expires_at,
             created_at=view.created_at,
             accepted_at=view.accepted_at,
+            declined_at=view.declined_at,
             revoked_at=view.revoked_at,
             grants=[GrantSchema.from_view(g) for g in view.grants],
         )
@@ -507,7 +510,7 @@ async def list_collaborators(
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         InsufficientPermissionsError: Caller lacks
-            `manage_collaborators`; HTTP 403.
+            `read_product` (i.e. is not a collaborator); HTTP 403.
         EntityNotFoundError: Product missing; HTTP 404.
     """
     ctx = await auth.authenticate(request)
@@ -600,6 +603,11 @@ async def invite_by_email(
 
     See :func:`invite_by_user` for the link shape and accept flow.
 
+    The handler enforces a per-actor cap of 10 email invitations
+    per rolling 24 hours so a single account cannot drain the
+    upstream email-provider quota with a flood of invites to
+    attacker-controlled addresses.
+
     Args:
         request: Source of the access-token cookie.
         payload: ``email`` + at least one grant.
@@ -621,6 +629,8 @@ async def invite_by_email(
         CollaborationAlreadyExistsError: A pending invite for this
             email or an active collaboration for the matched user
             already exists; HTTP 409.
+        EmailInviteRateLimitExceededError: Caller has already issued
+            the per-day limit of email invitations; HTTP 429.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -727,6 +737,113 @@ async def accept_invite(
     )
 
 
+@collab_router.post(
+    "/{collaboration_id}/accept-in-app",
+    summary="Accept a pending collaboration invite from in-app",
+    operation_id="acceptCollaborationInviteInApp",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=COLLABORATION_ACCEPT_MAP,
+)
+async def accept_invite_in_app(
+    request: Request,
+    interactor: FromDishka[AcceptCollaborationInAppCommandHandler],
+    auth: FromDishka[Authenticator],
+    collaboration_id: UUID = _COLLAB_ID_PATH,
+) -> None:
+    """Accept a collaboration invite from an in-app notification.
+
+    Same as ``POST /collaborations/{id}/accept`` but without the
+    email-link token. The in-app channel is itself authenticated as
+    the recipient, so identity-based authorisation is sufficient.
+
+    For by-user invites the caller's id must equal
+    ``collaboration.collaborator_id``; for by-email invites the
+    caller's account email must equal ``invited_email``.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected accept-in-app command handler.
+        auth: Injected authenticator.
+        collaboration_id: Target collaboration, parsed from the URL
+            path.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotResourceOwnerError: Caller is not the addressed by-user
+            invitee; HTTP 403.
+        InviteEmailMismatchError: Caller's email does not match the
+            by-email invite; HTTP 403.
+        EntityNotFoundError: Collaboration missing; HTTP 404.
+        FieldError: Domain invariants violated (e.g. expired or
+            non-pending status); HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        AcceptCollaborationInAppCommand(
+            actor_id=ctx.user_id,
+            collaboration_id=ProductCollaborationID(collaboration_id),
+        ),
+    )
+
+
+@collab_router.post(
+    "/{collaboration_id}/decline-in-app",
+    summary="Decline a pending collaboration invite from in-app",
+    operation_id="declineCollaborationInviteInApp",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=COLLABORATION_ACCEPT_MAP,
+)
+async def decline_invite_in_app(
+    request: Request,
+    interactor: FromDishka[DeclineCollaborationInAppCommandHandler],
+    auth: FromDishka[Authenticator],
+    collaboration_id: UUID = _COLLAB_ID_PATH,
+) -> None:
+    """Decline a collaboration invite from an in-app notification.
+
+    Mirror of ``POST /collaborations/{id}/accept-in-app`` — same
+    identity-based authorisation, but flips the collaboration to
+    :class:`CollaborationStatus.DECLINED` and broadcasts a
+    ``COLLABORATION_DECLINED`` product event so the inviter's
+    collaborators screen reacts in real time. The recipient's
+    surviving ``invite_sent`` notification is republished on the
+    notifications WS channel with the updated collaboration
+    snapshot so the panel re-renders the row as resolved.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected decline-in-app command handler.
+        auth: Injected authenticator.
+        collaboration_id: Target collaboration, parsed from the URL
+            path.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotResourceOwnerError: Caller is not the addressed by-user
+            invitee; HTTP 403.
+        InviteEmailMismatchError: Caller's email does not match the
+            by-email invite; HTTP 403.
+        EntityNotFoundError: Collaboration missing; HTTP 404.
+        FieldError: Domain invariants violated (e.g. non-pending
+            status); HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        DeclineCollaborationInAppCommand(
+            actor_id=ctx.user_id,
+            collaboration_id=ProductCollaborationID(collaboration_id),
+        ),
+    )
+
+
 @collab_router.put(
     "/{collaboration_id}/grants",
     summary="Replace grants of a collaboration",
@@ -807,6 +924,9 @@ async def revoke(
         InsufficientPermissionsError: Caller lacks
             `manage_collaborators`; HTTP 403.
         EntityNotFoundError: Collaboration missing; HTTP 404.
+        CannotRevokeInThisStatusError: Collaboration is already in a
+            terminal state (``revoked`` or ``declined``); HTTP 409
+            via ``CANNOT_REVOKE_IN_THIS_STATUS_RULE``.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
@@ -815,6 +935,61 @@ async def revoke(
             collaboration_id=ProductCollaborationID(collaboration_id),
         ),
     )
+
+
+@collab_router.post(
+    "/{collaboration_id}/reinvite",
+    summary="Re-invite a collaborator after a previous declined/revoked invite",
+    operation_id="reinviteCollaborator",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CreatedCollaborationSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=COLLABORATION_INVITE_MAP,
+)
+async def reinvite(
+    request: Request,
+    interactor: FromDishka[ReinviteCollaboratorCommandHandler],
+    auth: FromDishka[Authenticator],
+    collaboration_id: UUID = _COLLAB_ID_PATH,
+) -> CreatedCollaborationSchema:
+    """Re-invite a collaborator from a terminal collaboration row.
+
+    Reads the source collaboration to recover the original target
+    (registered user id or email) and grants, then creates a new
+    pending invitation with the same scope. The previous row stays
+    in its terminal state for audit; this operation never resurrects
+    it. The new collaboration's id is returned in the response body.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected re-invite command handler.
+        auth: Injected authenticator.
+        collaboration_id: Source (declined/revoked) collaboration,
+            parsed from the URL path.
+
+    Returns:
+        ``201 Created`` with the new collaboration's `oid`.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        InsufficientPermissionsError: Caller lacks
+            `manage_collaborators`; HTTP 403.
+        EntityNotFoundError: Source collaboration missing or its
+            target cannot be resolved; HTTP 404.
+        CollaborationAlreadyExistsError: A new active or pending
+            invite already exists for the same target; HTTP 409.
+        EmailInviteRateLimitExceededError: Email rate cap reached;
+            HTTP 429.
+        FieldError: VO invariants violated; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        ReinviteCollaboratorCommand(
+            actor_id=ctx.user_id,
+            source_collaboration_id=ProductCollaborationID(collaboration_id),
+        ),
+    )
+    return CreatedCollaborationSchema(oid=oid)
 
 
 @me_router.get(

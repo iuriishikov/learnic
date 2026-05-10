@@ -33,6 +33,7 @@ async def test_accept_by_user_invite(
     fake_user_gateway: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     existing_collab: ProductCollaboration,
     invitee_user: User,
     actor_user: User,
@@ -46,6 +47,7 @@ async def test_accept_by_user_invite(
         user_gateway=fake_user_gateway,
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
+        notifications=fake_notifications,
     )
     await handler.run(
         AcceptCollaborationInviteCommand(
@@ -66,6 +68,7 @@ async def test_accept_rejects_wrong_user(
     fake_user_gateway: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     existing_collab: ProductCollaboration,
     invitee_user: User,
     actor_user: User,
@@ -89,6 +92,7 @@ async def test_accept_rejects_wrong_user(
         user_gateway=fake_user_gateway,
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
+        notifications=fake_notifications,
     )
     with pytest.raises(NotResourceOwnerError):
         await handler.run(
@@ -108,6 +112,7 @@ async def test_accept_email_invite_requires_email_match(
     fake_user_gateway: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
     product_id: object,
     actor_id: UserID,
 ) -> None:
@@ -143,6 +148,7 @@ async def test_accept_email_invite_requires_email_match(
         user_gateway=fake_user_gateway,
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
+        notifications=fake_notifications,
     )
     with pytest.raises(InviteEmailMismatchError):
         await handler.run(
@@ -162,6 +168,7 @@ async def test_404_when_collaboration_missing(
     fake_user_gateway: AsyncMock,
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_notifications: AsyncMock,
 ) -> None:
     fake_collab_gateway.with_id.return_value = None
 
@@ -171,6 +178,7 @@ async def test_404_when_collaboration_missing(
         user_gateway=fake_user_gateway,
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
+        notifications=fake_notifications,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(

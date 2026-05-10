@@ -1,6 +1,8 @@
 import pytest
 
 from learnic.entities.course_block.constants import (
+    CODE_BLOCK_MAX_LEN,
+    CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     VIDEO_TITLE_MAX_LEN,
@@ -9,8 +11,12 @@ from learnic.entities.course_block.errors import (
     BlockContentTooLongError,
     EmptyBlockContentError,
     InvalidRutubeUrlError,
+    UnsupportedCodeLanguageError,
 )
 from learnic.entities.course_block.value_objects import (
+    CodeLanguage,
+    CodeSource,
+    CodeTabLabel,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -106,3 +112,67 @@ class TestVideoTitle:
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):
             VideoTitle("x" * (VIDEO_TITLE_MAX_LEN + 1))
+
+
+class TestCodeSource:
+    def test_accepts_non_empty(self) -> None:
+        assert CodeSource("const x = 1;").value == "const x = 1;"
+
+    def test_accepts_empty_for_freshly_created_block(self) -> None:
+        # Empty code is fine — the author may add the block first and
+        # type code in the editor afterwards.
+        assert CodeSource("").value == ""
+
+    def test_preserves_whitespace(self) -> None:
+        # Whitespace is meaningful in code; the VO must not strip it.
+        assert CodeSource("  \n  \t").value == "  \n  \t"
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(BlockContentTooLongError):
+            CodeSource("x" * (CODE_BLOCK_MAX_LEN + 1))
+
+
+class TestCodeLanguage:
+    def test_accepts_supported(self) -> None:
+        # Round-trip every backend-recognised language — guards against
+        # accidental enum drift from the frontend tokenizer's supported
+        # set (the two MUST stay in sync per the enum's docstring).
+        supported = (
+            "tsx", "ts", "jsx", "js",
+            "python", "go", "rust", "java", "kotlin", "swift", "php", "ruby",
+            "c", "cpp", "csharp",
+            "html", "xml", "css", "scss",
+            "json", "yaml", "toml", "sql", "graphql",
+            "markdown",
+            "bash", "sh", "dockerfile",
+            "plain",
+        )
+        for lang in supported:
+            assert CodeLanguage(lang).value == lang
+
+    def test_rejects_unsupported(self) -> None:
+        # Use a language we explicitly don't ship — "haskell" is a stable
+        # canary because adding it would also need a tokenizer landing
+        # client-side first (per the enum's docstring contract).
+        with pytest.raises(UnsupportedCodeLanguageError):
+            CodeLanguage("haskell")
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(UnsupportedCodeLanguageError):
+            CodeLanguage("")
+
+
+class TestCodeTabLabel:
+    def test_accepts_empty(self) -> None:
+        # Empty label is meaningful for single-tab blocks (the strip
+        # is hidden client-side). Cross-tab uniqueness is enforced
+        # at the entity level, not the VO level.
+        assert CodeTabLabel("").value == ""
+
+    def test_accepts_typical_labels(self) -> None:
+        for label in ("npm", "pnpm", "yarn", "Component.tsx"):
+            assert CodeTabLabel(label).value == label
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(BlockContentTooLongError):
+            CodeTabLabel("x" * (CODE_TAB_LABEL_MAX_LEN + 1))

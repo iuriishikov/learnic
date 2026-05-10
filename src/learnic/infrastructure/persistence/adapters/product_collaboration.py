@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Final
 
 import sqlalchemy as sa
@@ -8,12 +9,12 @@ from typing_extensions import override
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.product_collaboration import (
     CollaborationGrantView,
-    CollaboratorView,
     ProductCollaborationGateway,
     ProductCollaborationReader,
     ProductCollaborationSaver,
     ProductCollaborationView,
 )
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.grant import CollaborationGrant
@@ -62,7 +63,10 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
         stmt = sa.select(ProductCollaboration).where(
             product_collaborations_table.c.product_id == product_id,
             product_collaborations_table.c.collaborator_id == collaborator_id,
-            product_collaborations_table.c.status != CollaborationStatus.REVOKED.value,
+            sa.or_(
+                product_collaborations_table.c.status == CollaborationStatus.ACTIVE.value,
+                product_collaborations_table.c.status == CollaborationStatus.PENDING_INVITE.value
+            ),
         )
         collab = (await self._session.execute(stmt)).scalar_one_or_none()
         if collab is None:
@@ -87,6 +91,22 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
             return None
         collab.grants = await self._load_grants(collab.oid)
         return collab
+
+    @override
+    async def count_email_invites_by_actor_since(
+        self,
+        actor_id: UserID,
+        since: datetime,
+    ) -> int:
+        stmt = sa.select(sa.func.count()).select_from(
+            product_collaborations_table,
+        ).where(
+            product_collaborations_table.c.invited_by == actor_id,
+            product_collaborations_table.c.invited_email.is_not(None),
+            product_collaborations_table.c.created_at >= since,
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
 
     async def _load_grants(
         self,
@@ -160,10 +180,10 @@ class ProductCollaborationSaverAlchemy(ProductCollaborationSaver):
         )
 
 
-def _row_to_collaborator(row: sa.Row[Any]) -> CollaboratorView | None:
+def _row_to_collaborator(row: sa.Row[Any]) -> UserRefView | None:
     if row.collaborator_oid is None:
         return None
-    return CollaboratorView(
+    return UserRefView(
         oid=UserID(row.collaborator_oid),
         email=row.collaborator_email,
         first_name=row.collaborator_first_name,
@@ -237,6 +257,7 @@ class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
             product_collaborations_table.c.invite_expires_at,
             product_collaborations_table.c.created_at,
             product_collaborations_table.c.accepted_at,
+            product_collaborations_table.c.declined_at,
             product_collaborations_table.c.revoked_at,
             users_table.c.oid.label("collaborator_oid"),
             users_table.c.email.label("collaborator_email"),
@@ -265,6 +286,7 @@ class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
             invite_expires_at=row.invite_expires_at,
             created_at=row.created_at,
             accepted_at=row.accepted_at,
+            declined_at=row.declined_at,
             revoked_at=row.revoked_at,
             grants=grants,
         )

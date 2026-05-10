@@ -6,6 +6,7 @@ from learnic.application.common.errors import (
     EmailNotVerifiedError,
     InvalidCredentialsError,
 )
+from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.access_tokens import (
     AccessTokenService,
@@ -29,11 +30,13 @@ class LoginCommand:
 class LoginCommandHandler:
     def __init__(
         self,
+        transaction: Transaction,
         user_gateway: UserGateway,
         hasher: PasswordHasher,
         access_tokens: AccessTokenService,
         refresh_store: RefreshTokenStore,
     ) -> None:
+        self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
         self._hasher: Final = hasher
         self._access_tokens: Final = access_tokens
@@ -50,6 +53,7 @@ class LoginCommandHandler:
 
         access = self._access_tokens.issue(user.oid)
         refresh = await self._refresh_store.issue(user.oid, device=data.device)
+        await self._transaction.commit()
         return TokenPair(
             access_token=access.token,
             access_expires_at=access.payload.expires_at,

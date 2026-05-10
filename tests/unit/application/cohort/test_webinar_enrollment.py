@@ -23,7 +23,7 @@ from learnic.application.common.errors import (
     CohortFullError,
     EnrollmentClosedError,
     EntityNotFoundError,
-    NotResourceOwnerError,
+    InsufficientPermissionsError,
 )
 from learnic.entities.cohort.enums import CohortEnrollmentStatus
 from learnic.entities.cohort.models import Cohort
@@ -176,7 +176,7 @@ async def test_drop_self_drop_allowed(
     fake_transaction: AsyncMock,
     fake_enrollment_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_enrollment: WebinarEnrollment,
 ) -> None:
     fake_enrollment_gateway.with_id.return_value = existing_enrollment
@@ -184,7 +184,7 @@ async def test_drop_self_drop_allowed(
         transaction=fake_transaction,
         enrollment_gateway=fake_enrollment_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -203,7 +203,7 @@ async def test_drop_by_host_allowed(
     fake_transaction: AsyncMock,
     fake_enrollment_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     existing_enrollment: WebinarEnrollment,
     host_id: UserID,
@@ -214,7 +214,7 @@ async def test_drop_by_host_allowed(
         transaction=fake_transaction,
         enrollment_gateway=fake_enrollment_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -230,23 +230,26 @@ async def test_drop_by_stranger_raises(
     fake_transaction: AsyncMock,
     fake_enrollment_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
-    webinar_product: object,
     existing_enrollment: WebinarEnrollment,
     stranger_id: UserID,
 ) -> None:
     fake_enrollment_gateway.with_id.return_value = existing_enrollment
     fake_cohort_gateway.with_id.return_value = cohort
-    fake_product_gateway.with_id.return_value = webinar_product
+    fake_authorizer.require.side_effect = InsufficientPermissionsError(
+        user_id=stranger_id,
+        product_id=cohort.webinar_id,
+        permission="MANAGE_RELEASES",
+    )
     handler = DropWebinarEnrollmentCommandHandler(
         transaction=fake_transaction,
         enrollment_gateway=fake_enrollment_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             DropWebinarEnrollmentCommand(
                 actor_id=stranger_id,
@@ -260,7 +263,7 @@ async def test_complete_by_host_allowed(
     fake_transaction: AsyncMock,
     fake_enrollment_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     existing_enrollment: WebinarEnrollment,
     host_id: UserID,
@@ -271,7 +274,7 @@ async def test_complete_by_host_allowed(
         transaction=fake_transaction,
         enrollment_gateway=fake_enrollment_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -287,7 +290,7 @@ async def test_refund_missing_enrollment_raises(
     fake_transaction: AsyncMock,
     fake_enrollment_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_enrollment: WebinarEnrollment,
     host_id: UserID,
 ) -> None:
@@ -296,7 +299,7 @@ async def test_refund_missing_enrollment_raises(
         transaction=fake_transaction,
         enrollment_gateway=fake_enrollment_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     with pytest.raises(EntityNotFoundError):

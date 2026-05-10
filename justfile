@@ -5,6 +5,17 @@ compose_dev := "docker compose -f docker-compose.dev.yaml"
 _default:
     @just --list --unsorted
 
+[private]
+[doc("Kill any processes listening on the given TCP port")]
+_kill-port port:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pids=$(lsof -ti tcp:{{ port }} 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        echo "Freeing port {{ port }} (killing PIDs: $pids)"
+        kill -9 $pids 2>/dev/null || true
+    fi
+
 [doc("Run ruff + codespell + mypy + bandit + semgrep")]
 check:
     poetry run ruff check --exit-non-zero-on-fix
@@ -18,6 +29,7 @@ check:
 dev-up:
     #!/usr/bin/env bash
     set -euo pipefail
+    just _kill-port "$UVICORN_PORT"
     {{compose_dev}} up -d --wait postgres minio redis
     {{compose_dev}} exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
         -v ON_ERROR_STOP=1 -q -v new_pw="$POSTGRES_PASSWORD" >/dev/null <<SQL
@@ -35,6 +47,10 @@ dev-down:
 
 [doc("Build and start the production-like stack")]
 prod-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _kill-port 80
+    just _kill-port 443
     docker compose up -d --build --wait
 
 [doc("Stop the production-like stack (keeps volumes)")]

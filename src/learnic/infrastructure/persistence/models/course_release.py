@@ -12,6 +12,7 @@ with imperative mapping).
 from enum import StrEnum
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import composite
 
 from learnic.entities.course_block.constants import (
@@ -245,6 +246,19 @@ course_release_rutube_video_blocks_table = sa.Table(
         sa.String(VIDEO_TITLE_MAX_LEN),
         nullable=True,
     ),
+)
+
+
+course_release_code_blocks_table = sa.Table(
+    "course_release_code_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("tabs", JSONB, nullable=False),
 )
 
 

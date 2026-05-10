@@ -7,10 +7,10 @@ Sits next to :class:`Authorizer` and answers two questions:
    revoke them, etc.)?
 
 The rule is strict: ``actor.position < target.position``. Equality
-is forbidden so a Moderator cannot manage another Moderator and
-cannot grant their own role to anyone. The product author has the
-synthetic top position (``OWNER_POSITION = 0``) and outranks every
-real role.
+is forbidden so two collaborators at the same rank cannot manage
+each other and cannot grant their own role to anyone. The product
+author has the synthetic top position (``OWNER_POSITION = 0``) and
+outranks every real role.
 """
 
 from typing import Final, Protocol

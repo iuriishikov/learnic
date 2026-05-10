@@ -64,6 +64,7 @@ def _make_handler() -> tuple[
     AsyncMock,
     AsyncMock,
     AsyncMock,
+    AsyncMock,
 ]:
     transaction = AsyncMock()
     transaction.flush = AsyncMock()
@@ -77,6 +78,8 @@ def _make_handler() -> tuple[
     snapshotter = AsyncMock()
     event_bus = AsyncMock()
     event_bus.publish = AsyncMock()
+    product_event_bus = AsyncMock()
+    product_event_bus.publish = AsyncMock()
     handler = CreateCourseReleaseCommandHandler(
         transaction=transaction,
         authorizer=authorizer,
@@ -85,6 +88,7 @@ def _make_handler() -> tuple[
         release_gateway=release_gw,
         snapshotter=snapshotter,
         event_bus=event_bus,
+        product_event_bus=product_event_bus,
     )
     return (
         handler,
@@ -95,6 +99,7 @@ def _make_handler() -> tuple[
         release_gw,
         snapshotter,
         event_bus,
+        product_event_bus,
     )
 
 
@@ -110,6 +115,7 @@ async def test_first_release_publishes_course_and_returns_release() -> None:
         release_gw,
         snapshotter,
         _,
+        product_event_bus,
     ) = _make_handler()
     product_gw.with_id.return_value = course
     release_gw.latest_for_product.return_value = None
@@ -134,6 +140,13 @@ async def test_first_release_publishes_course_and_returns_release() -> None:
     assert course.status.value == "published"
     tx.flush.assert_awaited_once()
     tx.commit.assert_awaited_once()
+    product_event_bus.publish.assert_awaited_once()
+    event = product_event_bus.publish.call_args.args[0]
+    assert event.kind.value == "published"
+    assert event.product_id == course.oid
+    assert event.actor_id == author
+    assert event.payload["status"] == "published"
+    assert "published_at" in event.payload
 
 
 async def test_subsequent_release_does_not_change_status() -> None:
@@ -155,6 +168,7 @@ async def test_subsequent_release_does_not_change_status() -> None:
         release_gw,
         snapshotter,
         _,
+        product_event_bus,
     ) = _make_handler()
     product_gw.with_id.return_value = course
     release_gw.latest_for_product.return_value = previous
@@ -174,6 +188,7 @@ async def test_subsequent_release_does_not_change_status() -> None:
         release.version.patch,
     ) == (1, 1, 3)
     snapshotter.snapshot.assert_awaited_once()
+    product_event_bus.publish.assert_not_awaited()
 
 
 async def test_release_for_webinar_raises() -> None:
@@ -191,6 +206,7 @@ async def test_release_for_webinar_raises() -> None:
         release_gw,
         snapshotter,
         _,
+        product_event_bus,
     ) = _make_handler()
     product_gw.with_id.return_value = webinar
 
@@ -205,6 +221,7 @@ async def test_release_for_webinar_raises() -> None:
     saver.add_one.assert_not_called()
     snapshotter.snapshot.assert_not_awaited()
     tx.commit.assert_not_called()
+    product_event_bus.publish.assert_not_awaited()
 
 
 async def test_release_non_owner_raises() -> None:
@@ -220,6 +237,7 @@ async def test_release_non_owner_raises() -> None:
         _,
         snapshotter,
         _,
+        product_event_bus,
     ) = _make_handler()
     product_gw.with_id.return_value = course
     authorizer.require.side_effect = InsufficientPermissionsError(
@@ -238,6 +256,7 @@ async def test_release_non_owner_raises() -> None:
         )
     saver.add_one.assert_not_called()
     snapshotter.snapshot.assert_not_awaited()
+    product_event_bus.publish.assert_not_awaited()
 
 
 async def test_release_missing_product_raises() -> None:
@@ -250,6 +269,7 @@ async def test_release_missing_product_raises() -> None:
         _,
         _,
         _,
+        product_event_bus,
     ) = _make_handler()
     product_gw.with_id.return_value = None
 
@@ -261,3 +281,4 @@ async def test_release_missing_product_raises() -> None:
                 kind=CourseReleaseKind.PATCH,
             ),
         )
+    product_event_bus.publish.assert_not_awaited()

@@ -18,14 +18,8 @@ class EmptyPermissionSetError(FieldError):
     """Raised when a role is constructed with no permissions.
 
     A role with zero permissions is meaningless — the closest
-    "no-access" semantics is no collaboration at all. Bottom of
-    the public hierarchy is the ``VIEWER`` system role with
-    ``READ_PRODUCT``.
+    "no-access" semantics is no collaboration at all.
     """
-
-
-class CannotMutateSystemRoleError(DomainError):
-    """Raised on attempts to modify or delete a SYSTEM-kind role."""
 
 
 class InvalidRolePositionError(FieldError):

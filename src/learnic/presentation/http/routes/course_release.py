@@ -345,7 +345,10 @@ async def list_releases(
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
 ) -> list[CourseReleaseSummarySchema]:
-    """Return all releases of a course, newest first. Author-only.
+    """Return all releases of a course, newest first.
+
+    Caller needs ``READ_PRODUCT`` on the product (owner or any
+    collaborator with that permission).
 
     Returns:
         List of :class:`CourseReleaseSummarySchema` ordered by
@@ -353,7 +356,8 @@ async def list_releases(
 
     Raises:
         InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: HTTP 403.
+        InsufficientPermissionsError: HTTP 403 — caller has no
+            collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404.
         NotACourseError: HTTP 409.
     """
@@ -382,7 +386,10 @@ async def get_release_content(
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     release_id: Annotated[UUID, _RELEASE_ID_PATH],
 ) -> CourseReleaseContentSchema:
-    """Return the full content tree of one release. Author-only.
+    """Return the full content tree of one release.
+
+    Caller needs ``READ_PRODUCT`` on the product (owner or any
+    collaborator with that permission).
 
     Returns:
         :class:`CourseReleaseContentSchema` — modules + lessons +
@@ -391,7 +398,8 @@ async def get_release_content(
 
     Raises:
         InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: HTTP 403.
+        InsufficientPermissionsError: HTTP 403 — caller has no
+            collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404 — product or release not
             found, or ``release_id`` doesn't belong to
             ``product_id``.

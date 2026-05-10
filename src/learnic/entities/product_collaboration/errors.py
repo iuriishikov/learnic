@@ -31,8 +31,20 @@ class CannotAcceptInThisStatusError(DomainError):
     status: str
 
 
+class CannotDeclineInThisStatusError(DomainError):
+    """Raised when ``decline_in_app()`` is called on a non-pending collaboration."""
+
+    status: str
+
+
 class CannotRevokeInThisStatusError(DomainError):
-    """Raised when ``revoke()`` is called on an already-revoked collaboration."""
+    """Raised when ``revoke()`` is called on a terminal collaboration.
+
+    Both ``REVOKED`` and ``DECLINED`` are terminal — the row is
+    preserved for audit and cannot be revoked again.
+    """
+
+    status: str
 
 
 class CannotMutateInactiveCollaborationError(DomainError):

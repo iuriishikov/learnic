@@ -47,6 +47,13 @@ def fake_cohort_gateway() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_authorizer() -> AsyncMock:
+    authorizer = AsyncMock()
+    authorizer.require = AsyncMock(return_value=None)
+    return authorizer
+
+
+@pytest.fixture
 def author_id() -> UserID:
     return UserID(uuid.uuid4())
 

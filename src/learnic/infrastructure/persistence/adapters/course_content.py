@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.course_content import (
+    CodeBlockView,
+    CodeTabView,
     CourseContentReader,
     CourseDraftView,
     DraftLessonView,
@@ -20,6 +22,7 @@ from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.product.ids import ProductID
 from learnic.infrastructure.persistence.models.course_block import (
+    code_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -31,6 +34,17 @@ from learnic.infrastructure.persistence.models.course_lesson import (
 from learnic.infrastructure.persistence.models.course_module import (
     course_modules_table,
 )
+
+
+def _jsonb_to_tab_views(raw: Any) -> list[CodeTabView]:
+    return [
+        CodeTabView(
+            label=item["label"],
+            source=item["source"],
+            language=item["language"],
+        )
+        for item in raw
+    ]
 
 
 def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
@@ -48,6 +62,13 @@ def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
             oid=LessonBlockID(row.oid),
             position=row.position,
             source=row.source,
+        )
+    if block_type is BlockType.CODE:
+        return CodeBlockView(
+            type=BlockType.CODE,
+            oid=LessonBlockID(row.oid),
+            position=row.position,
+            tabs=_jsonb_to_tab_views(row.code_tabs),
         )
     return RutubeVideoBlockView(
         type=BlockType.RUTUBE_VIDEO,
@@ -103,6 +124,7 @@ class CourseContentReaderAlchemy(CourseContentReader):
                     "rutube_external_id",
                 ),
                 rutube_video_blocks_table.c.title.label("rutube_title"),
+                code_blocks_table.c.tabs.label("code_tabs"),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -116,6 +138,10 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 .outerjoin(
                     rutube_video_blocks_table,
                     lesson_blocks_table.c.oid == rutube_video_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    code_blocks_table,
+                    lesson_blocks_table.c.oid == code_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == product_id)

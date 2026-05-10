@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated, Final, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
@@ -7,6 +7,11 @@ from fastapi import Depends, Path, Request, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
+from learnic.application.commands.course_block.add_code import (
+    AddCodeBlockCommand,
+    AddCodeBlockCommandHandler,
+    CodeTabInput,
+)
 from learnic.application.commands.course_block.add_html import (
     AddHtmlBlockCommand,
     AddHtmlBlockCommandHandler,
@@ -26,6 +31,10 @@ from learnic.application.commands.course_block.delete import (
 from learnic.application.commands.course_block.reorder import (
     ReorderLessonBlocksCommand,
     ReorderLessonBlocksCommandHandler,
+)
+from learnic.application.commands.course_block.update_code import (
+    UpdateCodeBlockCommand,
+    UpdateCodeBlockCommandHandler,
 )
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommand,
@@ -90,6 +99,7 @@ from learnic.application.common.errors import (
     WrongBlockTypeError,
 )
 from learnic.application.common.persistence.course_content import (
+    CodeBlockView,
     CourseDraftView,
     DraftLessonView,
     DraftModuleView,
@@ -103,11 +113,14 @@ from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQueryHandler,
 )
 from learnic.entities.course_block.constants import (
+    CODE_BLOCK_MAX_LEN,
+    CODE_BLOCK_MAX_TABS,
+    CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     VIDEO_TITLE_MAX_LEN,
 )
-from learnic.entities.course_block.enums import BlockType
+from learnic.entities.course_block.enums import BlockType, CodeBlockLanguage
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_lesson.constants import LESSON_TITLE_MAX_LEN
 from learnic.entities.course_lesson.ids import CourseLessonID
@@ -491,19 +504,97 @@ class RutubeVideoBlockSchema(BaseModel):
         )
 
 
+class CodeTabSchema(BaseModel):
+    """One tab inside a :class:`CodeBlockSchema`.
+
+    A code block always carries a non-empty ``tabs`` list. For
+    single-tab blocks the frontend hides the tab strip; for
+    multi-tab blocks (e.g. ``npm`` / ``pnpm`` / ``yarn``) every
+    label must be non-empty and unique.
+    """
+
+    label: str = Field(
+        description=(
+            "Tab label shown in the strip. Empty string is only "
+            "allowed when the block has a single tab. "
+            f"Max length {CODE_TAB_LABEL_MAX_LEN} chars."
+        ),
+        max_length=CODE_TAB_LABEL_MAX_LEN,
+        examples=["npm", "pnpm", "yarn"],
+    )
+    source: str = Field(
+        description=(
+            "Verbatim source code for this tab. Whitespace is "
+            f"preserved; may be empty. Max length {CODE_BLOCK_MAX_LEN} chars."
+        ),
+        max_length=CODE_BLOCK_MAX_LEN,
+        examples=["npm install react"],
+    )
+    language: CodeBlockLanguage = Field(
+        description=(
+            "Syntax-highlight language for this tab. Matches the "
+            "frontend tokenizer's supported set."
+        ),
+        examples=[CodeBlockLanguage.BASH],
+    )
+
+
+class CodeBlockSchema(BaseModel):
+    """Source-code lesson-block projection (read-only).
+
+    A code block holds one or more tabs (variants). The most
+    common case is a single tab — the tab strip is hidden client-
+    side. Multi-tab blocks carry variant snippets like ``npm`` /
+    ``pnpm`` / ``yarn`` that share intent but differ in tooling.
+    """
+
+    type: Literal[BlockType.CODE] = Field(
+        default=BlockType.CODE,
+        description="Discriminator — always `code` for this schema.",
+    )
+    oid: UUID = Field(examples=["f6a7b8c9-0d1e-4f2a-3b4c-5d6e7f8a9b0c"])
+    position: int = Field(examples=[3])
+    tabs: list[CodeTabSchema] = Field(
+        description=(
+            "Ordered list of code variants. Always non-empty; "
+            f"capped at {CODE_BLOCK_MAX_TABS} tabs (`CODE_BLOCK_MAX_TABS`)."
+        ),
+        min_length=1,
+        max_length=CODE_BLOCK_MAX_TABS,
+    )
+
+    @classmethod
+    def from_view(cls, view: CodeBlockView) -> Self:
+        return cls(
+            type=BlockType.CODE,
+            oid=view.oid,
+            position=view.position,
+            tabs=[
+                CodeTabSchema(
+                    label=t.label,
+                    source=t.source,
+                    language=CodeBlockLanguage(t.language),
+                )
+                for t in view.tabs
+            ],
+        )
+
+
 LessonBlockSchema = Annotated[
-    HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema,
+    HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema | CodeBlockSchema,
     Discriminator("type"),
 ]
 
 
 def _block_view_to_schema(
     view: LessonBlockView,
-) -> HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema:
+) -> HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema | CodeBlockSchema:
     if isinstance(view, HtmlBlockView):
         return HtmlBlockSchema.from_view(view)
     if isinstance(view, KatexBlockView):
         return KatexBlockSchema.from_view(view)
+    if isinstance(view, CodeBlockView):
+        return CodeBlockSchema.from_view(view)
     return RutubeVideoBlockSchema.from_view(view)
 
 
@@ -1046,7 +1137,7 @@ async def delete_lesson(
 
 @router.get(
     "/{course_id}/content/draft",
-    summary="Read the full draft tree of a course (author-only)",
+    summary="Read the full draft tree of a course",
     operation_id="getCourseDraft",
     response_model=CourseDraftSchema,
     dependencies=_AUTH_SECURITY,
@@ -1060,10 +1151,10 @@ async def get_draft(
 ) -> CourseDraftSchema:
     """Return the full draft tree of the course (modules + lessons + blocks).
 
-    Author-only — non-owners get HTTP 403 ``NotResourceOwner``.
-    Each lesson carries an ordered list of typed blocks
-    (``html`` / ``katex`` / ``rutube_video``) under a discriminated union
-    on ``type``.
+    Caller needs ``READ_PRODUCT`` on the product (owner or any
+    collaborator with that permission). Each lesson carries an
+    ordered list of typed blocks (``html`` / ``katex`` /
+    ``rutube_video``) under a discriminated union on ``type``.
 
     Returns:
         :class:`CourseDraftSchema` with modules ordered by position,
@@ -1072,7 +1163,8 @@ async def get_draft(
 
     Raises:
         InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: HTTP 403.
+        InsufficientPermissionsError: HTTP 403 — caller has no
+            collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404 — course not found.
         NotACourseError: HTTP 409 — product is a webinar.
     """
@@ -1177,6 +1269,82 @@ class UpdateKatexBlockSchema(BaseModel):
         min_length=1,
         max_length=KATEX_BLOCK_MAX_LEN,
         examples=[r"E = mc^2"],
+    )
+
+
+class CodeTabPayload(BaseModel):
+    """Per-tab payload for code-block create/update endpoints.
+
+    Same shape as :class:`CodeTabSchema` but on the request side.
+    Mirrors the domain :class:`CodeTabInput` directly.
+    """
+
+    label: str = Field(
+        description=(
+            f"Tab label, max {CODE_TAB_LABEL_MAX_LEN} chars. Empty "
+            "string is only valid for single-tab blocks."
+        ),
+        max_length=CODE_TAB_LABEL_MAX_LEN,
+        examples=["npm"],
+    )
+    source: str = Field(
+        description=(
+            f"Verbatim source. Max length {CODE_BLOCK_MAX_LEN} chars."
+        ),
+        max_length=CODE_BLOCK_MAX_LEN,
+        examples=["npm install react"],
+    )
+    language: CodeBlockLanguage = Field(
+        description="Syntax-highlight language for this tab.",
+        examples=[CodeBlockLanguage.BASH],
+    )
+
+
+_CODE_TABS_EXAMPLE: Final[Any] = [
+    {"label": "npm", "source": "npm install react", "language": "bash"},
+    {"label": "pnpm", "source": "pnpm add react", "language": "bash"},
+    {"label": "yarn", "source": "yarn add react", "language": "bash"},
+]
+
+
+class AddCodeBlockSchema(BaseModel):
+    """Body for ``POST /courses/{course_id}/lessons/{lesson_id}/blocks/code``.
+
+    Sources are taken verbatim — no sanitization, no whitespace
+    stripping. ``tabs`` must be non-empty and is capped at
+    ``CODE_BLOCK_MAX_TABS``. Multi-tab blocks must have non-empty
+    unique labels; single-tab blocks may have an empty label.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"tabs": _CODE_TABS_EXAMPLE}]},
+    )
+
+    tabs: list[CodeTabPayload] = Field(
+        description=(
+            "Code variants. At least one required, at most "
+            f"{CODE_BLOCK_MAX_TABS} (`CODE_BLOCK_MAX_TABS`)."
+        ),
+        min_length=1,
+        max_length=CODE_BLOCK_MAX_TABS,
+    )
+
+
+class UpdateCodeBlockSchema(BaseModel):
+    """Body for ``PATCH /courses/{course_id}/blocks/{block_id}/code``.
+
+    Replaces the entire tabs list. Partial / per-tab updates are
+    intentionally not supported — see :class:`UpdateCodeBlockCommand`.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"tabs": _CODE_TABS_EXAMPLE}]},
+    )
+
+    tabs: list[CodeTabPayload] = Field(
+        description="Full new tabs list — replaces the existing one.",
+        min_length=1,
+        max_length=CODE_BLOCK_MAX_TABS,
     )
 
 
@@ -1412,6 +1580,100 @@ async def update_katex_block(
             actor_id=ctx.user_id,
             block_id=LessonBlockID(block_id),
             source=payload.source,
+        ),
+    )
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/code",
+    summary="Add a code block to a lesson",
+    operation_id="addCodeBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def add_code_block(
+    request: Request,
+    payload: AddCodeBlockSchema,
+    interactor: FromDishka[AddCodeBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> CreatedLessonBlockSchema:
+    """Append a source-code block to the lesson. Author-only.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        FieldError: HTTP 422 — language unsupported or source too long.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        AddCodeBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            tabs=tuple(
+                CodeTabInput(
+                    label=t.label,
+                    source=t.source,
+                    language=t.language.value,
+                )
+                for t in payload.tabs
+            ),
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/code",
+    summary="Replace a code block's source and language",
+    operation_id="updateCodeBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE},
+)
+async def update_code_block(
+    request: Request,
+    payload: UpdateCodeBlockSchema,
+    interactor: FromDishka[UpdateCodeBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> None:
+    """Replace the body of an existing code block.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't of type `code`.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdateCodeBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            tabs=tuple(
+                CodeTabInput(
+                    label=t.label,
+                    source=t.source,
+                    language=t.language.value,
+                )
+                for t in payload.tabs
+            ),
         ),
     )
 

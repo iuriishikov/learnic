@@ -32,17 +32,29 @@ from learnic.application.commands.auth.register import (
 from learnic.application.commands.auth.request_password_reset import (
     RequestPasswordResetCommandHandler,
 )
+from learnic.application.commands.auth.resend_verification import (
+    ResendVerificationCommandHandler,
+)
 from learnic.application.commands.auth.reset_password import (
     ResetPasswordCommandHandler,
 )
 from learnic.application.commands.auth.verify_email import (
     VerifyEmailCommandHandler,
 )
+from learnic.application.commands.auth.verify_token import (
+    VerifyTokenCommandHandler,
+)
 from learnic.application.commands.auth.verify_wait import (
     VerifyWaitCommandHandler,
 )
+from learnic.application.queries.auth.token_status import (
+    GetTokenStatusQueryHandler,
+)
 from learnic.application.commands.cohort.add import (
     AddCohortCommandHandler,
+)
+from learnic.application.commands.course_block.add_code import (
+    AddCodeBlockCommandHandler,
 )
 from learnic.application.commands.course_block.add_html import (
     AddHtmlBlockCommandHandler,
@@ -58,6 +70,9 @@ from learnic.application.commands.course_block.delete import (
 )
 from learnic.application.commands.course_block.reorder import (
     ReorderLessonBlocksCommandHandler,
+)
+from learnic.application.commands.course_block.update_code import (
+    UpdateCodeBlockCommandHandler,
 )
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommandHandler,
@@ -182,6 +197,12 @@ from learnic.application.commands.product.update_webinar_defaults import (
 from learnic.application.commands.product_collaboration.accept import (
     AcceptCollaborationInviteCommandHandler,
 )
+from learnic.application.commands.product_collaboration.accept_in_app import (
+    AcceptCollaborationInAppCommandHandler,
+)
+from learnic.application.commands.product_collaboration.decline_in_app import (
+    DeclineCollaborationInAppCommandHandler,
+)
 from learnic.application.commands.product_collaboration.invite_by_email import (
     InviteCollaboratorByEmailCommandHandler,
 )
@@ -191,11 +212,20 @@ from learnic.application.commands.product_collaboration.invite_by_user import (
 from learnic.application.commands.product_collaboration.leave import (
     LeaveProductCommandHandler,
 )
+from learnic.application.commands.product_collaboration.reinvite import (
+    ReinviteCollaboratorCommandHandler,
+)
 from learnic.application.commands.product_collaboration.revoke import (
     RevokeCollaborationCommandHandler,
 )
 from learnic.application.commands.product_collaboration.update_grants import (
     UpdateCollaborationGrantsCommandHandler,
+)
+from learnic.application.commands.notification.mark_all_as_read import (
+    MarkAllNotificationsAsReadCommandHandler,
+)
+from learnic.application.commands.notification.mark_as_read import (
+    MarkNotificationAsReadCommandHandler,
 )
 from learnic.application.commands.product_qa.add import (
     AddProductQACommandHandler,
@@ -220,6 +250,12 @@ from learnic.application.queries.product_collaboration.list_for_product import (
 )
 from learnic.application.queries.product_collaboration.list_my import (
     ListMyCollaborationsQueryHandler,
+)
+from learnic.application.queries.notification.get_counters import (
+    GetMyNotificationCountersQueryHandler,
+)
+from learnic.application.queries.notification.list_my import (
+    ListMyNotificationsQueryHandler,
 )
 from learnic.application.queries.role.get import GetRoleQueryHandler
 from learnic.application.queries.role.list import (
@@ -348,6 +384,27 @@ from learnic.application.common.persistence.product_qa import (
     ProductQAGateway,
     ProductQAReader,
 )
+from learnic.application.common.notifications.event_bus import (
+    NotificationEventBus,
+)
+from learnic.application.common.notifications.gateway import (
+    NotificationGateway,
+)
+from learnic.application.common.notifications.publisher import (
+    NotificationPublisher,
+)
+from learnic.application.common.notifications.reader import (
+    NotificationReader,
+)
+from learnic.application.common.notification_preferences.gateway import (
+    NotificationPreferencesGateway,
+)
+from learnic.application.common.notification_preferences.reader import (
+    NotificationPreferencesReader,
+    NotificationPreferencesReaderService,
+)
+from learnic.application.common.push.gateway import PushSubscriptionGateway
+from learnic.application.common.push.sender import PushSender
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
     ProductCollaborationReader,
@@ -360,6 +417,7 @@ from learnic.application.common.persistence.role import (
 )
 from learnic.application.common.persistence.session import SessionsReader
 from learnic.application.common.auth.authorizer import Authorizer
+from learnic.application.common.auth.confirm_events import ConfirmEventBus
 from learnic.application.common.auth.resource_lineage import (
     ResourceLineageReader,
 )
@@ -392,9 +450,6 @@ from learnic.application.common.collaboration.event_bus import (
     ContentEventBus,
 )
 from learnic.application.common.presence.event_bus import PresenceEventBus
-from learnic.application.common.product_collaboration_events.event_bus import (
-    CollaborationEventBus,
-)
 from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
 )
@@ -493,6 +548,24 @@ from learnic.application.queries.webinar_session.get import (
 from learnic.application.queries.webinar_session.list_for_cohort import (
     GetCohortSessionsQueryHandler,
 )
+from learnic.application.commands.notification_preferences.update import (
+    UpdateNotificationPreferencesCommandHandler,
+)
+from learnic.application.commands.push.send_to_user import (
+    SendPushToUserCommandHandler,
+)
+from learnic.application.commands.push.subscribe import (
+    SubscribePushCommandHandler,
+)
+from learnic.application.commands.push.unsubscribe import (
+    UnsubscribePushCommandHandler,
+)
+from learnic.application.queries.notification_preferences.get_my import (
+    GetMyNotificationPreferencesQueryHandler,
+)
+from learnic.application.queries.push.list_my import (
+    ListMyPushSubscriptionsQueryHandler,
+)
 from learnic.infrastructure.configs import (
     ASGIConfig,
     Configs,
@@ -502,6 +575,7 @@ from learnic.infrastructure.configs import (
     S3Config,
     SecurityConfig,
     TaskIQConfig,
+    WebPushConfig,
 )
 from learnic.infrastructure.email.adapters.rusender import (
     RusenderEmailSender,
@@ -554,6 +628,20 @@ from learnic.infrastructure.persistence.adapters.product_qa import (
     ProductQAMapperAlchemy,
     ProductQAReaderAlchemy,
 )
+from learnic.infrastructure.notifications.event_bus_redis import (
+    NotificationEventBusRedis,
+)
+from learnic.infrastructure.persistence.adapters.notification import (
+    NotificationGatewayAlchemy,
+    NotificationReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.notification_preferences import (
+    NotificationPreferencesMapperAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.push_subscription import (
+    PushSubscriptionGatewayAlchemy,
+)
+from learnic.infrastructure.push.sender_pywebpush import PywebpushSender
 from learnic.infrastructure.persistence.adapters.product_collaboration import (
     ProductCollaborationMapperAlchemy,
     ProductCollaborationReaderAlchemy,
@@ -568,6 +656,9 @@ from learnic.infrastructure.persistence.adapters.role import (
     RoleSaverAlchemy,
 )
 from learnic.infrastructure.auth.authorizer import AuthorizerService
+from learnic.infrastructure.auth.confirm_events_redis import (
+    ConfirmEventBusRedis,
+)
 from learnic.infrastructure.auth.product_owner_resolver import (
     ProductOwnerResolverAlchemy,
 )
@@ -608,9 +699,6 @@ from learnic.infrastructure.collaboration.event_bus_redis import (
 )
 from learnic.infrastructure.presence.adapters.event_bus_redis import (
     PresenceEventBusRedis,
-)
-from learnic.infrastructure.product_collaboration_events.event_bus_redis import (
-    CollaborationEventBusRedis,
 )
 from learnic.infrastructure.product_events.event_bus_redis import (
     ProductEventBusRedis,
@@ -668,6 +756,10 @@ class ConfigsProvider(Provider):
     @provide
     def security_config(self, configs: Configs) -> SecurityConfig:
         return configs.security
+
+    @provide
+    def web_push_config(self, configs: Configs) -> WebPushConfig:
+        return configs.web_push
 
 
 class DBProvider(Provider):
@@ -821,6 +913,27 @@ class GatewaysProvider(Provider):
         ProductCollaborationSaverAlchemy,
         provides=ProductCollaborationSaver,
     )
+    notification_gateway = provide(
+        NotificationGatewayAlchemy,
+        provides=NotificationGateway,
+    )
+    notification_reader = provide(
+        NotificationReaderAlchemy,
+        provides=NotificationReader,
+    )
+    notification_publisher = provide(NotificationPublisher)
+    notification_preferences_gateway = provide(
+        NotificationPreferencesMapperAlchemy,
+        provides=NotificationPreferencesGateway,
+    )
+    notification_preferences_reader = provide(
+        NotificationPreferencesReaderService,
+        provides=NotificationPreferencesReader,
+    )
+    push_subscription_gateway = provide(
+        PushSubscriptionGatewayAlchemy,
+        provides=PushSubscriptionGateway,
+    )
     resource_lineage_reader = provide(
         ResourceLineageReaderAlchemy,
         provides=ResourceLineageReader,
@@ -914,6 +1027,12 @@ class TasksProvider(Provider):
     scheduler = provide(TaskSchedulerTaskIQ, provides=TaskScheduler)
 
 
+class PushProvider(Provider):
+    scope = Scope.APP
+
+    sender = provide(PywebpushSender, provides=PushSender)
+
+
 class SchedulingProvider(Provider):
     scope = Scope.APP
 
@@ -961,13 +1080,19 @@ class ProductEventsProvider(Provider):
     event_bus = provide(ProductEventBusRedis, provides=ProductEventBus)
 
 
-class CollaborationEventsProvider(Provider):
+class NotificationEventsProvider(Provider):
     scope = Scope.APP
 
     event_bus = provide(
-        CollaborationEventBusRedis,
-        provides=CollaborationEventBus,
+        NotificationEventBusRedis,
+        provides=NotificationEventBus,
     )
+
+
+class ConfirmEventsProvider(Provider):
+    scope = Scope.APP
+
+    event_bus = provide(ConfirmEventBusRedis, provides=ConfirmEventBus)
 
 
 class InteractorsProvider(Provider):
@@ -988,6 +1113,9 @@ class InteractorsProvider(Provider):
     logout_all = provide(LogoutAllCommandHandler)
     verify_email = provide(VerifyEmailCommandHandler)
     verify_wait = provide(VerifyWaitCommandHandler)
+    verify_token = provide(VerifyTokenCommandHandler)
+    resend_verification = provide(ResendVerificationCommandHandler)
+    get_token_status = provide(GetTokenStatusQueryHandler)
     request_password_reset = provide(RequestPasswordResetCommandHandler)
     reset_password = provide(ResetPasswordCommandHandler)
 
@@ -1136,9 +1264,11 @@ class InteractorsProvider(Provider):
     add_html_block = provide(AddHtmlBlockCommandHandler)
     add_katex_block = provide(AddKatexBlockCommandHandler)
     add_rutube_video_block = provide(AddRutubeVideoBlockCommandHandler)
+    add_code_block = provide(AddCodeBlockCommandHandler)
     update_html_block = provide(UpdateHtmlBlockCommandHandler)
     update_katex_block = provide(UpdateKatexBlockCommandHandler)
     update_rutube_video_block = provide(UpdateRutubeVideoBlockCommandHandler)
+    update_code_block = provide(UpdateCodeBlockCommandHandler)
     reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
     delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
     get_course_draft = provide(GetCourseDraftQueryHandler)
@@ -1165,10 +1295,17 @@ class InteractorsProvider(Provider):
     accept_collaboration_invite = provide(
         AcceptCollaborationInviteCommandHandler,
     )
+    accept_collaboration_in_app = provide(
+        AcceptCollaborationInAppCommandHandler,
+    )
+    decline_collaboration_in_app = provide(
+        DeclineCollaborationInAppCommandHandler,
+    )
     update_collaboration_grants = provide(
         UpdateCollaborationGrantsCommandHandler,
     )
     revoke_collaboration = provide(RevokeCollaborationCommandHandler)
+    reinvite_collaborator = provide(ReinviteCollaboratorCommandHandler)
     leave_product = provide(LeaveProductCommandHandler)
     list_product_collaborators = provide(
         ListProductCollaboratorsQueryHandler,
@@ -1176,6 +1313,26 @@ class InteractorsProvider(Provider):
     list_my_collaborations = provide(ListMyCollaborationsQueryHandler)
     get_my_effective_permissions = provide(
         GetMyEffectivePermissionsQueryHandler,
+    )
+
+    list_my_notifications = provide(ListMyNotificationsQueryHandler)
+    get_my_notification_counters = provide(
+        GetMyNotificationCountersQueryHandler,
+    )
+    mark_notification_read = provide(MarkNotificationAsReadCommandHandler)
+    mark_all_notifications_read = provide(
+        MarkAllNotificationsAsReadCommandHandler,
+    )
+
+    subscribe_push = provide(SubscribePushCommandHandler)
+    unsubscribe_push = provide(UnsubscribePushCommandHandler)
+    list_my_push_subscriptions = provide(ListMyPushSubscriptionsQueryHandler)
+    send_push_to_user = provide(SendPushToUserCommandHandler)
+    get_my_notification_preferences = provide(
+        GetMyNotificationPreferencesQueryHandler,
+    )
+    update_notification_preferences = provide(
+        UpdateNotificationPreferencesCommandHandler,
     )
 
 
@@ -1228,12 +1385,14 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         SecurityProvider(),
         S3Provider(),
         TasksProvider(),
+        PushProvider(),
         SchedulingProvider(),
         RedisProvider(),
         PresenceProvider(),
         CollaborationProvider(),
         ProductEventsProvider(),
-        CollaborationEventsProvider(),
+        NotificationEventsProvider(),
+        ConfirmEventsProvider(),
         EmailProvider(),
         InteractorsProvider(),
         context={Configs: configs},

@@ -35,7 +35,7 @@ from learnic.entities.user.models import UserID
 async def test_close_then_open_enrollment(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -44,7 +44,7 @@ async def test_close_then_open_enrollment(
     close = CloseCohortEnrollmentCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
     await close.run(
         CloseCohortEnrollmentCommand(
@@ -57,7 +57,7 @@ async def test_close_then_open_enrollment(
     open_handler = OpenCohortEnrollmentCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
     await open_handler.run(
         OpenCohortEnrollmentCommand(
@@ -71,7 +71,7 @@ async def test_close_then_open_enrollment(
 async def test_mark_full_sets_status(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -79,7 +79,7 @@ async def test_mark_full_sets_status(
     handler = MarkCohortFullCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -91,7 +91,7 @@ async def test_mark_full_sets_status(
 async def test_lifecycle_start_complete_cancel(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -99,7 +99,7 @@ async def test_lifecycle_start_complete_cancel(
     start = StartCohortCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
     await start.run(StartCohortCommand(actor_id=host_id, cohort_id=cohort.oid))
     assert cohort.lifecycle_status is CohortLifecycleStatus.ACTIVE
@@ -107,7 +107,7 @@ async def test_lifecycle_start_complete_cancel(
     complete = CompleteCohortCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
     await complete.run(
         CompleteCohortCommand(actor_id=host_id, cohort_id=cohort.oid),
@@ -117,7 +117,7 @@ async def test_lifecycle_start_complete_cancel(
     cancel = CancelCohortCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
     await cancel.run(
         CancelCohortCommand(actor_id=host_id, cohort_id=cohort.oid),

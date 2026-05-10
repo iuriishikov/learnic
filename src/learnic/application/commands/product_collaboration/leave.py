@@ -5,17 +5,20 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     NotResourceOwnerError,
 )
+from learnic.application.common.notifications.publisher import (
+    NotificationPublisher,
+)
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
 )
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.product_collaboration_events import (
-    CollaborationEvent,
-    CollaborationEventBus,
-    CollaborationEventKind,
-    publish_collaboration_event,
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_collaboration_payload,
+    publish_product_event,
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.product.ids import ProductID
@@ -46,7 +49,8 @@ class LeaveProductCommandHandler:
         collab_gateway: ProductCollaborationGateway,
         user_gateway: UserGateway,
         scheduler: TaskScheduler,
-        event_bus: CollaborationEventBus,
+        event_bus: ProductEventBus,
+        notifications: NotificationPublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._product_gateway: Final = product_gateway
@@ -54,6 +58,7 @@ class LeaveProductCommandHandler:
         self._user_gateway: Final = user_gateway
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
+        self._notifications: Final = notifications
 
     async def run(self, data: LeaveProductCommand) -> None:
         product = await self._product_gateway.with_id(data.product_id)
@@ -77,13 +82,21 @@ class LeaveProductCommandHandler:
                 product_id=data.product_id,
                 collaborator_id=data.actor_id,
             )
-        await publish_collaboration_event(
+        await publish_product_event(
             self._event_bus,
-            kind=CollaborationEventKind.REVOKED,
+            kind=ProductEventKind.COLLABORATION_REVOKED,
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload=CollaborationEvent.make_payload(
+            payload=make_collaboration_payload(
                 collaboration_id=collab.oid,
                 collaborator_id=data.actor_id,
             ),
+        )
+        # The leaver's own ``invite_sent`` card (now in ACTIVE state
+        # since they accepted earlier) needs to flip to REVOKED in
+        # real time so their panel does not keep an "active" indicator
+        # for a collaboration they just walked away from.
+        await self._notifications.republish_for_collaboration(
+            recipient_id=data.actor_id,
+            collaboration_id=collab.oid,
         )

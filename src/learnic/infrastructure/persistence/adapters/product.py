@@ -6,21 +6,27 @@ from typing_extensions import override
 
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.product import (
-    AuthorView,
     ProductGateway,
     ProductReader,
     ProductView,
     WebinarDetailsView,
 )
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.file.ids import FileID
 from learnic.entities.product.enums import ProductStatus, ProductType
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.webinar_details import WebinarDetails
+from learnic.entities.product_collaboration.enums import (
+    CollaborationStatus,
+)
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.product import (
     product_webinar_details_table,
     products_table,
+)
+from learnic.infrastructure.persistence.models.product_collaboration import (
+    product_collaborations_table,
 )
 from learnic.infrastructure.persistence.models.user import users_table
 
@@ -68,8 +74,9 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
         name=row.name,
         description=row.description,
         total_duration_in_hours=row.total_duration_in_hours,
-        author=AuthorView(
+        author=UserRefView(
             oid=UserID(row.author_oid),
+            email=row.author_email,
             first_name=row.author_first_name,
             last_name=row.author_last_name,
             patronymic=row.author_patronymic,
@@ -98,6 +105,7 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.c.updated_at,
         products_table.c.cover_file_id,
         users_table.c.oid.label("author_oid"),
+        users_table.c.email.label("author_email"),
         users_table.c.first_name.label("author_first_name"),
         users_table.c.last_name.label("author_last_name"),
         users_table.c.patronymic.label("author_patronymic"),
@@ -131,14 +139,26 @@ class ProductReaderAlchemy(ProductReader):
         return _row_to_view(row)
 
     @override
-    async def for_author(
+    async def accessible_to(
         self,
-        author_id: UserID,
+        user_id: UserID,
         pagination: Pagination,
     ) -> list[ProductView]:
+        active_collab_product_ids = sa.select(
+            product_collaborations_table.c.product_id,
+        ).where(
+            product_collaborations_table.c.collaborator_id == user_id,
+            product_collaborations_table.c.status
+            == CollaborationStatus.ACTIVE.value,
+        )
         stmt = (
             _select_with_joins()
-            .where(products_table.c.author_id == author_id)
+            .where(
+                sa.or_(
+                    products_table.c.author_id == user_id,
+                    products_table.c.oid.in_(active_collab_product_ids),
+                ),
+            )
             .order_by(products_table.c.created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)

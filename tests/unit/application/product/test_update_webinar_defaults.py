@@ -21,6 +21,7 @@ async def test_update_replaces_all_fields(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     webinar_product: Product,
     author_id: UserID,
 ) -> None:
@@ -30,6 +31,7 @@ async def test_update_replaces_all_fields(
         authorizer=fake_authorizer,
         entity_saver=MagicMock(),
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     await handler.run(
@@ -57,12 +59,26 @@ async def test_update_replaces_all_fields(
     assert details.access_window_minutes is not None
     assert details.access_window_minutes.value == 20
     fake_transaction.commit.assert_awaited_once()
+    fake_event_bus.publish.assert_awaited_once()
+    event = fake_event_bus.publish.call_args.args[0]
+    assert event.kind.value == "webinar_defaults_updated"
+    assert event.product_id == webinar_product.oid
+    assert event.actor_id == author_id
+    assert event.payload == {
+        "total_lessons": 12,
+        "default_duration_minutes": 120,
+        "allow_recording": False,
+        "default_max_participants": 25,
+        "default_stream_url": "https://meet.example.com/new",
+        "access_window_minutes": 20,
+    }
 
 
 async def test_update_clears_optional_fields_with_none(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     webinar_product: Product,
     author_id: UserID,
 ) -> None:
@@ -72,6 +88,7 @@ async def test_update_clears_optional_fields_with_none(
         authorizer=fake_authorizer,
         entity_saver=MagicMock(),
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     await handler.run(
@@ -92,12 +109,18 @@ async def test_update_clears_optional_fields_with_none(
     assert details.default_max_participants is None
     assert details.default_stream_url is None
     assert details.access_window_minutes is None
+    fake_event_bus.publish.assert_awaited_once()
+    event = fake_event_bus.publish.call_args.args[0]
+    assert event.payload["default_max_participants"] is None
+    assert event.payload["default_stream_url"] is None
+    assert event.payload["access_window_minutes"] is None
 
 
 async def test_update_on_course_raises(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     course_product: Product,
     author_id: UserID,
 ) -> None:
@@ -107,6 +130,7 @@ async def test_update_on_course_raises(
         authorizer=fake_authorizer,
         entity_saver=MagicMock(),
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     with pytest.raises(NotAWebinarError):
@@ -123,12 +147,14 @@ async def test_update_on_course_raises(
             ),
         )
     fake_transaction.commit.assert_not_called()
+    fake_event_bus.publish.assert_not_awaited()
 
 
 async def test_update_non_owner_raises(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     webinar_product: Product,
     other_user_id: UserID,
 ) -> None:
@@ -143,6 +169,7 @@ async def test_update_non_owner_raises(
         authorizer=fake_authorizer,
         entity_saver=MagicMock(),
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     with pytest.raises(InsufficientPermissionsError):
@@ -159,6 +186,7 @@ async def test_update_non_owner_raises(
             ),
         )
     fake_transaction.commit.assert_not_called()
+    fake_event_bus.publish.assert_not_awaited()
 
 
 async def test_update_creates_details_when_missing(
@@ -166,6 +194,7 @@ async def test_update_creates_details_when_missing(
     fake_authorizer: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     author_id: UserID,
 ) -> None:
     bare_webinar = Product.create_webinar(
@@ -179,6 +208,7 @@ async def test_update_creates_details_when_missing(
         authorizer=fake_authorizer,
         entity_saver=fake_entity_saver,
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     await handler.run(
@@ -202,12 +232,17 @@ async def test_update_creates_details_when_missing(
     saved = fake_entity_saver.add_one.call_args.args[0]
     assert isinstance(saved, WebinarDetails)
     fake_transaction.commit.assert_awaited_once()
+    fake_event_bus.publish.assert_awaited_once()
+    event = fake_event_bus.publish.call_args.args[0]
+    assert event.kind.value == "webinar_defaults_updated"
+    assert event.payload["total_lessons"] == 6
 
 
 async def test_update_invalid_lessons_raises_field_error(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     webinar_product: Product,
     author_id: UserID,
 ) -> None:
@@ -217,6 +252,7 @@ async def test_update_invalid_lessons_raises_field_error(
         authorizer=fake_authorizer,
         entity_saver=MagicMock(),
         product_gateway=fake_product_gateway,
+        event_bus=fake_event_bus,
     )
 
     with pytest.raises(InvalidWebinarLessonsError):
@@ -233,3 +269,4 @@ async def test_update_invalid_lessons_raises_field_error(
             ),
         )
     fake_transaction.commit.assert_not_called()
+    fake_event_bus.publish.assert_not_awaited()

@@ -42,7 +42,7 @@ class DeleteCustomRoleCommandHandler:
 
     async def run(self, data: DeleteCustomRoleCommand) -> None:
         role = await self._role_gateway.with_id(data.role_id)
-        if role is None or role.product_id is None:
+        if role is None:
             raise EntityNotFoundError(data.role_id)
         await self._authorizer.require(
             data.actor_id,

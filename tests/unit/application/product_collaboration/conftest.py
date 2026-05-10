@@ -75,6 +75,7 @@ def fake_collab_gateway() -> AsyncMock:
     gw.with_id = AsyncMock(return_value=None)
     gw.active_for_product_and_user = AsyncMock(return_value=None)
     gw.pending_for_product_and_email = AsyncMock(return_value=None)
+    gw.count_email_invites_by_actor_since = AsyncMock(return_value=0)
     return gw
 
 
@@ -119,6 +120,14 @@ def fake_event_bus() -> AsyncMock:
     bus = AsyncMock()
     bus.publish = AsyncMock()
     return bus
+
+
+@pytest.fixture
+def fake_notifications() -> AsyncMock:
+    publisher = AsyncMock()
+    publisher.publish = AsyncMock()
+    publisher.republish_for_collaboration = AsyncMock()
+    return publisher
 
 
 @pytest.fixture

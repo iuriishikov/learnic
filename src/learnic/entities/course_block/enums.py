@@ -17,3 +17,54 @@ class BlockType(StrEnum):
     HTML = "html"
     KATEX = "katex"
     RUTUBE_VIDEO = "rutube_video"
+    CODE = "code"
+
+
+class CodeBlockLanguage(StrEnum):
+    """Supported syntax-highlight languages for :class:`CodeBlock`.
+
+    The set is bounded by the frontend tokenizer
+    (``shared/ui/code-block-tokenize.ts``) — every value here must
+    be renderable client-side. Adding a language means landing the
+    tokenizer support first, then extending this enum (and the
+    persisted `String(16)` column tolerates new members without a
+    DB migration).
+    """
+
+    # JS / TS family
+    TSX = "tsx"
+    TS = "ts"
+    JSX = "jsx"
+    JS = "js"
+    # Backend
+    PYTHON = "python"
+    GO = "go"
+    RUST = "rust"
+    JAVA = "java"
+    KOTLIN = "kotlin"
+    SWIFT = "swift"
+    PHP = "php"
+    RUBY = "ruby"
+    # Systems
+    C = "c"
+    CPP = "cpp"
+    CSHARP = "csharp"
+    # Web markup / styles
+    HTML = "html"
+    XML = "xml"
+    CSS = "css"
+    SCSS = "scss"
+    # Data / config
+    JSON = "json"
+    YAML = "yaml"
+    TOML = "toml"
+    SQL = "sql"
+    GRAPHQL = "graphql"
+    # Markup
+    MARKDOWN = "markdown"
+    # Shell
+    BASH = "bash"
+    SH = "sh"
+    DOCKERFILE = "dockerfile"
+    # Fallback
+    PLAIN = "plain"

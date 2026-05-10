@@ -4,6 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from learnic.application.common.pagination import Pagination
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.ids import (
@@ -28,27 +29,17 @@ class CollaborationGrantView:
 
 
 @dataclass(slots=True, frozen=True)
-class CollaboratorView:
-    """Read-side projection embedded in :class:`ProductCollaborationView`."""
-
-    oid: UserID
-    email: str
-    first_name: str
-    last_name: str
-    patronymic: str | None
-
-
-@dataclass(slots=True, frozen=True)
 class ProductCollaborationView:
     oid: ProductCollaborationID
     product_id: ProductID
-    collaborator: CollaboratorView | None
+    collaborator: UserRefView | None
     invited_email: str | None
     status: CollaborationStatus
     invited_by: UserID
     invite_expires_at: datetime | None
     created_at: datetime
     accepted_at: datetime | None
+    declined_at: datetime | None
     revoked_at: datetime | None
     grants: tuple[CollaborationGrantView, ...]
 
@@ -89,6 +80,23 @@ class ProductCollaborationGateway(Protocol):
 
         Used to prevent issuing two pending email invites to the
         same address for the same product.
+        """
+        ...
+
+    async def count_email_invites_by_actor_since(
+        self,
+        actor_id: UserID,
+        since: datetime,
+    ) -> int:
+        """Count email-based invites issued by ``actor_id`` since ``since``.
+
+        Used by ``InviteCollaboratorByEmailCommandHandler`` to enforce
+        a per-actor daily cap so a malicious / compromised account
+        cannot drain the upstream email provider's quota with a flood
+        of invitations to attacker-controlled addresses. Counts every
+        row created in the window across all products — accepted and
+        revoked rows included, because the email (and the upstream
+        token) was already spent regardless of later state.
         """
         ...
 

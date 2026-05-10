@@ -13,6 +13,8 @@ class NotificationKind(StrEnum):
 
     INVITE_SENT = "invite_sent"
     INVITE_ACCEPTED = "invite_accepted"
+    INVITE_DECLINED = "invite_declined"
+    ACCESS_REVOKED = "access_revoked"
 
 
 class NotificationCategory(StrEnum):
@@ -29,3 +31,17 @@ class NotificationCategory(StrEnum):
     FILES = "files"
     JOBS = "jobs"
     OTHER = "other"
+
+
+class NotificationChannel(StrEnum):
+    """Delivery channels controlled by user notification preferences.
+
+    ``IN_APP`` is the always-on bell-icon panel — user preferences
+    cannot disable it (``in-app`` toggle in the settings UI is
+    rendered as locked-on). ``PUSH`` and ``EMAIL`` are opt-in per
+    category and respected at the publisher boundary.
+    """
+
+    PUSH = "push"
+    EMAIL = "email"
+    IN_APP = "in_app"

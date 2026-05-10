@@ -4,9 +4,18 @@ from datetime import datetime, timezone
 from typing import Self
 
 from learnic.entities.common.base_entity import BaseEntity
+from learnic.entities.course_block.constants import CODE_BLOCK_MAX_TABS
 from learnic.entities.course_block.enums import BlockType
+from learnic.entities.course_block.errors import (
+    DuplicateCodeTabLabelError,
+    EmptyCodeTabsError,
+    TooManyCodeTabsError,
+)
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.value_objects import (
+    CodeLanguage,
+    CodeSource,
+    CodeTabLabel,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -165,4 +174,94 @@ class RutubeVideoBlock(BaseEntity[LessonBlockID]):
         )
 
 
-LessonBlock = HtmlBlock | KatexBlock | RutubeVideoBlock
+@dataclass(frozen=True, slots=True)
+class CodeTab:
+    """One tab inside a :class:`CodeBlock`.
+
+    A tab is a ``(label, source, language)`` triple. ``label`` is
+    visible to the student in the tab strip — empty string is only
+    allowed for single-tab blocks (where no strip is rendered).
+    Multi-tab blocks must have non-empty unique labels; that
+    invariant lives on the parent :class:`CodeBlock` so it can see
+    all tabs at once.
+    """
+
+    label: CodeTabLabel
+    source: CodeSource
+    language: CodeLanguage
+
+
+def _validate_tabs(tabs: list[CodeTab]) -> None:
+    """Apply the cross-tab invariants: count + label uniqueness."""
+    if not tabs:
+        raise EmptyCodeTabsError()
+    if len(tabs) > CODE_BLOCK_MAX_TABS:
+        raise TooManyCodeTabsError(CODE_BLOCK_MAX_TABS)
+    if len(tabs) > 1:
+        seen: set[str] = set()
+        for tab in tabs:
+            if not tab.label.value:
+                # Multi-tab blocks need real labels — empty label is
+                # only meaningful for the single-tab case.
+                raise DuplicateCodeTabLabelError("")
+            if tab.label.value in seen:
+                raise DuplicateCodeTabLabelError(tab.label.value)
+            seen.add(tab.label.value)
+
+
+@dataclass
+class CodeBlock(BaseEntity[LessonBlockID]):
+    """A draft source-code block inside a lesson.
+
+    A code block is a non-empty list of tabs (variants). The most
+    common case is a single tab — the tab strip is hidden client-
+    side, so the block reads as a plain code snippet. Multi-tab
+    blocks are for variant snippets like ``npm`` / ``pnpm`` /
+    ``yarn``: same intent, different shells.
+
+    ``language`` per tab is bound to :class:`CodeBlockLanguage`;
+    sources are preserved verbatim.
+    """
+
+    lesson_id: CourseLessonID
+    product_id: ProductID
+    tabs: list[CodeTab]
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        _validate_tabs(self.tabs)
+
+    @property
+    def type(self) -> BlockType:
+        return BlockType.CODE
+
+    def replace_tabs(self, new_tabs: list[CodeTab]) -> None:
+        _validate_tabs(new_tabs)
+        self.tabs = new_tabs
+
+    def change_position(self, new_position: int) -> None:
+        self.position = new_position
+
+    @classmethod
+    def create(
+        cls,
+        lesson_id: CourseLessonID,
+        product_id: ProductID,
+        tabs: list[CodeTab],
+        position: int,
+    ) -> Self:
+        now = datetime.now(timezone.utc)
+        return cls(
+            oid=LessonBlockID(uuid.uuid4()),
+            lesson_id=lesson_id,
+            product_id=product_id,
+            tabs=tabs,
+            position=position,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+LessonBlock = HtmlBlock | KatexBlock | RutubeVideoBlock | CodeBlock

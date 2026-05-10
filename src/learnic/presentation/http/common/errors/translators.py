@@ -92,6 +92,70 @@ class FieldErrorTranslator(ErrorTranslator[FieldErrorResponseModel]):
         )
 
 
+class RateLimitedResponseModel(BaseModel):
+    """Response for actor-scoped rate-limit violations.
+
+    Carries the ``limit`` that was hit and ``retry_after_seconds``
+    so the SPA can render a precise "try again in N hours" message
+    without parsing free-form text.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "error": "EmailInviteRateLimitExceeded",
+                    "limit": 10,
+                    "retry_after_seconds": 86400,
+                },
+            ],
+        },
+    )
+
+    error: str = Field(
+        description=(
+            "Raw class name of the rate-limit error without the "
+            "trailing `Error` suffix."
+        ),
+        examples=["EmailInviteRateLimitExceeded"],
+    )
+    limit: int = Field(
+        description=(
+            "Maximum number of operations allowed in the rolling "
+            "window before the limit triggers."
+        ),
+        examples=[10],
+    )
+    retry_after_seconds: int = Field(
+        description=(
+            "Hint at how long the caller must wait before retrying. "
+            "Mirrors the standard `Retry-After` HTTP header."
+        ),
+        examples=[86400],
+    )
+
+
+class RateLimitedTranslator(ErrorTranslator[RateLimitedResponseModel]):
+    """``{"error": "<ClassName>", "limit": int, "retry_after_seconds": int}``."""
+
+    @property
+    @override
+    def error_response_model_cls(
+        self,
+    ) -> type[RateLimitedResponseModel]:
+        return RateLimitedResponseModel
+
+    @override
+    def from_error(self, err: Exception) -> RateLimitedResponseModel:
+        return RateLimitedResponseModel(
+            error=_strip_error_suffix(type(err).__name__),
+            limit=int(getattr(err, "limit", 0)),
+            retry_after_seconds=int(
+                getattr(err, "retry_after_seconds", 0),
+            ),
+        )
+
+
 class EntityNotFoundResponseModel(BaseModel):
     """Response for a missing aggregate lookup."""
 

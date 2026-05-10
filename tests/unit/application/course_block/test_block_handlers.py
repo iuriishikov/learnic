@@ -3,6 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from learnic.application.commands.course_block.add_code import (
+    AddCodeBlockCommand,
+    AddCodeBlockCommandHandler,
+    CodeTabInput,
+)
 from learnic.application.commands.course_block.add_html import (
     AddHtmlBlockCommand,
     AddHtmlBlockCommandHandler,
@@ -23,6 +28,10 @@ from learnic.application.commands.course_block.reorder import (
     ReorderLessonBlocksCommand,
     ReorderLessonBlocksCommandHandler,
 )
+from learnic.application.commands.course_block.update_code import (
+    UpdateCodeBlockCommand,
+    UpdateCodeBlockCommandHandler,
+)
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommand,
     UpdateHtmlBlockCommandHandler,
@@ -42,7 +51,12 @@ from learnic.application.common.errors import (
     WrongBlockTypeError,
 )
 from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.errors import (
+    DuplicateCodeTabLabelError,
+    UnsupportedCodeLanguageError,
+)
 from learnic.entities.course_block.models import (
+    CodeBlock,
     HtmlBlock,
     KatexBlock,
     RutubeVideoBlock,
@@ -623,3 +637,190 @@ async def test_delete_block_missing_raises(
                 block_id=LessonBlockID(uuid.uuid4()),
             ),
         )
+
+
+# ---- add_code ----
+
+
+_NPM_TAB = CodeTabInput(label="npm", source="npm i react", language="bash")
+_PNPM_TAB = CodeTabInput(label="pnpm", source="pnpm add react", language="bash")
+_PLAIN_TS_TAB = CodeTabInput(label="", source="const x = 1;", language="ts")
+
+
+async def test_add_code_block_appends_multi_tab_at_next_position(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_lesson_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    course_lesson: CourseLesson,
+    code_block: CodeBlock,
+    author_id: UserID,
+) -> None:
+    fake_lesson_gateway.with_id.return_value = course_lesson
+    fake_product_gateway.with_id.return_value = course_product
+    fake_block_gateway.list_for_lesson.return_value = [code_block]
+    handler = AddCodeBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        lesson_gateway=fake_lesson_gateway,
+        block_gateway=fake_block_gateway,
+        event_bus=fake_event_bus,
+    )
+
+    oid = await handler.run(
+        AddCodeBlockCommand(
+            actor_id=author_id,
+            lesson_id=CourseLessonID(course_lesson.oid),
+            tabs=(_NPM_TAB, _PNPM_TAB),
+        ),
+    )
+    fake_block_gateway.add_code.assert_awaited_once()
+    saved = fake_block_gateway.add_code.call_args.args[0]
+    assert isinstance(saved, CodeBlock)
+    assert saved.oid == oid
+    assert saved.position == code_block.position + 1
+    assert [t.label.value for t in saved.tabs] == ["npm", "pnpm"]
+    assert [t.language.value for t in saved.tabs] == ["bash", "bash"]
+    fake_transaction.commit.assert_awaited_once()
+
+
+async def test_add_code_block_rejects_unsupported_language(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_lesson_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    course_lesson: CourseLesson,
+    author_id: UserID,
+) -> None:
+    fake_lesson_gateway.with_id.return_value = course_lesson
+    fake_product_gateway.with_id.return_value = course_product
+    fake_block_gateway.list_for_lesson.return_value = []
+    handler = AddCodeBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        lesson_gateway=fake_lesson_gateway,
+        block_gateway=fake_block_gateway,
+        event_bus=fake_event_bus,
+    )
+    with pytest.raises(UnsupportedCodeLanguageError):
+        await handler.run(
+            AddCodeBlockCommand(
+                actor_id=author_id,
+                lesson_id=CourseLessonID(course_lesson.oid),
+                tabs=(
+                    CodeTabInput(label="", source="x", language="haskell"),
+                ),
+            ),
+        )
+    fake_block_gateway.add_code.assert_not_awaited()
+    fake_transaction.commit.assert_not_called()
+
+
+async def test_add_code_block_rejects_duplicate_labels(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_lesson_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    course_lesson: CourseLesson,
+    author_id: UserID,
+) -> None:
+    fake_lesson_gateway.with_id.return_value = course_lesson
+    fake_product_gateway.with_id.return_value = course_product
+    fake_block_gateway.list_for_lesson.return_value = []
+    handler = AddCodeBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        lesson_gateway=fake_lesson_gateway,
+        block_gateway=fake_block_gateway,
+        event_bus=fake_event_bus,
+    )
+    with pytest.raises(DuplicateCodeTabLabelError):
+        await handler.run(
+            AddCodeBlockCommand(
+                actor_id=author_id,
+                lesson_id=CourseLessonID(course_lesson.oid),
+                tabs=(
+                    _NPM_TAB,
+                    CodeTabInput(label="npm", source="x", language="bash"),
+                ),
+            ),
+        )
+    fake_block_gateway.add_code.assert_not_awaited()
+
+
+# ---- update_code ----
+
+
+async def test_update_code_block_replaces_tabs(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    code_block: CodeBlock,
+    author_id: UserID,
+) -> None:
+    fake_block_gateway.with_id.return_value = code_block
+    fake_product_gateway.with_id.return_value = course_product
+    handler = UpdateCodeBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        block_gateway=fake_block_gateway,
+        event_bus=fake_event_bus,
+    )
+
+    await handler.run(
+        UpdateCodeBlockCommand(
+            actor_id=author_id,
+            block_id=code_block.oid,
+            tabs=(_NPM_TAB, _PNPM_TAB),
+        ),
+    )
+    fake_block_gateway.update_code.assert_awaited_once_with(code_block)
+    assert [t.label.value for t in code_block.tabs] == ["npm", "pnpm"]
+    fake_transaction.commit.assert_awaited_once()
+
+
+async def test_update_code_block_wrong_type_raises(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    html_block: HtmlBlock,
+    author_id: UserID,
+) -> None:
+    fake_block_gateway.with_id.return_value = html_block
+    fake_product_gateway.with_id.return_value = course_product
+    handler = UpdateCodeBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        block_gateway=fake_block_gateway,
+        event_bus=fake_event_bus,
+    )
+    with pytest.raises(WrongBlockTypeError):
+        await handler.run(
+            UpdateCodeBlockCommand(
+                actor_id=author_id,
+                block_id=html_block.oid,
+                tabs=(_PLAIN_TS_TAB,),
+            ),
+        )
+    fake_block_gateway.update_code.assert_not_awaited()
+    fake_transaction.commit.assert_not_called()

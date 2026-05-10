@@ -12,10 +12,15 @@ class CollaborationStatus(StrEnum):
       but has not clicked the accept link yet.
 
     ``ACTIVE`` means the invitee has accepted; only then are
-    grants effective. ``REVOKED`` is terminal — the collaboration
-    is preserved for audit and the row is never reactivated.
+    grants effective. ``DECLINED`` is set when the recipient
+    explicitly rejects the in-app invite — terminal, the row is
+    preserved for audit so the inviter can see the outcome.
+    ``REVOKED`` is terminal — manager-initiated end of the
+    collaboration; the row is preserved for audit and never
+    reactivated.
     """
 
     PENDING_INVITE = "pending_invite"
     ACTIVE = "active"
+    DECLINED = "declined"
     REVOKED = "revoked"

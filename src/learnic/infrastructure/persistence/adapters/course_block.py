@@ -10,12 +10,17 @@ from learnic.application.common.persistence.course_block import (
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import (
+    CodeBlock,
+    CodeTab,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
     RutubeVideoBlock,
 )
 from learnic.entities.course_block.value_objects import (
+    CodeLanguage,
+    CodeSource,
+    CodeTabLabel,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -24,6 +29,7 @@ from learnic.entities.course_block.value_objects import (
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.product.ids import ProductID
 from learnic.infrastructure.persistence.models.course_block import (
+    code_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -31,13 +37,43 @@ from learnic.infrastructure.persistence.models.course_block import (
 )
 
 
+def _tabs_to_jsonb(tabs: list[CodeTab]) -> list[dict[str, str]]:
+    """Serialize domain tabs into the JSONB-friendly shape stored on disk."""
+    return [
+        {
+            "label": tab.label.value,
+            "source": tab.source.value,
+            "language": tab.language.value,
+        }
+        for tab in tabs
+    ]
+
+
+def _jsonb_to_tabs(raw: Any) -> list[CodeTab]:
+    """Hydrate JSONB tabs back into VOs.
+
+    The stored shape is a list of ``{"label", "source", "language"}``
+    dicts. Anything else is a corruption — propagate as-is so the
+    failure surfaces in logs rather than silently falling back to an
+    empty block.
+    """
+    return [
+        CodeTab(
+            label=CodeTabLabel(item["label"]),
+            source=CodeSource(item["source"]),
+            language=CodeLanguage(item["language"]),
+        )
+        for item in raw
+    ]
+
+
 def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
     """Hydrate a parent + LEFT JOIN child row into a domain entity.
 
     The caller's SELECT must include the type-specific columns
     aliased as ``html``, ``source``, ``rutube_external_id``,
-    ``rutube_title``. Left joins yield NULL for the other types'
-    columns.
+    ``rutube_title``, ``code_source``, ``code_language``. Left
+    joins yield NULL for the other types' columns.
     """
     block_type = BlockType(row.type)
     if block_type is BlockType.HTML:
@@ -56,6 +92,16 @@ def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
             lesson_id=CourseLessonID(row.lesson_id),
             product_id=ProductID(row.product_id),
             source=KatexSource(row.source),
+            position=row.position,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+    if block_type is BlockType.CODE:
+        return CodeBlock(
+            oid=LessonBlockID(row.oid),
+            lesson_id=CourseLessonID(row.lesson_id),
+            product_id=ProductID(row.product_id),
+            tabs=_jsonb_to_tabs(row.code_tabs),
             position=row.position,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -85,6 +131,7 @@ def _select_blocks() -> sa.Select[Any]:
         katex_blocks_table.c.source,
         rutube_video_blocks_table.c.external_id.label("rutube_external_id"),
         rutube_video_blocks_table.c.title.label("rutube_title"),
+        code_blocks_table.c.tabs.label("code_tabs"),
     ).select_from(
         lesson_blocks_table.outerjoin(
             html_blocks_table,
@@ -97,6 +144,10 @@ def _select_blocks() -> sa.Select[Any]:
         .outerjoin(
             rutube_video_blocks_table,
             lesson_blocks_table.c.oid == rutube_video_blocks_table.c.oid,
+        )
+        .outerjoin(
+            code_blocks_table,
+            lesson_blocks_table.c.oid == code_blocks_table.c.oid,
         ),
     )
 
@@ -225,6 +276,39 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
                 external_id=block.external_id.value,
                 title=block.title.value if block.title is not None else None,
             ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_code(self, block: CodeBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.CODE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(code_blocks_table).values(
+                oid=block.oid,
+                tabs=_tabs_to_jsonb(block.tabs),
+            ),
+        )
+
+    @override
+    async def update_code(self, block: CodeBlock) -> None:
+        await self._session.execute(
+            sa.update(code_blocks_table)
+            .where(code_blocks_table.c.oid == block.oid)
+            .values(tabs=_tabs_to_jsonb(block.tabs)),
         )
         await self._session.execute(
             sa.update(lesson_blocks_table)

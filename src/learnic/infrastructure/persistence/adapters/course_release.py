@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.course_content import (
+    CodeBlockView,
+    CodeTabView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
@@ -43,6 +45,7 @@ from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.course_block import (
+    code_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -56,6 +59,7 @@ from learnic.infrastructure.persistence.models.course_module import (
 )
 from learnic.infrastructure.persistence.models.course_release import (
     course_release_blocks_table,
+    course_release_code_blocks_table,
     course_release_html_blocks_table,
     course_release_katex_blocks_table,
     course_release_lessons_table,
@@ -208,6 +212,7 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
                         "rutube_external_id",
                     ),
                     rutube_video_blocks_table.c.title.label("rutube_title"),
+                    code_blocks_table.c.tabs.label("code_tabs"),
                 )
                 .select_from(
                     lesson_blocks_table.outerjoin(
@@ -221,6 +226,10 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
                     .outerjoin(
                         rutube_video_blocks_table,
                         lesson_blocks_table.c.oid == rutube_video_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        code_blocks_table,
+                        lesson_blocks_table.c.oid == code_blocks_table.c.oid,
                     ),
                 )
                 .where(lesson_blocks_table.c.product_id == release.product_id),
@@ -250,6 +259,7 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
         html_values: list[dict[str, Any]] = []
         katex_values: list[dict[str, Any]] = []
         rutube_values: list[dict[str, Any]] = []
+        code_values: list[dict[str, Any]] = []
         for row in rows:
             new_oid = block_map[row.oid]
             block_type = (
@@ -259,6 +269,17 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
                 html_values.append({"oid": new_oid, "html": row.html})
             elif block_type is BlockType.KATEX:
                 katex_values.append({"oid": new_oid, "source": row.source})
+            elif block_type is BlockType.CODE:
+                code_values.append(
+                    {
+                        "oid": new_oid,
+                        # Snapshots take the JSONB tabs payload as-is —
+                        # release content is immutable so a deep copy
+                        # isn't required (psycopg/asyncpg encodes the
+                        # dict to JSON on insert independently per row).
+                        "tabs": row.code_tabs,
+                    },
+                )
             else:  # RUTUBE_VIDEO
                 rutube_values.append(
                     {
@@ -283,6 +304,11 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
                 sa.insert(course_release_rutube_video_blocks_table),
                 rutube_values,
             )
+        if code_values:
+            await self._session.execute(
+                sa.insert(course_release_code_blocks_table),
+                code_values,
+            )
 
 
 # ============================== reader ============================== #
@@ -303,6 +329,20 @@ def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
             oid=LessonBlockID(row.oid),
             position=row.position,
             source=row.source,
+        )
+    if block_type is BlockType.CODE:
+        return CodeBlockView(
+            type=BlockType.CODE,
+            oid=LessonBlockID(row.oid),
+            position=row.position,
+            tabs=[
+                CodeTabView(
+                    label=item["label"],
+                    source=item["source"],
+                    language=item["language"],
+                )
+                for item in row.code_tabs
+            ],
         )
     return RutubeVideoBlockView(
         type=BlockType.RUTUBE_VIDEO,
@@ -420,6 +460,9 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                     course_release_rutube_video_blocks_table.c.title.label(
                         "rutube_title",
                     ),
+                    course_release_code_blocks_table.c.tabs.label(
+                        "code_tabs",
+                    ),
                 )
                 .select_from(
                     course_release_blocks_table.outerjoin(
@@ -436,6 +479,11 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                         course_release_rutube_video_blocks_table,
                         course_release_blocks_table.c.oid
                         == course_release_rutube_video_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_code_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_code_blocks_table.c.oid,
                     ),
                 )
                 .where(course_release_blocks_table.c.release_id == release_id)

@@ -4,9 +4,9 @@ from typing import Final, final
 from learnic.application.commands.cohort._authorization import (
     assert_cohort_authorized,
 )
+from learnic.application.common.auth.authorizer import Authorizer
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.cohort import CohortGateway
-from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.webinar_enrollment import (
     WebinarEnrollmentReader,
     WebinarEnrollmentView,
@@ -34,11 +34,11 @@ class GetCohortEnrollmentsQueryHandler:
         self,
         reader: WebinarEnrollmentReader,
         cohort_gateway: CohortGateway,
-        product_gateway: ProductGateway,
+        authorizer: Authorizer,
     ) -> None:
         self._reader: Final = reader
         self._cohort_gateway: Final = cohort_gateway
-        self._product_gateway: Final = product_gateway
+        self._authorizer: Final = authorizer
 
     async def run(
         self,
@@ -50,6 +50,6 @@ class GetCohortEnrollmentsQueryHandler:
         await assert_cohort_authorized(
             cohort,
             data.actor_id,
-            self._product_gateway,
+            self._authorizer,
         )
         return await self._reader.for_cohort(data.cohort_id)

@@ -23,7 +23,7 @@ from learnic.application.commands.webinar_session.reschedule import (
     RescheduleWebinarSessionCommand,
     RescheduleWebinarSessionCommandHandler,
 )
-from learnic.application.common.errors import NotResourceOwnerError
+from learnic.application.common.errors import InsufficientPermissionsError
 from learnic.entities.cohort.enums import WebinarSessionStatus
 from learnic.entities.cohort.models import Cohort
 from learnic.entities.cohort.session import WebinarSession
@@ -58,7 +58,7 @@ async def test_add_one_off_session_persists_and_returns_id(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -67,7 +67,7 @@ async def test_add_one_off_session_persists_and_returns_id(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     starts_at = datetime(2026, 9, 4, 16, 0, tzinfo=timezone.utc)
@@ -95,7 +95,7 @@ async def test_reschedule_session_updates_starts_at_and_status(
     fake_transaction: AsyncMock,
     fake_session_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_session: WebinarSession,
     cohort: Cohort,
     host_id: UserID,
@@ -106,7 +106,7 @@ async def test_reschedule_session_updates_starts_at_and_status(
         transaction=fake_transaction,
         session_gateway=fake_session_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     new_start = datetime(2026, 9, 5, 16, 0, tzinfo=timezone.utc)
@@ -125,7 +125,7 @@ async def test_cancel_session_with_reason(
     fake_transaction: AsyncMock,
     fake_session_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_session: WebinarSession,
     cohort: Cohort,
     host_id: UserID,
@@ -136,7 +136,7 @@ async def test_cancel_session_with_reason(
         transaction=fake_transaction,
         session_gateway=fake_session_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -155,7 +155,7 @@ async def test_complete_session_sets_status(
     fake_transaction: AsyncMock,
     fake_session_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_session: WebinarSession,
     cohort: Cohort,
     host_id: UserID,
@@ -166,7 +166,7 @@ async def test_complete_session_sets_status(
         transaction=fake_transaction,
         session_gateway=fake_session_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -182,7 +182,7 @@ async def test_attach_recording_sets_url(
     fake_transaction: AsyncMock,
     fake_session_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_session: WebinarSession,
     cohort: Cohort,
     host_id: UserID,
@@ -193,7 +193,7 @@ async def test_attach_recording_sets_url(
         transaction=fake_transaction,
         session_gateway=fake_session_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -213,23 +213,26 @@ async def test_session_action_by_stranger_raises(
     fake_transaction: AsyncMock,
     fake_session_gateway: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     existing_session: WebinarSession,
     cohort: Cohort,
-    webinar_product: object,
     stranger_id: UserID,
 ) -> None:
     fake_session_gateway.with_id.return_value = existing_session
     fake_cohort_gateway.with_id.return_value = cohort
-    fake_product_gateway.with_id.return_value = webinar_product
+    fake_authorizer.require.side_effect = InsufficientPermissionsError(
+        user_id=stranger_id,
+        product_id=cohort.webinar_id,
+        permission="MANAGE_RELEASES",
+    )
     handler = CompleteWebinarSessionCommandHandler(
         transaction=fake_transaction,
         session_gateway=fake_session_gateway,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             CompleteWebinarSessionCommand(
                 actor_id=stranger_id,

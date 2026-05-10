@@ -83,6 +83,11 @@ product_collaborations_table = sa.Table(
         nullable=True,
     ),
     sa.Column(
+        "declined_at",
+        sa.DateTime(timezone=True),
+        nullable=True,
+    ),
+    sa.Column(
         "revoked_at",
         sa.DateTime(timezone=True),
         nullable=True,
@@ -94,7 +99,12 @@ product_collaborations_table = sa.Table(
         unique=True,
         postgresql_where=sa.and_(
             sa.column("collaborator_id").isnot(None),
-            sa.column("status") != CollaborationStatus.REVOKED.value,
+            sa.column("status").notin_(
+                [
+                    CollaborationStatus.REVOKED.value,
+                    CollaborationStatus.DECLINED.value,
+                ],
+            ),
         ),
     ),
     sa.Index(
@@ -195,6 +205,7 @@ def map_product_collaboration_table() -> None:
             "invite_expires_at": (product_collaborations_table.c.invite_expires_at),
             "created_at": product_collaborations_table.c.created_at,
             "accepted_at": product_collaborations_table.c.accepted_at,
+            "declined_at": product_collaborations_table.c.declined_at,
             "revoked_at": product_collaborations_table.c.revoked_at,
         },
         column_prefix="_col_",

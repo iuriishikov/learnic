@@ -1,5 +1,3 @@
-from enum import StrEnum
-
 import sqlalchemy as sa
 from sqlalchemy.orm import composite
 
@@ -7,7 +5,6 @@ from learnic.entities.role.constants import (
     ROLE_DESCRIPTION_MAX_LEN,
     ROLE_NAME_MAX_LEN,
 )
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.models import Role
 from learnic.entities.role.value_objects import (
     RoleDescription,
@@ -15,10 +12,6 @@ from learnic.entities.role.value_objects import (
     RolePosition,
 )
 from learnic.infrastructure.persistence.models.registry import mapper_registry
-
-
-def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
-    return [member.value for member in enum_cls]
 
 
 roles_table = sa.Table(
@@ -29,15 +22,6 @@ roles_table = sa.Table(
         "product_id",
         sa.Uuid,
         sa.ForeignKey("products.oid", ondelete="CASCADE"),
-        nullable=True,
-    ),
-    sa.Column(
-        "kind",
-        sa.Enum(
-            RoleKind,
-            name="role_kind",
-            values_callable=_enum_values,
-        ),
         nullable=False,
     ),
     sa.Column("name", sa.String(ROLE_NAME_MAX_LEN), nullable=False),
@@ -71,14 +55,10 @@ roles_table = sa.Table(
         onupdate=sa.func.now(),
         server_onupdate=sa.func.now(),
     ),
-    sa.Index(
-        "uq_roles_name_per_product",
-        sa.func.coalesce(
-            sa.column("product_id"),
-            sa.literal("00000000-0000-0000-0000-000000000000"),
-        ),
-        sa.column("name"),
-        unique=True,
+    sa.UniqueConstraint(
+        "product_id",
+        "name",
+        name="uq_roles_name_per_product",
     ),
     sa.Index("ix_roles_product_id", "product_id"),
 )
@@ -123,7 +103,6 @@ def map_role_table() -> None:
         properties={
             "oid": roles_table.c.oid,
             "product_id": roles_table.c.product_id,
-            "kind": roles_table.c.kind,
             "name": composite(RoleName, roles_table.c.name),
             "description": composite(
                 RoleDescription.of_optional,

@@ -1,12 +1,24 @@
 import uuid
 
+import pytest
+
 from learnic.entities.course_block.enums import BlockType
+from learnic.entities.course_block.errors import (
+    DuplicateCodeTabLabelError,
+    EmptyCodeTabsError,
+    TooManyCodeTabsError,
+)
 from learnic.entities.course_block.models import (
+    CodeBlock,
+    CodeTab,
     HtmlBlock,
     KatexBlock,
     RutubeVideoBlock,
 )
 from learnic.entities.course_block.value_objects import (
+    CodeLanguage,
+    CodeSource,
+    CodeTabLabel,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -127,3 +139,92 @@ class TestRutubeVideoBlock:
         assert b.title is not None
         b.update_title(None)
         assert b.title is None
+
+
+def _tab(label: str, source: str, language: str) -> CodeTab:
+    return CodeTab(
+        label=CodeTabLabel(label),
+        source=CodeSource(source),
+        language=CodeLanguage(language),
+    )
+
+
+class TestCodeBlock:
+    def test_create_single_tab_with_empty_label(self) -> None:
+        b = CodeBlock.create(
+            lesson_id=_lesson_id(),
+            product_id=_product_id(),
+            tabs=[_tab("", "const x = 1;\n", "ts")],
+            position=0,
+        )
+        assert len(b.tabs) == 1
+        assert b.tabs[0].source.value == "const x = 1;\n"
+        assert b.tabs[0].language.value == "ts"
+        assert b.position == 0
+        assert b.type is BlockType.CODE
+
+    def test_create_multi_tab(self) -> None:
+        b = CodeBlock.create(
+            lesson_id=_lesson_id(),
+            product_id=_product_id(),
+            tabs=[
+                _tab("npm", "npm i react", "bash"),
+                _tab("pnpm", "pnpm add react", "bash"),
+                _tab("yarn", "yarn add react", "bash"),
+            ],
+            position=0,
+        )
+        assert [t.label.value for t in b.tabs] == ["npm", "pnpm", "yarn"]
+
+    def test_replace_tabs(self) -> None:
+        b = CodeBlock.create(
+            lesson_id=_lesson_id(),
+            product_id=_product_id(),
+            tabs=[_tab("", "a", "plain")],
+            position=0,
+        )
+        b.replace_tabs([_tab("", "b", "bash")])
+        assert b.tabs[0].source.value == "b"
+        assert b.tabs[0].language.value == "bash"
+
+    def test_rejects_empty_tabs(self) -> None:
+        with pytest.raises(EmptyCodeTabsError):
+            CodeBlock.create(
+                lesson_id=_lesson_id(),
+                product_id=_product_id(),
+                tabs=[],
+                position=0,
+            )
+
+    def test_rejects_duplicate_labels(self) -> None:
+        with pytest.raises(DuplicateCodeTabLabelError):
+            CodeBlock.create(
+                lesson_id=_lesson_id(),
+                product_id=_product_id(),
+                tabs=[
+                    _tab("npm", "x", "bash"),
+                    _tab("npm", "y", "bash"),
+                ],
+                position=0,
+            )
+
+    def test_rejects_empty_label_in_multi_tab(self) -> None:
+        with pytest.raises(DuplicateCodeTabLabelError):
+            CodeBlock.create(
+                lesson_id=_lesson_id(),
+                product_id=_product_id(),
+                tabs=[
+                    _tab("", "x", "bash"),
+                    _tab("pnpm", "y", "bash"),
+                ],
+                position=0,
+            )
+
+    def test_rejects_too_many_tabs(self) -> None:
+        with pytest.raises(TooManyCodeTabsError):
+            CodeBlock.create(
+                lesson_id=_lesson_id(),
+                product_id=_product_id(),
+                tabs=[_tab(f"t{i}", "x", "plain") for i in range(9)],
+                position=0,
+            )

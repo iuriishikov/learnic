@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.formatting import build_full_name
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.user import UserReader
 from learnic.application.common.storage.file_storage import FileStorage
@@ -26,16 +27,17 @@ class SearchUsersQuery:
 
 @dataclass(slots=True, frozen=True)
 class UserSummaryOutput:
-    """Single search hit. ``email`` is intentionally absent.
+    """Single search hit. Email is intentionally absent.
 
-    The avatar URL is resolved by the handler to a short-lived
-    presigned URL; clients render it directly.
+    ``full_name`` collapses the user's name fields into the
+    canonical Russian-style display name (``Last First Patronymic``)
+    so callers can render a result row without re-joining the parts
+    themselves. The avatar URL is resolved by the handler to a
+    short-lived presigned URL; clients render it directly.
     """
 
     oid: UserID
-    first_name: str
-    last_name: str
-    patronymic: str | None
+    full_name: str
     avatar_url: str | None
 
 
@@ -70,9 +72,9 @@ class SearchUsersQueryHandler:
             results.append(
                 UserSummaryOutput(
                     oid=view.oid,
-                    first_name=view.first_name,
-                    last_name=view.last_name,
-                    patronymic=view.patronymic,
+                    full_name=build_full_name(
+                        view.first_name, view.last_name, view.patronymic
+                    ),
                     avatar_url=avatar_url,
                 )
             )

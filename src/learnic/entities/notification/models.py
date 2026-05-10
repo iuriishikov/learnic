@@ -5,7 +5,9 @@ from typing import Self
 
 from learnic.entities.common.base_entity import BaseEntity
 from learnic.entities.notification.details import (
+    AccessRevokedDetails,
     InviteAcceptedDetails,
+    InviteDeclinedDetails,
     InviteSentDetails,
     NotificationDetails,
 )
@@ -101,5 +103,59 @@ class Notification(BaseEntity[NotificationID]):
                 collaboration_id=collaboration_id,
                 product_id=product_id,
                 collaborator_id=collaborator_id,
+            ),
+        )
+
+    @classmethod
+    def for_invite_declined(
+        cls,
+        *,
+        recipient_id: UserID,
+        actor_id: UserID,
+        collaboration_id: ProductCollaborationID,
+        product_id: ProductID,
+        decliner_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.INVITE_DECLINED,
+            category=NotificationCategory.INVITES,
+            actor_id=actor_id,
+            created_at=moment,
+            read_at=None,
+            details=InviteDeclinedDetails(
+                collaboration_id=collaboration_id,
+                product_id=product_id,
+                decliner_id=decliner_id,
+            ),
+        )
+
+    @classmethod
+    def for_access_revoked(
+        cls,
+        *,
+        recipient_id: UserID,
+        actor_id: UserID,
+        collaboration_id: ProductCollaborationID,
+        product_id: ProductID,
+        revoker_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.ACCESS_REVOKED,
+            category=NotificationCategory.INVITES,
+            actor_id=actor_id,
+            created_at=moment,
+            read_at=None,
+            details=AccessRevokedDetails(
+                collaboration_id=collaboration_id,
+                product_id=product_id,
+                revoker_id=revoker_id,
             ),
         )

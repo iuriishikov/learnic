@@ -12,7 +12,7 @@ from learnic.application.common.persistence.role import (
     RoleView,
 )
 from learnic.entities.product.ids import ProductID
-from learnic.entities.role.enums import RoleKind
+from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
 from learnic.entities.role.permissions import Permission
@@ -20,6 +20,7 @@ from learnic.entities.role.value_objects import PermissionSet
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.product_collaboration import (
     collaboration_grants_table,
+    product_collaborations_table,
 )
 from learnic.infrastructure.persistence.models.role import (
     role_permissions_table,
@@ -33,8 +34,7 @@ def _row_to_view(
 ) -> RoleView:
     return RoleView(
         oid=RoleID(row.oid),
-        product_id=ProductID(row.product_id) if row.product_id else None,
-        kind=row.kind,
+        product_id=ProductID(row.product_id),
         name=row.name,
         description=row.description,
         position=row.position,
@@ -76,10 +76,28 @@ class RoleMapperAlchemy(RoleGateway):
 
     @override
     async def is_in_use(self, oid: RoleID) -> bool:
+        # Only grants tied to a live collaboration count: DECLINED
+        # and REVOKED are terminal audit rows whose grants linger
+        # for history but no longer effect any permission. Without
+        # this filter a once-invited-then-declined user would
+        # block role deletion forever.
         stmt = (
             sa.select(collaboration_grants_table.c.oid)
+            .select_from(
+                collaboration_grants_table.join(
+                    product_collaborations_table,
+                    product_collaborations_table.c.oid
+                    == collaboration_grants_table.c.collaboration_id,
+                ),
+            )
             .where(
                 collaboration_grants_table.c.role_id == oid,
+                product_collaborations_table.c.status.in_(
+                    [
+                        CollaborationStatus.PENDING_INVITE.value,
+                        CollaborationStatus.ACTIVE.value,
+                    ],
+                ),
             )
             .limit(1)
         )
@@ -87,6 +105,26 @@ class RoleMapperAlchemy(RoleGateway):
 
     @override
     async def delete(self, role: Role) -> None:
+        # FK collaboration_grants.role_id is ON DELETE RESTRICT, so
+        # any lingering grant from a DECLINED/REVOKED collaboration
+        # would raise IntegrityError even though `is_in_use` already
+        # reported the role as free. Purge those dead-collaboration
+        # grants first so the role row can be removed.
+        await self._session.execute(
+            sa.delete(collaboration_grants_table).where(
+                collaboration_grants_table.c.role_id == role.oid,
+                collaboration_grants_table.c.collaboration_id.in_(
+                    sa.select(product_collaborations_table.c.oid).where(
+                        product_collaborations_table.c.status.in_(
+                            [
+                                CollaborationStatus.DECLINED.value,
+                                CollaborationStatus.REVOKED.value,
+                            ],
+                        ),
+                    ),
+                ),
+            ),
+        )
         await self._session.delete(role)
 
     async def _load_permissions(self, role_id: RoleID) -> PermissionSet:
@@ -161,28 +199,13 @@ class RoleReaderAlchemy(RoleReader):
         return _row_to_view(row, permissions[RoleID(row.oid)])
 
     @override
-    async def system_roles(self) -> list[RoleView]:
-        stmt = (
-            sa.select(roles_table)
-            .where(roles_table.c.kind == RoleKind.SYSTEM.value)
-            .order_by(roles_table.c.created_at)
-        )
-        rows = (await self._session.execute(stmt)).all()
-        return await self._rows_to_views(rows)
-
-    @override
     async def for_product(
         self,
         product_id: ProductID,
     ) -> list[RoleView]:
         stmt = (
             sa.select(roles_table)
-            .where(
-                sa.or_(
-                    roles_table.c.kind == RoleKind.SYSTEM.value,
-                    roles_table.c.product_id == product_id,
-                ),
-            )
+            .where(roles_table.c.product_id == product_id)
             .order_by(
                 roles_table.c.position.asc(),
                 roles_table.c.created_at.asc(),
@@ -196,12 +219,9 @@ class RoleReaderAlchemy(RoleReader):
         self,
         product_id: ProductID,
     ) -> int:
-        stmt = sa.select(sa.func.coalesce(sa.func.max(roles_table.c.position), 0)).where(
-            sa.or_(
-                roles_table.c.kind == RoleKind.SYSTEM.value,
-                roles_table.c.product_id == product_id,
-            ),
-        )
+        stmt = sa.select(
+            sa.func.coalesce(sa.func.max(roles_table.c.position), 0),
+        ).where(roles_table.c.product_id == product_id)
         return int((await self._session.execute(stmt)).scalar_one())
 
     @override
@@ -237,8 +257,7 @@ class RoleReaderAlchemy(RoleReader):
                 product_collaborations_table.c.collaborator_id == user_id,
                 product_collaborations_table.c.status
                 == CollaborationStatus.ACTIVE.value,
-                collaboration_grants_table.c.scope_type
-                == ScopeType.PRODUCT.value,
+                collaboration_grants_table.c.scope_type == ScopeType.PRODUCT.value,
             )
         )
         value = (await self._session.execute(stmt)).scalar_one_or_none()

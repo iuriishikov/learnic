@@ -16,6 +16,7 @@ from learnic.infrastructure.configs import (
     S3Config,
     SecurityConfig,
     TaskIQConfig,
+    WebPushConfig,
 )
 from learnic.web import create_app_tests
 
@@ -50,6 +51,7 @@ def configs() -> Configs:
             frontend_base_url="http://0.0.0.0:8000",
             cookie_secure=False,
         ),
+        web_push=WebPushConfig(),
     )
 
 

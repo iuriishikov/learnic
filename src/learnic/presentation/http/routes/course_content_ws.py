@@ -12,9 +12,12 @@ model WebSockets):
 * **Auth.** Standard ``accessCookie`` HttpOnly cookie sent by the
   browser on the WS handshake. Failure closes with code ``4401``
   before ``accept``.
-* **Authorization.** Only the product author can subscribe in
-  Phase A; non-authors get ``4403``. When the
-  ``ProductCollaborator`` feature lands, the check expands.
+* **Authorization.** Anyone with ``READ_PRODUCT`` on the target
+  product can subscribe — that's the product owner (short-circuited
+  by :class:`Authorizer`) plus any collaborator whose active
+  grants include ``READ_PRODUCT`` (every editor / manager
+  permission transitively grants it). Non-authorised callers get
+  ``4403``.
 * **Lifecycle.** Server pushes events one-way until the client
   disconnects. No client→server messages are interpreted yet
   (they will land for presence / cursors in a later phase).
@@ -40,13 +43,21 @@ from uuid import UUID
 from dishka import AsyncContainer
 from fastapi import APIRouter, Path, WebSocket, WebSocketDisconnect
 
+from learnic.application.common.auth.authorizer import (
+    Authorizer,
+    AuthzTarget,
+)
 from learnic.application.common.collaboration.event_bus import (
     ContentEventBus,
 )
-from learnic.application.common.errors import InvalidTokenError
+from learnic.application.common.errors import (
+    InsufficientPermissionsError,
+    InvalidTokenError,
+)
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.entities.product.enums import ProductType
 from learnic.entities.product.ids import ProductID
+from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import Authenticator
 
 router = APIRouter(prefix="/courses")
@@ -85,8 +96,19 @@ async def course_content_ws(
         if product is None or product.type is not ProductType.COURSE:
             await websocket.close(code=4404, reason="course not found")
             return
-        if product.author_id != ctx.user_id:
-            await websocket.close(code=4403, reason="not the product author")
+
+        authorizer = await request_scope.get(Authorizer)
+        try:
+            await authorizer.require(
+                ctx.user_id,
+                AuthzTarget.for_product(ProductID(course_id)),
+                Permission.READ_PRODUCT,
+            )
+        except InsufficientPermissionsError:
+            await websocket.close(
+                code=4403,
+                reason="not authorized to observe course content events",
+            )
             return
 
     event_bus = await container.get(ContentEventBus)

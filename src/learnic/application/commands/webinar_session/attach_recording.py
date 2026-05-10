@@ -4,9 +4,9 @@ from typing import Final, final
 from learnic.application.commands.cohort._authorization import (
     assert_session_authorized,
 )
+from learnic.application.common.auth.authorizer import Authorizer
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.cohort import CohortGateway
-from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.webinar_session import (
     WebinarSessionGateway,
@@ -30,12 +30,12 @@ class AttachWebinarSessionRecordingCommandHandler:
         transaction: Transaction,
         session_gateway: WebinarSessionGateway,
         cohort_gateway: CohortGateway,
-        product_gateway: ProductGateway,
+        authorizer: Authorizer,
     ) -> None:
         self._transaction: Final = transaction
         self._session_gateway: Final = session_gateway
         self._cohort_gateway: Final = cohort_gateway
-        self._product_gateway: Final = product_gateway
+        self._authorizer: Final = authorizer
 
     async def run(
         self,
@@ -48,7 +48,7 @@ class AttachWebinarSessionRecordingCommandHandler:
             session,
             data.actor_id,
             self._cohort_gateway,
-            self._product_gateway,
+            self._authorizer,
         )
         session.attach_recording(RecordingUrl(data.url))
         await self._transaction.commit()

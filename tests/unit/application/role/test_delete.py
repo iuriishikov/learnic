@@ -13,7 +13,6 @@ from learnic.application.common.errors import (
     RoleInUseError,
 )
 from learnic.entities.product.ids import ProductID
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
 from learnic.entities.role.permissions import Permission
@@ -30,27 +29,10 @@ def _custom_role(product_id: ProductID, creator: UserID) -> Role:
     return Role(
         oid=RoleID(uuid.uuid4()),
         product_id=product_id,
-        kind=RoleKind.CUSTOM,
         name=RoleName("Editor"),
         description=None,
         position=RolePosition(1010),
         created_by=creator,
-        created_at=now,
-        updated_at=now,
-        permissions=PermissionSet.of(Permission.READ_PRODUCT),
-    )
-
-
-def _system_role() -> Role:
-    now = datetime.now(timezone.utc)
-    return Role(
-        oid=RoleID(uuid.uuid4()),
-        product_id=None,
-        kind=RoleKind.SYSTEM,
-        name=RoleName("Editor"),
-        description=None,
-        position=RolePosition(200),
-        created_by=None,
         created_at=now,
         updated_at=now,
         permissions=PermissionSet.of(Permission.READ_PRODUCT),
@@ -110,13 +92,13 @@ async def test_refuses_when_in_use(
 
 
 @pytest.mark.asyncio
-async def test_404_for_system_role(
+async def test_404_when_role_missing(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_role_gateway: AsyncMock,
     author_id: UserID,
 ) -> None:
-    fake_role_gateway.with_id.return_value = _system_role()
+    fake_role_gateway.with_id.return_value = None
 
     handler = DeleteCustomRoleCommandHandler(
         transaction=fake_transaction,

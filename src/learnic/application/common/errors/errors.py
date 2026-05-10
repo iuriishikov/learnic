@@ -316,3 +316,30 @@ class InviteEmailMismatchError(ApplicationError):
     The accepting user's email must match the email the invite was
     issued to. Surfaces as HTTP 403.
     """
+
+
+class EmailInviteRateLimitExceededError(ApplicationError):
+    """Raised when an actor exceeds the per-day email-invite cap.
+
+    Email invitations consume tokens with the upstream email
+    provider; the limit shields the quota from a single account
+    spamming invites to attacker-controlled addresses. Carries
+    ``actor_id``, the configured ``limit``, and ``retry_after_seconds``
+    so the HTTP layer can populate the standard ``Retry-After``
+    header. Surfaces as HTTP 429.
+    """
+
+    def __init__(
+        self,
+        *,
+        actor_id: object,
+        limit: int,
+        retry_after_seconds: int,
+    ) -> None:
+        super().__init__(
+            f"User {actor_id!r} exceeded the email-invite limit "
+            f"of {limit} per day",
+        )
+        self.actor_id = actor_id
+        self.limit = limit
+        self.retry_after_seconds = retry_after_seconds

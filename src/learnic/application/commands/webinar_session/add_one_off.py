@@ -5,9 +5,9 @@ from typing import Final, final
 from learnic.application.commands.cohort._authorization import (
     assert_cohort_authorized,
 )
+from learnic.application.common.auth.authorizer import Authorizer
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.cohort import CohortGateway
-from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
@@ -39,12 +39,12 @@ class AddOneOffWebinarSessionCommandHandler:
         transaction: Transaction,
         entity_saver: EntitySaver,
         cohort_gateway: CohortGateway,
-        product_gateway: ProductGateway,
+        authorizer: Authorizer,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
         self._cohort_gateway: Final = cohort_gateway
-        self._product_gateway: Final = product_gateway
+        self._authorizer: Final = authorizer
 
     async def run(
         self,
@@ -56,7 +56,7 @@ class AddOneOffWebinarSessionCommandHandler:
         await assert_cohort_authorized(
             cohort,
             data.actor_id,
-            self._product_gateway,
+            self._authorizer,
         )
         session = WebinarSession.create(
             cohort_id=data.cohort_id,

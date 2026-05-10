@@ -1,10 +1,11 @@
-"""Roles HTTP routes — system + per-product custom role catalogue.
+"""Roles HTTP routes — per-product role catalogue.
 
 Roles are bundles of :class:`Permission` values (from the role
-aggregate). System roles (Viewer / Commentor / Editor / Moderator)
-are seeded by Alembic and visible everywhere; custom roles live
-inside a single product and are managed by collaborators with
-``MANAGE_ROLES``.
+aggregate). Each role belongs to exactly one product and is managed
+by collaborators with ``MANAGE_ROLES`` (the product author has every
+permission by short-circuit). The Team-tab onboarding flow on the
+SPA bootstraps an initial role set on first open when the product's
+role list is empty.
 """
 
 from datetime import datetime
@@ -12,7 +13,7 @@ from typing import Final, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Depends, Path, Query, Request, status
+from fastapi import Depends, Path, Request, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,7 +44,6 @@ from learnic.entities.role.constants import (
     ROLE_NAME_MAX_LEN,
     ROLE_NAME_MIN_LEN,
 )
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import (
@@ -216,7 +216,6 @@ class RoleSchema(BaseModel):
                 {
                     "oid": "e7c2a8f0-1b34-4d6e-9c89-08d7641a2b15",
                     "product_id": ("3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"),
-                    "kind": "custom",
                     "name": "Lead Editor",
                     "description": "Full editing power except publish.",
                     "position": 1010,
@@ -235,8 +234,7 @@ class RoleSchema(BaseModel):
     )
 
     oid: UUID
-    product_id: UUID | None
-    kind: RoleKind
+    product_id: UUID
     name: str
     description: str | None
     position: int = Field(
@@ -248,7 +246,7 @@ class RoleSchema(BaseModel):
             "role's position; the API enforces this and returns 403 "
             "`RoleHierarchyViolation` when the rule is broken."
         ),
-        examples=[100, 200, 1010],
+        examples=[10, 20, 1010],
     )
     permissions: list[Permission]
     created_by: UUID | None
@@ -260,7 +258,6 @@ class RoleSchema(BaseModel):
         return cls(
             oid=view.oid,
             product_id=view.product_id,
-            kind=view.kind,
             name=view.name,
             description=view.description,
             position=view.position,
@@ -307,13 +304,12 @@ async def list_product_roles(
     interactor: FromDishka[ListProductRolesQueryHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
-    _kind: str | None = Query(
-        default=None,
-        description="Reserved for future filtering; ignored for now.",
-        alias="kind",
-    ),
 ) -> RoleListSchema:
-    """Return system roles plus the product's custom roles.
+    """Return the roles defined inside a product.
+
+    Returns an empty list when the product has no roles yet — the
+    SPA's Team-tab onboarding flow uses that signal to prompt the
+    author to create an initial set.
 
     Args:
         request: Source of the access-token cookie.
@@ -322,8 +318,8 @@ async def list_product_roles(
         product_id: Owning product, parsed from the URL path.
 
     Returns:
-        :class:`RoleListSchema` with all visible roles ordered system
-        first.
+        :class:`RoleListSchema` with the product's roles ordered by
+        ``position`` ascending (highest-rank first).
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
@@ -331,7 +327,6 @@ async def list_product_roles(
         InsufficientPermissionsError: Caller lacks `read_product`;
             HTTP 403.
     """
-    del _kind
     ctx = await auth.authenticate(request)
     views = await interactor.run(
         ListProductRolesQuery(
@@ -422,8 +417,8 @@ async def get_role(
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: No role with the given id; HTTP 404.
-        InsufficientPermissionsError: For custom roles, caller is not
-            a collaborator on the role's product; HTTP 403.
+        InsufficientPermissionsError: Caller is not a collaborator on
+            the role's product; HTTP 403.
     """
     ctx = await auth.authenticate(request)
     view = await interactor.run(
@@ -461,8 +456,7 @@ async def update_custom_role(
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
-        EntityNotFoundError: Role missing or attempting to mutate a
-            system role; HTTP 404.
+        EntityNotFoundError: Role missing; HTTP 404.
         InsufficientPermissionsError: Caller lacks `manage_roles`;
             HTTP 403.
         RoleNameAlreadyTakenError: New name conflicts; HTTP 409.
@@ -516,8 +510,7 @@ async def delete_custom_role(
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
-        EntityNotFoundError: Role missing or attempting to delete a
-            system role; HTTP 404.
+        EntityNotFoundError: Role missing; HTTP 404.
         InsufficientPermissionsError: Caller lacks `manage_roles`;
             HTTP 403.
         RoleInUseError: Role still assigned; HTTP 409.

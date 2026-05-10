@@ -19,10 +19,13 @@ class ListProductRolesQuery:
 
 @final
 class ListProductRolesQueryHandler:
-    """Return system + product-custom roles available inside a product.
+    """Return roles defined inside a product.
 
     Caller needs ``READ_PRODUCT`` on the target product, so only
     collaborators (and the owner) can introspect role definitions.
+    Returns an empty list while the product has no roles yet — the
+    Team-tab onboarding flow on the SPA reacts to that signal to
+    prompt the author to create an initial set.
     """
 
     def __init__(

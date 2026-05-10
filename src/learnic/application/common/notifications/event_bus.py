@@ -15,9 +15,14 @@ class NotificationEventKind(StrEnum):
     panel can prepend a hydrated card without an extra fetch.
     ``READ`` and ``READ_ALL`` flip the unread counter and the
     card's blue dot — the panel only needs the affected ids.
+    ``UPDATED`` carries a re-hydrated :class:`NotificationView`
+    so the panel can replace an existing card in place — used
+    when the embedded collaboration snapshot of an
+    ``invite_sent`` card changes (accept / decline / revoke).
     """
 
     CREATED = "created"
+    UPDATED = "updated"
     READ = "read"
     READ_ALL = "read_all"
 
@@ -26,6 +31,12 @@ class NotificationEventKind(StrEnum):
 class NotificationCreatedEvent:
     kind: NotificationEventKind = NotificationEventKind.CREATED
     notification: NotificationView | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class NotificationUpdatedEvent:
+    notification: NotificationView
+    kind: NotificationEventKind = NotificationEventKind.UPDATED
 
 
 @dataclass(slots=True, frozen=True)
@@ -40,14 +51,17 @@ class NotificationReadAllEvent:
 
 
 NotificationEvent = (
-    NotificationCreatedEvent | NotificationReadEvent | NotificationReadAllEvent
+    NotificationCreatedEvent
+    | NotificationUpdatedEvent
+    | NotificationReadEvent
+    | NotificationReadAllEvent
 )
 
 
 class NotificationEventBus(Protocol):
     """Per-user pub/sub channel for notification deltas.
 
-    Mirrors :class:`CollaborationEventBus` — Redis pub/sub keyed by
+    Mirrors :class:`ProductEventBus` — Redis pub/sub keyed by
     ``recipient_id`` so a user opens exactly one socket to
     ``WS /me/notifications`` and watches it across processes. The
     publisher is called by command handlers right after commit;

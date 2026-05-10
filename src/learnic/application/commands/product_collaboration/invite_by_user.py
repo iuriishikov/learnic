@@ -11,6 +11,9 @@ from learnic.application.common.errors import (
     CollaborationAlreadyExistsError,
     EntityNotFoundError,
 )
+from learnic.application.common.notifications.publisher import (
+    NotificationPublisher,
+)
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
@@ -19,17 +22,18 @@ from learnic.application.common.persistence.product_collaboration import (
 from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.product_collaboration_events import (
-    CollaborationEventBus,
-    CollaborationEvent,
-    CollaborationEventKind,
-    publish_collaboration_event,
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_collaboration_payload,
+    publish_product_event,
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
 )
+from learnic.entities.notification.models import Notification
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -55,7 +59,8 @@ class InviteCollaboratorByUserCommandHandler:
     """Invite an already-registered user to collaborate on a product.
 
     Caller must hold ``MANAGE_COLLABORATORS`` (typically only the
-    owner or a Moderator). The target must be a registered user
+    owner or a collaborator with a custom role granting that
+    permission). The target must be a registered user
     (the email path is :class:`InviteCollaboratorByEmailCommandHandler`),
     must not be the product author, and must not already have an
     active or pending invite for the same product. A fresh
@@ -75,7 +80,8 @@ class InviteCollaboratorByUserCommandHandler:
         role_gateway: RoleGateway,
         lineage: ResourceLineageReader,
         scheduler: TaskScheduler,
-        event_bus: CollaborationEventBus,
+        event_bus: ProductEventBus,
+        notifications: NotificationPublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -87,6 +93,7 @@ class InviteCollaboratorByUserCommandHandler:
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
+        self._notifications: Final = notifications
 
     async def run(
         self,
@@ -142,14 +149,22 @@ class InviteCollaboratorByUserCommandHandler:
             collaboration_id=collab.oid,
             raw_token=token.value,
         )
-        await publish_collaboration_event(
+        await publish_product_event(
             self._event_bus,
-            kind=CollaborationEventKind.INVITED,
+            kind=ProductEventKind.COLLABORATION_INVITED,
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload=CollaborationEvent.make_payload(
+            payload=make_collaboration_payload(
                 collaboration_id=collab.oid,
                 collaborator_id=data.target_user_id,
+            ),
+        )
+        await self._notifications.publish(
+            Notification.for_invite_sent(
+                recipient_id=data.target_user_id,
+                actor_id=data.actor_id,
+                collaboration_id=collab.oid,
+                product_id=data.product_id,
             ),
         )
         return collab.oid

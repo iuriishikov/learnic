@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Protocol
 
 from learnic.entities.product.ids import ProductID
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
 from learnic.entities.role.permissions import Permission
@@ -15,8 +14,7 @@ class RoleView:
     """Read-side projection of a :class:`Role`."""
 
     oid: RoleID
-    product_id: ProductID | None
-    kind: RoleKind
+    product_id: ProductID
     name: str
     description: str | None
     position: int
@@ -36,7 +34,7 @@ class RoleGateway(Protocol):
         product_id: ProductID,
         name: str,
     ) -> Role | None:
-        """Return the custom role with ``name`` inside ``product_id``, if any.
+        """Return the role with ``name`` inside ``product_id``, if any.
 
         Used by ``CreateCustomRole`` / ``UpdateCustomRole`` handlers
         to enforce the per-product unique-name invariant before
@@ -91,17 +89,14 @@ class RoleReader(Protocol):
 
     async def with_id(self, oid: RoleID) -> RoleView | None: ...
 
-    async def system_roles(self) -> list[RoleView]: ...
-
     async def for_product(
         self,
         product_id: ProductID,
     ) -> list[RoleView]:
-        """Return all roles available inside ``product_id``.
+        """Return all roles defined inside ``product_id``.
 
-        Returns the union of system roles (``product_id IS NULL``)
-        and that product's custom roles, ordered by ``position``
-        ascending (highest-rank first).
+        Ordered by ``position`` ascending (highest-rank first), then
+        by ``created_at`` to break ties deterministically.
         """
         ...
 
@@ -111,11 +106,10 @@ class RoleReader(Protocol):
     ) -> int:
         """Return the largest ``position`` currently used in ``product_id``.
 
-        Considers both system roles (``product_id IS NULL``) and the
-        product's custom roles. Used by ``CreateCustomRoleCommand``
-        to slot a fresh role at the bottom of the hierarchy.
-        Returns ``0`` when no roles exist (impossible in practice,
-        since system roles are seeded).
+        Used by ``CreateCustomRoleCommand`` to slot a fresh role at
+        the bottom of the hierarchy. Returns ``0`` when the product
+        has no roles yet — the first role created via the Team-tab
+        onboarding flow gets position ``10``.
         """
         ...
 

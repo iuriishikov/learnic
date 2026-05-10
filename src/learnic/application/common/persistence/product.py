@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.file.ids import FileID
 from learnic.entities.product.enums import (
     ProductStatus,
@@ -26,16 +27,6 @@ class WebinarDetailsView:
 
 
 @dataclass(slots=True, frozen=True)
-class AuthorView:
-    """Public author projection embedded in :class:`ProductView`."""
-
-    oid: UserID
-    first_name: str
-    last_name: str
-    patronymic: str | None
-
-
-@dataclass(slots=True, frozen=True)
 class ProductView:
     """Read-side projection of :class:`Product` returned by the Reader."""
 
@@ -45,7 +36,7 @@ class ProductView:
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    author: AuthorView
+    author: UserRefView
     webinar_details: WebinarDetailsView | None
     cover_file_id: FileID | None
     published_at: datetime | None
@@ -71,11 +62,18 @@ class ProductReader(Protocol):
 
     async def with_id(self, oid: ProductID) -> ProductView | None: ...
 
-    async def for_author(
+    async def accessible_to(
         self,
-        author_id: UserID,
+        user_id: UserID,
         pagination: Pagination,
-    ) -> list[ProductView]: ...
+    ) -> list[ProductView]:
+        """Return products the user can access — owned or active collaborations.
+
+        Includes products where ``user_id`` is the author **or** has
+        an :class:`CollaborationStatus.ACTIVE` collaboration.
+        ``PENDING_INVITE`` and ``REVOKED`` collaborations are excluded.
+        """
+        ...
 
     async def published(
         self,

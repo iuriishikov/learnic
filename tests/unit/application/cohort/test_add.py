@@ -9,12 +9,31 @@ from learnic.application.commands.cohort.add import (
 )
 from learnic.application.common.errors import (
     EntityNotFoundError,
+    InsufficientPermissionsError,
     NotAWebinarError,
-    NotResourceOwnerError,
 )
 from learnic.entities.cohort.models import Cohort
 from learnic.entities.product.models import Product
+from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
+
+
+def _allow_authorizer() -> AsyncMock:
+    authorizer = AsyncMock()
+    authorizer.require = AsyncMock(return_value=None)
+    return authorizer
+
+
+def _deny_authorizer(actor_id: UserID, product_id: object) -> AsyncMock:
+    authorizer = AsyncMock()
+    authorizer.require = AsyncMock(
+        side_effect=InsufficientPermissionsError(
+            user_id=actor_id,
+            product_id=product_id,
+            permission=Permission.MANAGE_RELEASES.value,
+        ),
+    )
+    return authorizer
 
 
 async def test_add_cohort_persists_and_returns_id(
@@ -30,6 +49,7 @@ async def test_add_cohort_persists_and_returns_id(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         product_gateway=fake_product_gateway,
+        authorizer=_allow_authorizer(),
     )
 
     cohort_id = await handler.run(
@@ -53,7 +73,7 @@ async def test_add_cohort_persists_and_returns_id(
     fake_transaction.commit.assert_awaited_once()
 
 
-async def test_add_cohort_non_owner_raises(
+async def test_add_cohort_without_permission_raises(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_product_gateway: AsyncMock,
@@ -66,9 +86,10 @@ async def test_add_cohort_non_owner_raises(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         product_gateway=fake_product_gateway,
+        authorizer=_deny_authorizer(stranger_id, webinar_product.oid),
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             AddCohortCommand(
                 actor_id=stranger_id,
@@ -97,6 +118,7 @@ async def test_add_cohort_on_course_raises(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         product_gateway=fake_product_gateway,
+        authorizer=_allow_authorizer(),
     )
 
     with pytest.raises(NotAWebinarError):
@@ -127,6 +149,7 @@ async def test_add_cohort_missing_product_raises(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
         product_gateway=fake_product_gateway,
+        authorizer=_allow_authorizer(),
     )
 
     with pytest.raises(EntityNotFoundError):

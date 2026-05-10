@@ -20,6 +20,11 @@ from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
 )
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    publish_product_event,
+)
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.course_release.value_objects import ReleaseNotes
@@ -65,6 +70,7 @@ class CreateCourseReleaseCommandHandler:
         release_gateway: CourseReleaseGateway,
         snapshotter: CourseReleaseSnapshotter,
         event_bus: ContentEventBus,
+        product_event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -73,6 +79,7 @@ class CreateCourseReleaseCommandHandler:
         self._release_gateway: Final = release_gateway
         self._snapshotter: Final = snapshotter
         self._event_bus: Final = event_bus
+        self._product_event_bus: Final = product_event_bus
 
     async def run(
         self,
@@ -110,8 +117,10 @@ class CreateCourseReleaseCommandHandler:
 
         await self._snapshotter.snapshot(release)
 
+        auto_published = False
         if previous is None and product.status is ProductStatus.DRAFT:
             product.publish()
+            auto_published = True
 
         await self._transaction.commit()
         await publish_content_event(
@@ -130,4 +139,16 @@ class CreateCourseReleaseCommandHandler:
                 "kind": release.kind.value,
             },
         )
+        if auto_published:
+            assert product.published_at is not None
+            await publish_product_event(
+                self._product_event_bus,
+                kind=ProductEventKind.PUBLISHED,
+                product_id=product.oid,
+                actor_id=data.actor_id,
+                payload={
+                    "status": product.status.value,
+                    "published_at": product.published_at.isoformat(),
+                },
+            )
         return release

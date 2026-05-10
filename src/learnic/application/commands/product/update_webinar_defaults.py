@@ -11,6 +11,11 @@ from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
 )
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    publish_product_event,
+)
 from learnic.entities.product.enums import ProductType
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import (
@@ -55,11 +60,13 @@ class UpdateWebinarDefaultsCommandHandler:
         authorizer: Authorizer,
         entity_saver: EntitySaver,
         product_gateway: ProductGateway,
+        event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
         self._entity_saver: Final = entity_saver
         self._product_gateway: Final = product_gateway
+        self._event_bus: Final = event_bus
 
     async def run(self, data: UpdateWebinarDefaultsCommand) -> None:
         product = await self._product_gateway.with_id(data.product_id)
@@ -113,3 +120,27 @@ class UpdateWebinarDefaultsCommandHandler:
             details.change_access_window(access_window)
 
         await self._transaction.commit()
+        await publish_product_event(
+            self._event_bus,
+            kind=ProductEventKind.WEBINAR_DEFAULTS_UPDATED,
+            product_id=product.oid,
+            actor_id=data.actor_id,
+            payload={
+                "total_lessons": total_lessons.value,
+                "default_duration_minutes": default_duration.value,
+                "allow_recording": data.allow_recording,
+                "default_max_participants": (
+                    max_participants.value
+                    if max_participants is not None
+                    else None
+                ),
+                "default_stream_url": (
+                    stream_url.value if stream_url is not None else None
+                ),
+                "access_window_minutes": (
+                    access_window.value
+                    if access_window is not None
+                    else None
+                ),
+            },
+        )

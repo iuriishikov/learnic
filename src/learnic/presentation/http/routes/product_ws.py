@@ -3,15 +3,16 @@
 Read-only push of :class:`ProductEvent` instances to the product
 author. Mutations stay on the REST API — this socket fans out
 post-commit deltas of product metadata (name / description /
-duration / cover / status) and Q&A entries so two tabs of the same
-author (or, later, a co-author) stay in sync without polling.
+duration / cover / status), webinar defaults and Q&A entries so
+two tabs of the same author (or, later, a co-author) stay in sync
+without polling.
 
 This channel is **separate** from the course-content channel
 (``WS /courses/{course_id}/events``): course-content events
 (modules / lessons / blocks / releases / draft reset) keep flowing
 through `ContentEventBus`; everything in this channel comes from
-`ProductEventBus`. Webinar defaults and cohorts are intentionally
-**not** covered yet.
+`ProductEventBus`. Cohorts (and their schedules / sessions) are
+intentionally **not** covered yet.
 
 Protocol summary (kept here, not in OpenAPI — OpenAPI 3 doesn't
 model WebSockets):
@@ -19,9 +20,12 @@ model WebSockets):
 * **Auth.** Standard ``accessCookie`` HttpOnly cookie sent by the
   browser on the WS handshake. Failure closes with code ``4401``
   before ``accept``.
-* **Authorization.** Only the product author can subscribe in
-  Phase A; non-authors get ``4403``. When the
-  ``ProductCollaborator`` feature lands, the check expands.
+* **Authorization.** Anyone with ``READ_PRODUCT`` on the target
+  product can subscribe — that's the product owner (short-circuited
+  by :class:`Authorizer`) plus any collaborator whose active
+  grants include ``READ_PRODUCT`` (every editor / manager
+  permission transitively grants it). Non-authorised callers get
+  ``4403``.
 * **Lifecycle.** Server pushes events one-way until the client
   disconnects. No client→server messages are interpreted yet.
 * **Initial state.** Client first calls ``GET /products/{id}``
@@ -47,12 +51,20 @@ from uuid import UUID
 from dishka import AsyncContainer
 from fastapi import APIRouter, Path, WebSocket, WebSocketDisconnect
 
-from learnic.application.common.errors import InvalidTokenError
+from learnic.application.common.auth.authorizer import (
+    Authorizer,
+    AuthzTarget,
+)
+from learnic.application.common.errors import (
+    InsufficientPermissionsError,
+    InvalidTokenError,
+)
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
 )
 from learnic.entities.product.ids import ProductID
+from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import Authenticator
 
 router = APIRouter(prefix="/products")
@@ -88,8 +100,19 @@ async def product_ws(
         if product is None:
             await websocket.close(code=4404, reason="product not found")
             return
-        if product.author_id != ctx.user_id:
-            await websocket.close(code=4403, reason="not the product author")
+
+        authorizer = await request_scope.get(Authorizer)
+        try:
+            await authorizer.require(
+                ctx.user_id,
+                AuthzTarget.for_product(ProductID(product_id)),
+                Permission.READ_PRODUCT,
+            )
+        except InsufficientPermissionsError:
+            await websocket.close(
+                code=4403,
+                reason="not authorized to observe product events",
+            )
             return
 
     event_bus = await container.get(ProductEventBus)

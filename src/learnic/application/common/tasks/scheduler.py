@@ -131,3 +131,33 @@ class TaskScheduler(Protocol):
     ) -> None:
         """Notify the product owner that a collaborator left."""
         ...
+
+    async def schedule_send_web_push(
+        self,
+        *,
+        user_id: UserID,
+        title: str,
+        body: str,
+        url: str | None = None,
+        tag: str | None = None,
+        icon: str | None = None,
+        category: str | None = None,
+        bypass_preferences: bool = False,
+    ) -> None:
+        """Enqueue a Web Push fanout to every subscription of ``user_id``.
+
+        Args:
+            user_id: Recipient user.
+            title: System banner title.
+            body: System banner body text.
+            url: Optional click target opened by the SW.
+            tag: Optional notification tag for in-place replacement.
+            icon: Optional icon URL.
+            category: :class:`NotificationCategory` value used for
+                preference enforcement at the worker; ``None`` skips
+                the check (system / ops broadcasts).
+            bypass_preferences: ``True`` for the manual "Send test"
+                path — the worker delivers regardless of the
+                per-category opt-in.
+        """
+        ...

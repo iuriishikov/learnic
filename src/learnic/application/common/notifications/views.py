@@ -1,32 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.notification.enums import (
     NotificationCategory,
     NotificationKind,
 )
 from learnic.entities.notification.ids import NotificationID
 from learnic.entities.product.ids import ProductID
+from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
 from learnic.entities.user.models import UserID
-
-
-@dataclass(slots=True, frozen=True)
-class ActorView:
-    """Read-side projection of the user who triggered the notification.
-
-    Embedded inside :class:`NotificationView` so the panel can render
-    the avatar row without a follow-up request to ``/users/{id}``.
-    Hydrated via a join in the reader; ``None`` for system-generated
-    notifications without an actor.
-    """
-
-    oid: UserID
-    first_name: str
-    last_name: str
-    patronymic: str | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -43,19 +29,80 @@ class ProductRefView:
 
 
 @dataclass(slots=True, frozen=True)
+class CollaborationSnapshotView:
+    """Live snapshot of the collaboration referenced by an invite notification.
+
+    Embedded inside :class:`InviteSentView` and
+    :class:`InviteAcceptedView` and hydrated by the reader through a
+    join with ``product_collaborations``. The frontend uses
+    :attr:`status` (plus the timestamps) as the single source of
+    truth for the Accept / Decline card state — a reload picks up
+    the latest collaboration row, so local React state never has
+    to ``remember`` whether the invite was already resolved.
+
+    ``None`` only if the underlying collaboration row was deleted
+    out of band (it never is in current code — REVOKED / DECLINED
+    are terminal but preserved). Treat ``None`` defensively as
+    ``unavailable`` on the client.
+    """
+
+    status: CollaborationStatus
+    accepted_at: datetime | None
+    declined_at: datetime | None
+    revoked_at: datetime | None
+    invite_expires_at: datetime | None
+
+
+@dataclass(slots=True, frozen=True)
 class InviteSentView:
     collaboration_id: ProductCollaborationID
     product: ProductRefView
+    collaboration: CollaborationSnapshotView | None
 
 
 @dataclass(slots=True, frozen=True)
 class InviteAcceptedView:
     collaboration_id: ProductCollaborationID
     product: ProductRefView
-    collaborator: ActorView
+    collaborator: UserRefView
+    collaboration: CollaborationSnapshotView | None
+    viewer_can_manage_collaborators: bool = False
+    """Does the recipient currently hold ``MANAGE_COLLABORATORS`` on
+    the product? Resolved at read time so the SPA can hide the
+    "revoke" CTA for users who lost the permission since the
+    notification was published."""
 
 
-NotificationDetailsView = InviteSentView | InviteAcceptedView
+@dataclass(slots=True, frozen=True)
+class InviteDeclinedView:
+    collaboration_id: ProductCollaborationID
+    product: ProductRefView
+    decliner: UserRefView
+    collaboration: CollaborationSnapshotView | None
+    viewer_can_manage_collaborators: bool = False
+    """Does the recipient currently hold ``MANAGE_COLLABORATORS`` on
+    the product? Drives the visibility of the "re-invite" CTA — if
+    ``False`` the SPA hides the action button regardless of the
+    underlying collaboration status."""
+
+
+@dataclass(slots=True, frozen=True)
+class AccessRevokedView:
+    """Read-side projection of ``access_revoked`` notifications.
+
+    Sent to a user whose **active** collaboration was revoked. The
+    card is intentionally read-only — the recipient lost access to
+    the product, so there is no in-app action they can take.
+    """
+
+    collaboration_id: ProductCollaborationID
+    product: ProductRefView
+    revoker: UserRefView
+
+
+NotificationDetailsView = (
+    InviteSentView | InviteAcceptedView | InviteDeclinedView | AccessRevokedView
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -73,7 +120,7 @@ class NotificationView:
     recipient_id: UserID
     kind: NotificationKind
     category: NotificationCategory
-    actor: ActorView | None
+    actor: UserRefView | None
     created_at: datetime
     read_at: datetime | None
     details: NotificationDetailsView

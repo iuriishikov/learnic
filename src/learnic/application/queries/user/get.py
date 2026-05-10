@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.formatting import (
+    build_full_name,
+    mask_email,
+)
 from learnic.application.common.persistence.user import UserReader
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
@@ -16,13 +20,15 @@ class GetUserQuery:
 class UserOutput:
     """Query result with media URLs already resolved.
 
-    ``email`` is deliberately omitted from the public profile projection.
+    ``full_name`` collapses ``last_name`` / ``first_name`` /
+    ``patronymic`` into the canonical Russian-style display name.
+    ``email`` is masked via :func:`mask_email` so the public profile
+    projection never leaks a plain address.
     """
 
     oid: UserID
-    first_name: str
-    last_name: str
-    patronymic: str | None
+    full_name: str
+    email: str
     description: str | None
     avatar_url: str | None
     cover_url: str | None
@@ -55,9 +61,10 @@ class GetUserQueryHandler:
 
         return UserOutput(
             oid=view.oid,
-            first_name=view.first_name,
-            last_name=view.last_name,
-            patronymic=view.patronymic,
+            full_name=build_full_name(
+                view.first_name, view.last_name, view.patronymic
+            ),
+            email=mask_email(view.email),
             description=view.description,
             avatar_url=avatar_url,
             cover_url=cover_url,

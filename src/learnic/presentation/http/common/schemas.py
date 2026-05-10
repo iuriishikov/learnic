@@ -11,13 +11,33 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import Self
 
+from learnic.application.common.formatting import build_full_name, mask_email
+from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.application.queries.user.get import UserOutput
 from learnic.application.queries.user.search import UserSummaryOutput
 from learnic.entities.user.constants import (
     DESCRIPTION_MAX_LEN,
+    EMAIL_MAX_LEN,
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
     PATRONYMIC_MAX_LEN,
+)
+
+_FULL_NAME_MAX_LEN: int = (
+    FIRST_NAME_MAX_LEN + LAST_NAME_MAX_LEN + PATRONYMIC_MAX_LEN + 2
+)
+"""Upper bound on a joined ``Last First Patronymic`` string.
+
+Two extra characters cover the spaces between the parts. The same
+value caps :class:`UserSchema.full_name` and :class:`UserSummarySchema.full_name`.
+"""
+
+_MASKED_EMAIL_DESCRIPTION = (
+    "Privacy-respecting masked address in the form "
+    "`f*****d@domain.com` — the first and last characters of the "
+    "local part are preserved, everything in between collapses to a "
+    "fixed asterisk run, and the domain stays intact. Use it for "
+    "display only; never echo it back as login input."
 )
 
 
@@ -51,8 +71,10 @@ class FileSchema(BaseModel):
 class UserSchema(BaseModel):
     """Public user profile.
 
-    `email` is intentionally omitted — it is private to the account
-    owner and never returned by user-facing endpoints.
+    The user's identity is exposed as a single ``full_name`` string
+    (``Last First Patronymic``) plus a ``email`` masked through the
+    canonical ``f*****d@domain.com`` form so the API never returns a
+    plain address.
     """
 
     model_config = ConfigDict(
@@ -60,9 +82,8 @@ class UserSchema(BaseModel):
             "examples": [
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
-                    "first_name": "Ada",
-                    "last_name": "Lovelace",
-                    "patronymic": None,
+                    "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
                     "description": "<p>Mathematician.</p>",
                     "avatar_url": "https://s3.example.com/avatars/...",
                     "cover_url": None,
@@ -75,24 +96,21 @@ class UserSchema(BaseModel):
         description="User's stable identifier (UUID v4).",
         examples=["550e8400-e29b-41d4-a716-446655440000"],
     )
-    first_name: str = Field(
-        description="User's given name. Required, non-empty.",
-        min_length=1,
-        max_length=FIRST_NAME_MAX_LEN,
-        examples=["Ada"],
-    )
-    last_name: str = Field(
-        description="User's family name. Required, non-empty.",
-        min_length=1,
-        max_length=LAST_NAME_MAX_LEN,
-        examples=["Lovelace"],
-    )
-    patronymic: str | None = Field(
+    full_name: str = Field(
         description=(
-            "User's middle/patronymic name. `null` when the user has not set one."
+            "Display name in the canonical Russian-style "
+            "`Last First Patronymic` order. Whitespace-trimmed; "
+            "missing patronymic collapses to `Last First`."
         ),
-        max_length=PATRONYMIC_MAX_LEN,
-        examples=[None, "Augusta"],
+        min_length=1,
+        max_length=_FULL_NAME_MAX_LEN,
+        examples=["Lovelace Ada"],
+    )
+    email: str = Field(
+        description=_MASKED_EMAIL_DESCRIPTION,
+        min_length=1,
+        max_length=EMAIL_MAX_LEN,
+        examples=["a*****a@example.com"],
     )
     description: str | None = Field(
         description=(
@@ -132,9 +150,8 @@ class UserSchema(BaseModel):
         """Build the schema from a ``GetUserQueryHandler`` output."""
         return cls(
             oid=view.oid,
-            first_name=view.first_name,
-            last_name=view.last_name,
-            patronymic=view.patronymic,
+            full_name=view.full_name,
+            email=view.email,
             description=view.description,
             avatar_url=view.avatar_url,
             cover_url=view.cover_url,
@@ -144,10 +161,12 @@ class UserSchema(BaseModel):
 class UserSummarySchema(BaseModel):
     """Lightweight user projection returned by name search.
 
-    Like :class:`UserSchema` it omits ``email`` and ``description`` —
-    the search endpoint is general-purpose, so private fields stay
-    private. ``cover_url`` is also omitted because callers display
-    a single thumbnail per hit, not a full profile card.
+    Like :class:`UserSchema` it omits ``description`` — the search
+    endpoint is general-purpose, so private fields stay private.
+    ``cover_url`` is also omitted because callers display a single
+    thumbnail per hit, not a full profile card. ``email`` is **not**
+    surfaced at all here, even masked, because the search endpoint
+    must not let an attacker enumerate registered addresses.
     """
 
     model_config = ConfigDict(
@@ -155,9 +174,7 @@ class UserSummarySchema(BaseModel):
             "examples": [
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
-                    "first_name": "Ada",
-                    "last_name": "Lovelace",
-                    "patronymic": None,
+                    "full_name": "Lovelace Ada",
                     "avatar_url": "https://s3.example.com/avatars/...",
                 },
             ],
@@ -168,24 +185,15 @@ class UserSummarySchema(BaseModel):
         description="User's stable identifier (UUID v4).",
         examples=["550e8400-e29b-41d4-a716-446655440000"],
     )
-    first_name: str = Field(
-        description="User's given name.",
-        min_length=1,
-        max_length=FIRST_NAME_MAX_LEN,
-        examples=["Ada"],
-    )
-    last_name: str = Field(
-        description="User's family name.",
-        min_length=1,
-        max_length=LAST_NAME_MAX_LEN,
-        examples=["Lovelace"],
-    )
-    patronymic: str | None = Field(
+    full_name: str = Field(
         description=(
-            "User's middle/patronymic name. `null` when not set."
+            "Display name in the canonical Russian-style "
+            "`Last First Patronymic` order. Whitespace-trimmed; "
+            "missing patronymic collapses to `Last First`."
         ),
-        max_length=PATRONYMIC_MAX_LEN,
-        examples=[None, "Augusta"],
+        min_length=1,
+        max_length=_FULL_NAME_MAX_LEN,
+        examples=["Lovelace Ada"],
     )
     avatar_url: str | None = Field(
         description=(
@@ -204,10 +212,81 @@ class UserSummarySchema(BaseModel):
         """Build the schema from a ``SearchUsersQueryHandler`` hit."""
         return cls(
             oid=view.oid,
-            first_name=view.first_name,
-            last_name=view.last_name,
-            patronymic=view.patronymic,
+            full_name=view.full_name,
             avatar_url=view.avatar_url,
+        )
+
+
+class UserRefSchema(BaseModel):
+    """Unified user reference embedded in parent resources.
+
+    Returned wherever the API exposes a user *as a reference inside
+    another resource* — product author, collaboration collaborator,
+    notification actor, and so on. Carries the user's identifier, the
+    canonical ``Last First Patronymic`` display name, and a
+    privacy-masked email so the SPA can render the row without a
+    follow-up ``GET /users/{id}``.
+
+    Distinct from :class:`UserSchema`, which is the full profile
+    projection (``GET /users/{id}``) and adds avatar, cover, and
+    description on top of these fields. Distinct from
+    :class:`UserSummarySchema`, which intentionally omits ``email``
+    to keep the public name-search endpoint immune to address
+    enumeration.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
+                },
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description="User's stable identifier (UUID v4).",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    full_name: str = Field(
+        description=(
+            "Display name in the canonical Russian-style "
+            "`Last First Patronymic` order. Whitespace-trimmed; "
+            "missing patronymic collapses to `Last First`."
+        ),
+        min_length=1,
+        max_length=_FULL_NAME_MAX_LEN,
+        examples=["Lovelace Ada"],
+    )
+    email: str = Field(
+        description=(
+            f"{_MASKED_EMAIL_DESCRIPTION} May be an empty string in "
+            "the rare placeholder case where the reader could not "
+            "join the underlying user row — the SPA must tolerate "
+            "this and fall back to ``full_name`` for display."
+        ),
+        max_length=EMAIL_MAX_LEN,
+        examples=["a*****a@example.com"],
+    )
+
+    @classmethod
+    def from_view(cls, view: UserRefView) -> Self:
+        """Build the schema from a :class:`UserRefView` projection.
+
+        Collapses the name parts via :func:`build_full_name` and
+        masks the raw email via :func:`mask_email`. When the view
+        carries an empty email (defensive placeholder for rows the
+        reader could not join), the masked field is also empty.
+        """
+        return cls(
+            oid=view.oid,
+            full_name=build_full_name(
+                view.first_name, view.last_name, view.patronymic
+            ),
+            email=mask_email(view.email) if view.email else "",
         )
 
 

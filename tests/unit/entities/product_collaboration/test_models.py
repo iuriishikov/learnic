@@ -162,6 +162,50 @@ class TestAccept:
             )
 
 
+class TestAcceptInApp:
+    def _make_pending(
+        self,
+        *,
+        token: InviteToken,
+        ttl_days: int = INVITE_TOKEN_TTL_DAYS,
+        now: datetime | None = None,
+    ) -> ProductCollaboration:
+        return ProductCollaboration.invite_existing_user(
+            product_id=_product(),
+            collaborator_id=_user(),
+            invited_by=_user(),
+            grants=_grants(),
+            token=token,
+            ttl_days=ttl_days,
+            now=now,
+        )
+
+    def test_accept_in_app_transitions_to_active_without_token(self) -> None:
+        token = InviteToken("plain-token-value")
+        collab = self._make_pending(token=token)
+        accepting_user = _user()
+        collab.accept_in_app(accepting_user)
+        assert collab.status is CollaborationStatus.ACTIVE
+        assert collab.collaborator_id == accepting_user
+        assert collab.accepted_at is not None
+        assert collab.invite_token_hash is None
+        assert collab.invite_expires_at is None
+
+    def test_accept_in_app_rejects_when_already_active(self) -> None:
+        token = InviteToken("plain-token-value")
+        collab = self._make_pending(token=token)
+        collab.accept_in_app(_user())
+        with pytest.raises(CannotAcceptInThisStatusError):
+            collab.accept_in_app(_user())
+
+    def test_accept_in_app_rejects_expired(self) -> None:
+        token = InviteToken("plain-token-value")
+        old = datetime.now(timezone.utc) - timedelta(days=30)
+        collab = self._make_pending(token=token, ttl_days=14, now=old)
+        with pytest.raises(InviteTokenExpiredError):
+            collab.accept_in_app(_user(), now=datetime.now(timezone.utc))
+
+
 class TestRevoke:
     def test_revokes_active_collaboration(self) -> None:
         token = InviteToken("plain-token-value")

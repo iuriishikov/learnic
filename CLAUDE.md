@@ -1112,6 +1112,54 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
 - ❌ Silently swallow an unmapped exception by setting
   `warn_on_unmapped=False` — the noisy `RuntimeError("No rule defined for
   ...")` is a feature; fix the `error_map` of the offending route.
+- ❌ Patch one missing entry in an `error_map` from a stack trace without
+  auditing the sibling errors. When a handler can raise one of a family
+  of related errors (state-mismatch families like
+  `CannotAcceptInThisStatusError` / `CannotDeclineInThisStatusError` /
+  `CannotRevokeInThisStatusError` / `CannotMutateInactiveCollaborationError`,
+  invite-token failures, status-transition guards, …), they are reachable
+  from real flows — map them in the **same** change. Otherwise you trade
+  one 500 for another the next time the user trips a sibling status. The
+  pattern is the same as on the frontend: when a bug is reported against
+  one variant of a closed set (an enum, an error family, an event kind),
+  audit every variant before declaring the fix done — the user reported
+  one because that's the one they hit, the others are latent reports
+  that haven't fired yet.
+- ❌ Drop a domain-status check (`if self.status in (...): raise X`) on a
+  state-machine entity without enumerating every status the operation is
+  invalid in. The set of forbidden states is a closed set on
+  `<Aggregate>Status` — list every variant explicitly, don't write
+  `if self.status != ALLOWED: raise` and rely on a single allow-listed
+  state. When a new status is added to the enum, every existing
+  guard-clause must be revisited.
+- ❌ Write an "is in use" / "is referenced" / "has dependents" gating
+  query that filters only on the FK and ignores the lifecycle status
+  of the related aggregate. Child / link / grant tables hold rows
+  from **every** status the parent has ever been in — `PENDING_INVITE`,
+  `ACTIVE`, `DECLINED`, `REVOKED`, archived, soft-deleted. A bare
+  `WHERE fk_id = :id` treats dead audit-trail rows as live references.
+  Same closed-set discipline as the guard-clause rule above: walk every
+  value of `<Aggregate>Status` and pick a side for it explicitly
+  (`WHERE status IN (PENDING_INVITE, ACTIVE)` for "still owes
+  something," not "ever existed"). When a bug is reported against one
+  variant of a closed set (an enum, an error family, a status), audit
+  every variant before declaring the fix done — the reported one is
+  the variant that fired, the others are latent and will fire next.
+  Concrete past trap: a collaborator who declined or had their invite
+  revoked kept the role-deletion check returning `True` forever
+  because the dead grant row still pointed at the role.
+- ❌ Ship an "in use" / "is referenced" semantic that the FK constraint
+  disagrees with. If the gating query says "no live references" but
+  the FK on those rows is `ON DELETE RESTRICT`, the handler will
+  cheerfully proceed and Postgres will throw `IntegrityError` → 500.
+  The application-level liveness check and the DB-level constraint
+  must agree on what "free to delete" means. Pick one: purge the
+  dead-state child rows alongside the parent in the same gateway
+  operation (most common), declare the FK `ON DELETE SET NULL` /
+  `CASCADE` if the child should follow the parent, or count the
+  audit-trail rows as live in the check (and refuse deletion).
+  Whenever you change a status-aware gating query, re-read the FK
+  on the same table — they are two halves of one invariant.
 - ❌ Call `session.commit()` / `session.flush()` from gateways or readers.
   Only `TransactionAlchemy` manages transactions.
 - ❌ Merge `Gateway` and `Reader` into one protocol. The CQRS split is load-bearing.

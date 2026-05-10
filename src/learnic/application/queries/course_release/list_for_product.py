@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.errors import (
     EntityNotFoundError,
     NotACourseError,
-    NotResourceOwnerError,
 )
 from learnic.application.common.persistence.course_release import (
     CourseReleaseReader,
@@ -13,6 +13,7 @@ from learnic.application.common.persistence.course_release import (
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.entities.product.enums import ProductType
 from learnic.entities.product.ids import ProductID
+from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 
 
@@ -24,13 +25,20 @@ class ListCourseReleasesQuery:
 
 @final
 class ListCourseReleasesQueryHandler:
-    """Return all releases of a course, newest first. Author-only."""
+    """Return all releases of a course, newest first.
+
+    Caller needs ``READ_PRODUCT`` on the target product, so the
+    owner and any collaborator with that permission (Editor,
+    Commentor, custom roles) can list releases.
+    """
 
     def __init__(
         self,
+        authorizer: Authorizer,
         product_gateway: ProductGateway,
         release_reader: CourseReleaseReader,
     ) -> None:
+        self._authorizer: Final = authorizer
         self._product_gateway: Final = product_gateway
         self._release_reader: Final = release_reader
 
@@ -41,8 +49,11 @@ class ListCourseReleasesQueryHandler:
         product = await self._product_gateway.with_id(data.product_id)
         if product is None:
             raise EntityNotFoundError(data.product_id)
-        if product.author_id != data.actor_id:
-            raise NotResourceOwnerError(data.product_id, data.actor_id)
+        await self._authorizer.require(
+            data.actor_id,
+            AuthzTarget.for_product(data.product_id),
+            Permission.READ_PRODUCT,
+        )
         if product.type is not ProductType.COURSE:
             raise NotACourseError(data.product_id)
         return await self._release_reader.list_for_product(data.product_id)

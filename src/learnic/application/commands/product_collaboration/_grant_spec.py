@@ -3,9 +3,9 @@
 Both ``InviteCollaborator*`` and ``UpdateCollaborationGrants`` accept
 the same shape: a non-empty list of ``(role_id, scope_type, scope_id?)``
 tuples. The helper validates them against the target product (role
-must exist and either be a system role or belong to the same product;
-module/lesson scope ids must reference resources inside the product)
-and converts them into :class:`CollaborationGrant` entities.
+must exist and belong to the same product; module/lesson scope ids
+must reference resources inside the product) and converts them into
+:class:`CollaborationGrant` entities.
 """
 
 from dataclasses import dataclass
@@ -20,7 +20,6 @@ from learnic.application.common.persistence.role import RoleGateway
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.errors import InvalidScopeError
 from learnic.entities.product_collaboration.grant import CollaborationGrant
-from learnic.entities.role.enums import RoleKind
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.permissions import ScopeType
 
@@ -37,8 +36,8 @@ class GrantSpecResolver:
 
     Raises :class:`EntityNotFoundError` for a missing role or for a
     module/lesson scope id that does not exist or belongs to a
-    different product. Raises :class:`InvalidScopeError` when a
-    custom role from a different product is referenced.
+    different product. Raises :class:`InvalidScopeError` when a role
+    from a different product is referenced.
     """
 
     def __init__(
@@ -79,8 +78,8 @@ class GrantSpecResolver:
         role = await self._role_gateway.with_id(role_id)
         if role is None:
             raise EntityNotFoundError(role_id)
-        if role.kind is RoleKind.CUSTOM and role.product_id != product_id:
-            raise InvalidScopeError("custom_role_from_other_product")
+        if role.product_id != product_id:
+            raise InvalidScopeError("role_from_other_product")
 
     async def _validate_scope(
         self,

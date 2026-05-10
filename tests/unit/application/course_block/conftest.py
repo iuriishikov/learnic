@@ -4,11 +4,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from learnic.entities.course_block.models import (
+    CodeBlock,
+    CodeTab,
     HtmlBlock,
     KatexBlock,
     RutubeVideoBlock,
 )
 from learnic.entities.course_block.value_objects import (
+    CodeLanguage,
+    CodeSource,
+    CodeTabLabel,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -65,6 +70,8 @@ def fake_block_gateway() -> AsyncMock:
     gw.update_katex = AsyncMock()
     gw.add_rutube_video = AsyncMock()
     gw.update_rutube_video = AsyncMock()
+    gw.add_code = AsyncMock()
+    gw.update_code = AsyncMock()
     gw.delete = AsyncMock()
     gw.reorder = AsyncMock()
     return gw
@@ -142,4 +149,20 @@ def rutube_video_block(course_lesson: CourseLesson) -> RutubeVideoBlock:
         product_id=course_lesson.product_id,
         external_id=RutubeVideoID(_RUTUBE_ID),
         position=2,
+    )
+
+
+@pytest.fixture
+def code_block(course_lesson: CourseLesson) -> CodeBlock:
+    return CodeBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        tabs=[
+            CodeTab(
+                label=CodeTabLabel(""),
+                source=CodeSource("const x = 1;"),
+                language=CodeLanguage("ts"),
+            ),
+        ],
+        position=3,
     )

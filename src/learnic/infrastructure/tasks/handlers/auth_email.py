@@ -11,7 +11,12 @@ from learnic.infrastructure.tasks.broker import broker
 
 
 def _verify_link(base_url: str, raw_token: str) -> str:
-    return f"{base_url.rstrip('/')}/verify-email?token={raw_token}"
+    # Routes through the unified ``/confirm/<purpose>`` SPA page so the
+    # token is consumed via ``POST /auth/verify-token``. The old
+    # ``/verify-email?token=...`` route still exists and still works
+    # against ``POST /auth/email-verification/verify`` for any
+    # in-flight emails issued before this link shape changed.
+    return f"{base_url.rstrip('/')}/confirm/email?token={raw_token}"
 
 
 def _reset_link(base_url: str, raw_token: str) -> str:

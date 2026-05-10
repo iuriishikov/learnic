@@ -20,6 +20,8 @@ from enum import StrEnum
 
 import sqlalchemy as sa
 
+from sqlalchemy.dialects.postgresql import JSONB
+
 from learnic.entities.course_block.constants import (
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
@@ -140,5 +142,27 @@ rutube_video_blocks_table = sa.Table(
         "title",
         sa.String(VIDEO_TITLE_MAX_LEN),
         nullable=True,
+    ),
+)
+
+
+code_blocks_table = sa.Table(
+    "code_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    # ``tabs`` is a JSONB array of ``{"label": str, "source": str,
+    # "language": str}`` objects. Stored opaque — the application layer
+    # never queries inside it, so a denormalized column beats a child
+    # table here. Length / count invariants are enforced upstream by
+    # :class:`CodeBlock`'s ``__post_init__`` so the DB stores trusted data.
+    sa.Column(
+        "tabs",
+        JSONB,
+        nullable=False,
     ),
 )

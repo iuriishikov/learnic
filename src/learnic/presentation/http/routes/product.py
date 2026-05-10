@@ -100,7 +100,6 @@ from learnic.application.common.pagination import (
     Pagination,
 )
 from learnic.application.common.persistence.product import (
-    AuthorView,
     ProductView,
     WebinarDetailsView,
 )
@@ -176,7 +175,7 @@ from learnic.presentation.http.common.errors.rules import (
     PRODUCT_NOT_IN_DRAFT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
-from learnic.presentation.http.common.schemas import FileSchema
+from learnic.presentation.http.common.schemas import FileSchema, UserRefSchema
 from learnic.presentation.http.common.uploads import read_image_upload
 
 router = ErrorAwareRouter(
@@ -302,24 +301,6 @@ class WebinarDetailsSchema(BaseModel):
         )
 
 
-class AuthorPublicSchema(BaseModel):
-    """Public author projection embedded in :class:`ProductSchema`."""
-
-    oid: UUID = Field(examples=["550e8400-e29b-41d4-a716-446655440000"])
-    first_name: str = Field(examples=["Ada"])
-    last_name: str = Field(examples=["Lovelace"])
-    patronymic: str | None = Field(examples=["Augusta", None])
-
-    @classmethod
-    def from_view(cls, view: AuthorView) -> Self:
-        return cls(
-            oid=view.oid,
-            first_name=view.first_name,
-            last_name=view.last_name,
-            patronymic=view.patronymic,
-        )
-
-
 class ProductSchema(BaseModel):
     """Full product projection returned by ``GET /products/...``."""
 
@@ -335,9 +316,8 @@ class ProductSchema(BaseModel):
                     "total_duration_in_hours": 30,
                     "author": {
                         "oid": "550e8400-e29b-41d4-a716-446655440000",
-                        "first_name": "Ada",
-                        "last_name": "Lovelace",
-                        "patronymic": None,
+                        "full_name": "Lovelace Ada",
+                        "email": "a*****a@example.com",
                     },
                     "webinar_details": None,
                     "cover_file_id": ("9f1e2d3c-4b5a-4d2c-9d11-9d4f0a44b6c8"),
@@ -355,7 +335,7 @@ class ProductSchema(BaseModel):
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    author: AuthorPublicSchema
+    author: UserRefSchema
     webinar_details: WebinarDetailsSchema | None
     cover_file_id: UUID | None
     published_at: datetime | None
@@ -371,7 +351,7 @@ class ProductSchema(BaseModel):
             name=view.name,
             description=view.description,
             total_duration_in_hours=view.total_duration_in_hours,
-            author=AuthorPublicSchema.from_view(view.author),
+            author=UserRefSchema.from_view(view.author),
             webinar_details=(
                 WebinarDetailsSchema.from_view(view.webinar_details)
                 if view.webinar_details is not None
@@ -1124,7 +1104,7 @@ async def delete_product(
 
 @router.get(
     "/mine",
-    summary="List the current user's products",
+    summary="List products the current user can access",
     operation_id="getMyProducts",
     response_model=list[ProductSchema],
     dependencies=_AUTH_SECURITY,
@@ -1148,7 +1128,12 @@ async def get_mine(
         examples=[20],
     ),
 ) -> list[ProductSchema]:
-    """Return products owned by the current user (any status), newest first.
+    """Return products accessible to the current user, newest first.
+
+    A product appears in the result if the caller is its author or
+    has an active collaboration on it (``PENDING_INVITE`` and
+    ``REVOKED`` collaborations are excluded). Any product status is
+    returned.
 
     Args:
         request: Source of the access-token cookie.
@@ -1167,7 +1152,7 @@ async def get_mine(
     ctx = await auth.authenticate(request)
     views = await interactor.run(
         GetMyProductsQuery(
-            author_id=ctx.user_id,
+            user_id=ctx.user_id,
             pagination=Pagination(limit=limit, offset=offset),
         ),
     )
@@ -1956,7 +1941,7 @@ async def enroll_in_course(
 
 @course_router.get(
     "/{course_id}/enrollments",
-    summary="List a course's enrollments (author only)",
+    summary="List a course's enrollments",
     operation_id="getCourseEnrollments",
     response_model=list[CourseEnrollmentListItemSchema],
     dependencies=_AUTH_SECURITY,
@@ -1968,11 +1953,15 @@ async def get_course_enrollments(
     auth: FromDishka[Authenticator],
     course_id: UUID = _COURSE_ID_PATH,
 ) -> list[CourseEnrollmentListItemSchema]:
-    """Return course enrollments. Caller must be the course author.
+    """Return course enrollments.
+
+    Caller needs ``READ_PRODUCT`` on the product (owner or any
+    collaborator with that permission).
 
     Raises:
         InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: HTTP 403.
+        InsufficientPermissionsError: HTTP 403 — caller has no
+            collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404.
     """
     ctx = await auth.authenticate(request)

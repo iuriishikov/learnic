@@ -7,6 +7,7 @@ from typing_extensions import override
 
 from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.security.email_tokens import (
+    EmailTokenInfo,
     EmailTokenPurpose,
     EmailTokenStore,
 )
@@ -56,6 +57,35 @@ class EmailTokenStoreAlchemy(EmailTokenStore):
             )
         )
         return raw
+
+    @override
+    async def peek(self, raw_token: str) -> EmailTokenInfo:
+        token_hash = hash_token(raw_token)
+        now = datetime.now(timezone.utc)
+
+        row = (
+            await self._session.execute(
+                sa.select(
+                    email_tokens_table.c.user_id,
+                    email_tokens_table.c.purpose,
+                    email_tokens_table.c.expires_at,
+                    email_tokens_table.c.consumed_at,
+                ).where(email_tokens_table.c.token_hash == token_hash)
+            )
+        ).one_or_none()
+
+        if row is None:
+            raise InvalidTokenError
+        if row.consumed_at is not None:
+            raise InvalidTokenError
+        if row.expires_at <= now:
+            raise InvalidTokenError
+
+        return EmailTokenInfo(
+            user_id=UserID(row.user_id),
+            purpose=EmailTokenPurpose(row.purpose),
+            expires_at=row.expires_at,
+        )
 
     @override
     async def consume(

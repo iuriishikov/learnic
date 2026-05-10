@@ -7,6 +7,9 @@ from learnic.application.common.notifications.views import (
 )
 from learnic.entities.notification.enums import NotificationCategory
 from learnic.entities.notification.ids import NotificationID
+from learnic.entities.product_collaboration.ids import (
+    ProductCollaborationID,
+)
 from learnic.entities.user.models import UserID
 
 
@@ -39,6 +42,21 @@ class NotificationReader(Protocol):
         post-mutation view over the WebSocket channel and by the
         invite-publishing flow that needs to ship the new card to
         the recipient without an extra round-trip.
+        """
+        ...
+
+    async def list_invite_sent_for_collaboration(
+        self,
+        recipient_id: UserID,
+        collaboration_id: ProductCollaborationID,
+    ) -> tuple[NotificationView, ...]:
+        """Return every ``invite_sent`` view for ``(recipient, collaboration)``.
+
+        Used by :class:`NotificationPublisher` to republish the
+        recipient's invitation cards after the underlying
+        collaboration changes status (accept / decline / revoke) so
+        the panel re-renders the embedded snapshot without a
+        full-list refetch.
         """
         ...
 

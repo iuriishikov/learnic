@@ -15,16 +15,15 @@ from learnic.application.commands.cohort.update_name import (
     UpdateCohortNameCommand,
     UpdateCohortNameCommandHandler,
 )
-from learnic.application.common.errors import NotResourceOwnerError
+from learnic.application.common.errors import InsufficientPermissionsError
 from learnic.entities.cohort.models import Cohort
-from learnic.entities.product.models import Product
 from learnic.entities.user.models import UserID
 
 
 async def test_update_name_by_host_succeeds(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -32,7 +31,7 @@ async def test_update_name_by_host_succeeds(
     handler = UpdateCohortNameCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -45,25 +44,23 @@ async def test_update_name_by_host_succeeds(
 
     assert cohort.name is not None
     assert cohort.name.value == "Renamed"
-    # Host check is the cheap path — product_gateway not consulted.
-    fake_product_gateway.with_id.assert_not_awaited()
+    # Host check is the cheap path — authorizer not consulted.
+    fake_authorizer.require.assert_not_awaited()
     fake_transaction.commit.assert_awaited_once()
 
 
 async def test_update_name_by_author_succeeds(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
-    webinar_product: Product,
     author_id: UserID,
 ) -> None:
     fake_cohort_gateway.with_id.return_value = cohort
-    fake_product_gateway.with_id.return_value = webinar_product
     handler = UpdateCohortNameCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -76,27 +73,30 @@ async def test_update_name_by_author_succeeds(
 
     assert cohort.name is not None
     assert cohort.name.value == "By author"
-    fake_product_gateway.with_id.assert_awaited_once()
+    fake_authorizer.require.assert_awaited_once()
     fake_transaction.commit.assert_awaited_once()
 
 
 async def test_update_name_by_stranger_raises(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
-    webinar_product: Product,
     stranger_id: UserID,
 ) -> None:
     fake_cohort_gateway.with_id.return_value = cohort
-    fake_product_gateway.with_id.return_value = webinar_product
+    fake_authorizer.require.side_effect = InsufficientPermissionsError(
+        user_id=stranger_id,
+        product_id=cohort.webinar_id,
+        permission="MANAGE_RELEASES",
+    )
     handler = UpdateCohortNameCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
-    with pytest.raises(NotResourceOwnerError):
+    with pytest.raises(InsufficientPermissionsError):
         await handler.run(
             UpdateCohortNameCommand(
                 actor_id=stranger_id,
@@ -110,7 +110,7 @@ async def test_update_name_by_stranger_raises(
 async def test_update_name_with_none_clears(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -118,7 +118,7 @@ async def test_update_name_with_none_clears(
     handler = UpdateCohortNameCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -135,7 +135,7 @@ async def test_update_name_with_none_clears(
 async def test_update_max_participants_clears(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -143,7 +143,7 @@ async def test_update_max_participants_clears(
     handler = UpdateCohortMaxParticipantsCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     await handler.run(
@@ -160,7 +160,7 @@ async def test_update_max_participants_clears(
 async def test_reschedule_updates_dates(
     fake_transaction: AsyncMock,
     fake_cohort_gateway: AsyncMock,
-    fake_product_gateway: AsyncMock,
+    fake_authorizer: AsyncMock,
     cohort: Cohort,
     host_id: UserID,
 ) -> None:
@@ -168,7 +168,7 @@ async def test_reschedule_updates_dates(
     handler = RescheduleCohortCommandHandler(
         transaction=fake_transaction,
         cohort_gateway=fake_cohort_gateway,
-        product_gateway=fake_product_gateway,
+        authorizer=fake_authorizer,
     )
 
     new_start = date(2026, 10, 1)
