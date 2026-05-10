@@ -74,6 +74,13 @@ def fake_role_reader() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_event_bus() -> AsyncMock:
+    bus = AsyncMock()
+    bus.publish = AsyncMock()
+    return bus
+
+
+@pytest.fixture
 def author_id() -> UserID:
     return UserID(uuid.uuid4())
 

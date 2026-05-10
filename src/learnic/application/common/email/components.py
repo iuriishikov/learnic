@@ -1,8 +1,9 @@
 """Typed email components rendered into HTML by the infrastructure layer.
 
-Handlers and tasks build a list of these dataclasses instead of writing
-HTML strings; the :class:`EmailService` adapter takes care of turning the
-list into a styled, email-client-safe message.
+Command handlers and the notification publisher build a list of these
+dataclasses instead of writing HTML strings; :class:`EmailRenderer`
+turns the list into a styled, email-client-safe message before the
+result is enqueued via :meth:`TaskScheduler.schedule_send_email`.
 """
 
 from dataclasses import dataclass

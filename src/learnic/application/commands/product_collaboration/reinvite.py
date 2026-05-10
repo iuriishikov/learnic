@@ -3,6 +3,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import (
     CollaborationAlreadyExistsError,
     EmailInviteRateLimitExceededError,
@@ -23,12 +27,16 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration.invite_by_email import (
     EMAIL_INVITE_RATE_LIMIT_WINDOW,
     MAX_EMAIL_INVITES_PER_DAY,
 )
 from learnic.entities.notification.models import Notification
+from learnic.entities.product_collaboration.constants import (
+    INVITE_TOKEN_TTL_DAYS,
+)
 from learnic.entities.product_collaboration.grant import CollaborationGrant
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -80,6 +88,7 @@ class ReinviteCollaboratorCommandHandler:
         scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
+        security: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -89,6 +98,7 @@ class ReinviteCollaboratorCommandHandler:
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
+        self._security: Final = security
 
     async def run(
         self,
@@ -137,11 +147,28 @@ class ReinviteCollaboratorCommandHandler:
         await self._transaction.commit()
         target_email = await self._resolve_email(collab)
         if target_email is not None:
-            await self._scheduler.schedule_send_collaboration_invite_email(
+            base = self._security.frontend_base_url.rstrip("/")
+            link = (
+                f"{base}/products/{collab.product_id}"
+                f"/collaboration-invitation/{collab.oid}"
+                f"/accept?token={token.value}"
+            )
+            await self._scheduler.schedule_send_email(
                 to=target_email,
-                product_id=collab.product_id,
-                collaboration_id=collab.oid,
-                raw_token=token.value,
+                subject="Приглашение к совместной работе на Learnic",
+                components=[
+                    EmailParagraph.text("Здравствуйте!"),
+                    EmailParagraph.text(
+                        "Вас пригласили в совместную работу над продуктом на "
+                        "платформе Learnic.",
+                    ),
+                    EmailButton(label="Принять приглашение", url=link),
+                    EmailParagraph.text(
+                        f"Ссылка действует {INVITE_TOKEN_TTL_DAYS} дней. "
+                        "После того как вы примете приглашение, нужные "
+                        "права будут выданы автоматически.",
+                    ),
+                ],
             )
         await publish_product_event(
             self._event_bus,

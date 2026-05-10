@@ -5,6 +5,7 @@ from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
     ContentEventKind,
+    block_added_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -18,7 +19,6 @@ from learnic.application.common.persistence.course_lesson import (
 )
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
-from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import KatexBlock
 from learnic.entities.course_block.value_objects import KatexSource
@@ -83,11 +83,9 @@ class AddKatexBlockCommandHandler:
             kind=ContentEventKind.BLOCK_ADDED,
             product_id=lesson.product_id,
             actor_id=data.actor_id,
-            payload={
-                "lesson_id": str(data.lesson_id),
-                "block_id": str(block.oid),
-                "type": BlockType.KATEX.value,
-                "position": block.position,
-            },
+            payload=block_added_payload(
+                lesson_id=data.lesson_id,
+                block=block,
+            ),
         )
         return block.oid

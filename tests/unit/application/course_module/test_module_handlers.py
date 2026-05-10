@@ -85,8 +85,12 @@ async def test_add_module_appends_at_next_position(
     assert event.kind.value == "module_added"
     assert event.product_id == course_product.oid
     assert event.actor_id == author_id
-    assert event.payload["module_id"] == str(saved.oid)
-    assert event.payload["title"] == "New"
+    module_payload = event.payload["module"]
+    assert module_payload["oid"] == str(saved.oid)
+    assert module_payload["title"] == "New"
+    assert module_payload["position"] == 3
+    assert module_payload["description"] is None
+    assert module_payload["lessons"] == []
 
 
 async def test_add_module_does_not_publish_on_validation_error(

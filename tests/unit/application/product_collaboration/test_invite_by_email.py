@@ -55,6 +55,7 @@ def _build_handler(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
 ) -> InviteCollaboratorByEmailCommandHandler:
     return InviteCollaboratorByEmailCommandHandler(
         transaction=fake_transaction,
@@ -69,6 +70,7 @@ def _build_handler(
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
+        security=security_config,
     )
 
 
@@ -106,6 +108,7 @@ async def test_refuses_when_actor_hit_daily_email_invite_limit(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     role_id: RoleID,
@@ -130,6 +133,7 @@ async def test_refuses_when_actor_hit_daily_email_invite_limit(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     with pytest.raises(EmailInviteRateLimitExceededError) as excinfo:
         await handler.run(
@@ -141,7 +145,7 @@ async def test_refuses_when_actor_hit_daily_email_invite_limit(
     assert excinfo.value.retry_after_seconds == 86400
     fake_collab_saver.save.assert_not_called()
     fake_transaction.commit.assert_not_called()
-    fake_scheduler.schedule_send_collaboration_invite_email.assert_not_called()
+    fake_scheduler.schedule_send_email.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -158,6 +162,7 @@ async def test_allows_when_actor_below_daily_limit(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     role_id: RoleID,
@@ -182,6 +187,7 @@ async def test_allows_when_actor_below_daily_limit(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     oid = await handler.run(
         _command(actor_id, product.oid, "fresh@example.com", role_id),
@@ -190,7 +196,7 @@ async def test_allows_when_actor_below_daily_limit(
     assert oid is not None
     fake_collab_saver.save.assert_called_once()
     fake_transaction.commit.assert_called_once()
-    fake_scheduler.schedule_send_collaboration_invite_email.assert_called_once()
+    fake_scheduler.schedule_send_email.assert_called_once()
     fake_notifications.publish.assert_not_called()
 
 
@@ -208,6 +214,7 @@ async def test_publishes_in_app_notification_for_registered_email(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     invitee_user: User,
@@ -230,6 +237,7 @@ async def test_publishes_in_app_notification_for_registered_email(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     oid = await handler.run(
         _command(actor_id, product.oid, invitee_user.email.value, role_id),

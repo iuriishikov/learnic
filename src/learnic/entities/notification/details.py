@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 
 from learnic.entities.product.ids import ProductID
@@ -87,3 +88,31 @@ class AccessRevokedDetails(NotificationDetails):
     collaboration_id: ProductCollaborationID
     product_id: ProductID
     revoker_id: UserID
+
+
+@dataclass(slots=True)
+class NewLoginDetails(NotificationDetails):
+    """Body for the ``new_login`` notification.
+
+    Emitted when a successful login lands on the user's account.
+    ``device_label`` is the short human-readable string the
+    auth flow already derives from the User-Agent for the active
+    sessions list (e.g. ``"Chrome on macOS"``); ``user_agent`` is
+    the raw header truncated to the column width and kept around
+    so a future "see details" expander can render the full string
+    without another fetch. ``ip_address`` is captured for the
+    same reason — all three fields are nullable because non-browser
+    clients (or legacy callers) may not provide them.
+
+    ``session_id`` is the refresh-token ``family_id`` minted at
+    login time. It is the same identifier the active-sessions
+    list uses so the panel can render a "Logout from this device"
+    CTA that hits ``DELETE /auth/sessions/{session_id}``. Carrying
+    it on the notification means a recipient who spots a hostile
+    login can revoke that session without leaving the panel.
+    """
+
+    device_label: str | None
+    user_agent: str | None
+    ip_address: str | None
+    session_id: uuid.UUID

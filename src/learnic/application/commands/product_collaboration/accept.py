@@ -20,7 +20,6 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
-from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -48,8 +47,9 @@ class AcceptCollaborationInviteCommandHandler:
        ``invited_email`` (otherwise a different signed-in user could
        accept on behalf of the original invitee).
 
-    On success an "invite accepted" email goes to the inviter (per
-    the project's "all notifications by email" rule).
+    On success the inviter receives an in-app notification; the
+    accompanying email is dispatched by ``NotificationPublisher``
+    based on the recipient's preference matrix.
     """
 
     def __init__(
@@ -57,14 +57,12 @@ class AcceptCollaborationInviteCommandHandler:
         transaction: Transaction,
         collab_gateway: ProductCollaborationGateway,
         user_gateway: UserGateway,
-        scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._collab_gateway: Final = collab_gateway
         self._user_gateway: Final = user_gateway
-        self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
 
@@ -89,13 +87,6 @@ class AcceptCollaborationInviteCommandHandler:
         token = InviteToken(data.raw_token)
         collab.accept(data.actor_id, token)
         await self._transaction.commit()
-        inviter = await self._user_gateway.with_id(collab.invited_by)
-        if inviter is not None:
-            await self._scheduler.schedule_send_collaboration_accepted_email(
-                to=inviter.email.value,
-                product_id=collab.product_id,
-                collaborator_id=data.actor_id,
-            )
         await publish_product_event(
             self._event_bus,
             kind=ProductEventKind.COLLABORATION_ACCEPTED,

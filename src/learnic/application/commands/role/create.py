@@ -13,6 +13,12 @@ from learnic.application.common.persistence.role import (
     RoleSaver,
 )
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_role_payload,
+    publish_product_event,
+)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
@@ -58,6 +64,7 @@ class CreateCustomRoleCommandHandler:
         role_gateway: RoleGateway,
         role_reader: RoleReader,
         role_saver: RoleSaver,
+        event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -65,6 +72,7 @@ class CreateCustomRoleCommandHandler:
         self._role_gateway: Final = role_gateway
         self._role_reader: Final = role_reader
         self._role_saver: Final = role_saver
+        self._event_bus: Final = event_bus
 
     async def run(self, data: CreateCustomRoleCommand) -> RoleID:
         product = await self._product_gateway.with_id(data.product_id)
@@ -112,4 +120,11 @@ class CreateCustomRoleCommandHandler:
         )
         await self._role_saver.save(role)
         await self._transaction.commit()
+        await publish_product_event(
+            self._event_bus,
+            kind=ProductEventKind.ROLE_CREATED,
+            product_id=data.product_id,
+            actor_id=data.actor_id,
+            payload=make_role_payload(role),
+        )
         return role.oid

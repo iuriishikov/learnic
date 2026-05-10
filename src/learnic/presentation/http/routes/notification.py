@@ -15,16 +15,23 @@ Caller-scoped, so the routes live under ``/users/me/...`` per the
 project's URL-hierarchy rule. Real-time deltas flow over
 ``WS /users/me/notifications`` — see
 ``## WebSocket channels`` in the OpenAPI ``info.description``.
+
+Per-kind ``details`` payloads form a Pydantic discriminated
+union: each kind contributes one schema with a fixed ``type``
+literal, and the unified dict produced by the kind spec's
+:meth:`NotificationKindSpec.to_ws_dict` is validated through
+the union. Adding a new kind = add one Pydantic schema and
+append it to the union; the route dispatch logic does not change.
 """
 
 from datetime import datetime
-from typing import Final, Self
+from typing import Annotated, Final, Literal, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
 from fastapi import Depends, Path, Query, Request, status
 from fastapi_error_map import ErrorAwareRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from learnic.application.commands.notification.mark_all_as_read import (
     MarkAllNotificationsAsReadCommand,
@@ -34,14 +41,12 @@ from learnic.application.commands.notification.mark_as_read import (
     MarkNotificationAsReadCommand,
     MarkNotificationAsReadCommandHandler,
 )
+from learnic.application.common.notifications.kind_spec import (
+    NotificationKindRegistry,
+)
 from learnic.application.common.notifications.views import (
-    AccessRevokedView,
     CollaborationSnapshotView,
-    InviteAcceptedView,
-    InviteDeclinedView,
-    InviteSentView,
     NotificationCounters,
-    NotificationDetailsView,
     NotificationListPage,
     NotificationView,
     ProductRefView,
@@ -131,14 +136,20 @@ class CollaborationSnapshotSchema(BaseModel):
 
 
 class InviteSentDetailsSchema(BaseModel):
-    type: str = Field(default="invite_sent", description="Discriminator.")
+    type: Literal["invite_sent"] = Field(
+        default="invite_sent",
+        description="Discriminator.",
+    )
     collaboration_id: UUID
     product: ProductRefSchema
     collaboration: CollaborationSnapshotSchema | None
 
 
 class InviteAcceptedDetailsSchema(BaseModel):
-    type: str = Field(default="invite_accepted", description="Discriminator.")
+    type: Literal["invite_accepted"] = Field(
+        default="invite_accepted",
+        description="Discriminator.",
+    )
     collaboration_id: UUID
     product: ProductRefSchema
     collaborator: UserRefSchema
@@ -154,7 +165,10 @@ class InviteAcceptedDetailsSchema(BaseModel):
 
 
 class InviteDeclinedDetailsSchema(BaseModel):
-    type: str = Field(default="invite_declined", description="Discriminator.")
+    type: Literal["invite_declined"] = Field(
+        default="invite_declined",
+        description="Discriminator.",
+    )
     collaboration_id: UUID
     product: ProductRefSchema
     decliner: UserRefSchema
@@ -178,60 +192,110 @@ class AccessRevokedDetailsSchema(BaseModel):
     display.
     """
 
-    type: str = Field(default="access_revoked", description="Discriminator.")
+    type: Literal["access_revoked"] = Field(
+        default="access_revoked",
+        description="Discriminator.",
+    )
     collaboration_id: UUID
     product: ProductRefSchema
     revoker: UserRefSchema
 
 
-NotificationDetailsSchema = (
+class NewLoginDetailsSchema(BaseModel):
+    """Body of a `new_login` notification.
+
+    Sent to the user when a successful login lands on their
+    account. ``device_label`` is the short human-readable form of
+    the User-Agent (e.g. ``"Chrome on macOS"``) — the panel's
+    primary surface for what device was used. ``user_agent`` is
+    the full raw header (truncated server-side) and ``ip_address``
+    is the source IP, both kept for a future "see details"
+    expander. The first three are nullable because non-browser
+    clients or legacy callers may not provide them.
+
+    ``session_id`` is the refresh-token ``family_id`` minted by
+    the login that triggered this notification. The SPA passes
+    it to ``DELETE /auth/sessions/{session_id}`` for the inline
+    "Logout from this device" CTA on the security card.
+    """
+
+    type: Literal["new_login"] = Field(
+        default="new_login",
+        description="Discriminator.",
+    )
+    session_id: UUID = Field(
+        description=(
+            "Refresh-token ``family_id`` of the session created by "
+            "this login. Pass to "
+            "``DELETE /auth/sessions/{session_id}`` to revoke that "
+            "specific session from the notification card."
+        ),
+    )
+    session_revoked: bool = Field(
+        description=(
+            "Live state of the session at read time. ``True`` when "
+            "the refresh-token family has been revoked, has expired, "
+            "or no longer exists; ``False`` when an active row is "
+            "still present. The SPA derives the initial state of "
+            "the \"Logout from this device\" CTA from this flag so "
+            "the button reflects reality across reloads."
+        ),
+    )
+    device_label: str | None = Field(
+        default=None,
+        description=(
+            "Short human-readable label for the device that "
+            "performed the login (e.g. ``\"Chrome on macOS\"``). "
+            "Derived heuristically from the User-Agent at the "
+            "HTTP boundary."
+        ),
+    )
+    user_agent: str | None = Field(
+        default=None,
+        description=(
+            "Raw User-Agent header, truncated server-side. Use "
+            "for a \"see details\" expander when the short label "
+            "is not enough."
+        ),
+    )
+    ip_address: str | None = Field(
+        default=None,
+        description=(
+            "Source IP address captured at login. Honours "
+            "``X-Forwarded-For`` / ``X-Real-IP`` so the value "
+            "reflects the originating client behind a reverse "
+            "proxy."
+        ),
+    )
+
+
+NotificationDetailsSchema = Annotated[
     InviteSentDetailsSchema
     | InviteAcceptedDetailsSchema
     | InviteDeclinedDetailsSchema
     | AccessRevokedDetailsSchema
+    | NewLoginDetailsSchema,
+    Field(discriminator="type"),
+]
+
+_DETAILS_ADAPTER: Final[TypeAdapter[NotificationDetailsSchema]] = TypeAdapter(
+    NotificationDetailsSchema,
 )
 
 
-def _snapshot_to_schema(
-    view: CollaborationSnapshotView | None,
-) -> CollaborationSnapshotSchema | None:
-    if view is None:
-        return None
-    return CollaborationSnapshotSchema.from_view(view)
+def _details_from_view(
+    view: NotificationView,
+    registry: NotificationKindRegistry,
+) -> NotificationDetailsSchema:
+    """Validate the spec's WS dict through the discriminated union.
 
-
-def _details_to_schema(view: NotificationDetailsView) -> NotificationDetailsSchema:
-    if isinstance(view, InviteSentView):
-        return InviteSentDetailsSchema(
-            collaboration_id=view.collaboration_id,
-            product=ProductRefSchema.from_view(view.product),
-            collaboration=_snapshot_to_schema(view.collaboration),
-        )
-    if isinstance(view, InviteAcceptedView):
-        return InviteAcceptedDetailsSchema(
-            collaboration_id=view.collaboration_id,
-            product=ProductRefSchema.from_view(view.product),
-            collaborator=UserRefSchema.from_view(view.collaborator),
-            collaboration=_snapshot_to_schema(view.collaboration),
-            viewer_can_manage_collaborators=(view.viewer_can_manage_collaborators),
-        )
-    if isinstance(view, InviteDeclinedView):
-        return InviteDeclinedDetailsSchema(
-            collaboration_id=view.collaboration_id,
-            product=ProductRefSchema.from_view(view.product),
-            decliner=UserRefSchema.from_view(view.decliner),
-            collaboration=_snapshot_to_schema(view.collaboration),
-            viewer_can_manage_collaborators=(view.viewer_can_manage_collaborators),
-        )
-    if isinstance(view, AccessRevokedView):
-        return AccessRevokedDetailsSchema(
-            collaboration_id=view.collaboration_id,
-            product=ProductRefSchema.from_view(view.product),
-            revoker=UserRefSchema.from_view(view.revoker),
-        )
-    raise NotImplementedError(
-        f"Unknown notification details view: {type(view).__name__}",
-    )
+    The kind spec produces the same wire dict for both REST and WS
+    (:meth:`NotificationKindSpec.to_ws_dict`); the union picks the
+    right Pydantic model by ``type`` and validates the payload.
+    """
+    spec = registry.by_view(view.details)
+    payload = {"type": spec.kind.value, **spec.to_ws_dict(view.details)}
+    return _DETAILS_ADAPTER.validate_python(payload)
 
 
 class NotificationSchema(BaseModel):
@@ -243,7 +307,7 @@ class NotificationSchema(BaseModel):
                 {
                     "oid": "a4f1c08d-2e5b-4ad7-b2e6-5d28a1f6c001",
                     "kind": "invite_sent",
-                    "category": "invites",
+                    "category": "teaching",
                     "actor": {
                         "oid": "550e8400-e29b-41d4-a716-446655440000",
                         "full_name": "Khan Zaid",
@@ -279,7 +343,11 @@ class NotificationSchema(BaseModel):
     details: NotificationDetailsSchema
 
     @classmethod
-    def from_view(cls, view: NotificationView) -> Self:
+    def from_view(
+        cls,
+        view: NotificationView,
+        registry: NotificationKindRegistry,
+    ) -> Self:
         return cls(
             oid=view.oid,
             kind=view.kind,
@@ -289,7 +357,7 @@ class NotificationSchema(BaseModel):
             ),
             created_at=view.created_at,
             read_at=view.read_at,
-            details=_details_to_schema(view.details),
+            details=_details_from_view(view, registry),
         )
 
 
@@ -300,9 +368,13 @@ class NotificationPageSchema(BaseModel):
     next_cursor: str | None
 
     @classmethod
-    def from_page(cls, page: NotificationListPage) -> Self:
+    def from_page(
+        cls,
+        page: NotificationListPage,
+        registry: NotificationKindRegistry,
+    ) -> Self:
         return cls(
-            items=[NotificationSchema.from_view(v) for v in page.items],
+            items=[NotificationSchema.from_view(v, registry) for v in page.items],
             next_cursor=page.next_cursor,
         )
 
@@ -351,12 +423,14 @@ async def list_mine(
     request: Request,
     interactor: FromDishka[ListMyNotificationsQueryHandler],
     auth: FromDishka[Authenticator],
+    registry: FromDishka[NotificationKindRegistry],
     category: NotificationCategory | None = Query(
         default=None,
         description=(
             "Tab filter: omit for the `View all` tab, supply "
-            "`invites` / `files` / `jobs` / `other` for a specific "
-            "tab. Unknown values are rejected by Pydantic."
+            "`teaching` / `learning` / `security` / `files` / "
+            "`jobs` / `other` for a specific tab. Unknown values "
+            "are rejected by Pydantic."
         ),
     ),
     cursor: str | None = Query(
@@ -374,6 +448,8 @@ async def list_mine(
         request: Source of the access-token cookie.
         interactor: Injected list-my-notifications query handler.
         auth: Injected authenticator.
+        registry: Injected notification-kind registry; resolves
+            per-kind schema dispatch.
         category: Optional tab filter — omit for the ``View all``
             tab.
         cursor: Opaque pagination cursor from the previous page.
@@ -395,7 +471,7 @@ async def list_mine(
             limit=limit,
         ),
     )
-    return NotificationPageSchema.from_page(page)
+    return NotificationPageSchema.from_page(page, registry)
 
 
 @router.get(

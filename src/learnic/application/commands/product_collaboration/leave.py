@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import (
     EntityNotFoundError,
     NotResourceOwnerError,
@@ -20,6 +24,7 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -51,6 +56,7 @@ class LeaveProductCommandHandler:
         scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
+        security: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._product_gateway: Final = product_gateway
@@ -59,6 +65,7 @@ class LeaveProductCommandHandler:
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
+        self._security: Final = security
 
     async def run(self, data: LeaveProductCommand) -> None:
         product = await self._product_gateway.with_id(data.product_id)
@@ -77,10 +84,18 @@ class LeaveProductCommandHandler:
         await self._transaction.commit()
         owner = await self._user_gateway.with_id(product.author_id)
         if owner is not None:
-            await self._scheduler.schedule_send_collaboration_left_email(
+            base = self._security.frontend_base_url.rstrip("/")
+            link = f"{base}/products/{data.product_id}"
+            await self._scheduler.schedule_send_email(
                 to=owner.email.value,
-                product_id=data.product_id,
-                collaborator_id=data.actor_id,
+                subject="Коллаборатор покинул продукт",
+                components=[
+                    EmailParagraph.text("Здравствуйте!"),
+                    EmailParagraph.text(
+                        "Один из коллабораторов покинул ваш продукт.",
+                    ),
+                    EmailButton(label="Открыть продукт", url=link),
+                ],
             )
         await publish_product_event(
             self._event_bus,

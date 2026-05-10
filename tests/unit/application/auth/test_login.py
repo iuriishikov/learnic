@@ -29,6 +29,7 @@ async def test_login_success_issues_token_pair(
         hasher=fake_hasher,
         access_tokens=fake_access_tokens,
         refresh_store=fake_refresh_store,
+        notification_publisher=AsyncMock(),
     )
     pair = await handler.run(
         LoginCommand(email="user@example.com", password="correcthorsebattery")
@@ -55,6 +56,7 @@ async def test_login_unknown_user_raises_invalid_credentials(
         hasher=fake_hasher,
         access_tokens=fake_access_tokens,
         refresh_store=fake_refresh_store,
+        notification_publisher=AsyncMock(),
     )
     with pytest.raises(InvalidCredentialsError):
         await handler.run(
@@ -83,6 +85,7 @@ async def test_login_wrong_password_raises_invalid_credentials(
         hasher=fake_hasher,
         access_tokens=fake_access_tokens,
         refresh_store=fake_refresh_store,
+        notification_publisher=AsyncMock(),
     )
     with pytest.raises(InvalidCredentialsError):
         await handler.run(
@@ -108,6 +111,7 @@ async def test_login_unverified_email_raises(
         hasher=fake_hasher,
         access_tokens=fake_access_tokens,
         refresh_store=fake_refresh_store,
+        notification_publisher=AsyncMock(),
     )
     with pytest.raises(EmailNotVerifiedError):
         await handler.run(

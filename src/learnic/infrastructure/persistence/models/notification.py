@@ -249,6 +249,57 @@ notification_invite_declined_table = sa.Table(
 )
 
 
+notification_new_login_table = sa.Table(
+    "notification_new_login",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "session_id",
+        sa.Uuid,
+        nullable=False,
+    ),
+    sa.Column(
+        "device_label",
+        sa.String(128),
+        nullable=True,
+    ),
+    sa.Column(
+        "user_agent",
+        sa.String(512),
+        nullable=True,
+    ),
+    sa.Column(
+        "ip_address",
+        sa.String(64),
+        nullable=True,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_new_login_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.NEW_LOGIN.value}'",
+        name="ck_notif_new_login_kind",
+    ),
+)
+
+
 notification_access_revoked_table = sa.Table(
     "notification_access_revoked",
     mapper_registry.metadata,

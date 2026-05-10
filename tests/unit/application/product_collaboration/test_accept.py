@@ -31,21 +31,18 @@ async def test_accept_by_user_invite(
     fake_transaction: AsyncMock,
     fake_collab_gateway: AsyncMock,
     fake_user_gateway: AsyncMock,
-    fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
     existing_collab: ProductCollaboration,
     invitee_user: User,
-    actor_user: User,
 ) -> None:
     fake_collab_gateway.with_id.return_value = existing_collab
-    fake_user_gateway.with_id.side_effect = [invitee_user, actor_user]
+    fake_user_gateway.with_id.return_value = invitee_user
 
     handler = AcceptCollaborationInviteCommandHandler(
         transaction=fake_transaction,
         collab_gateway=fake_collab_gateway,
         user_gateway=fake_user_gateway,
-        scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
     )
@@ -58,7 +55,7 @@ async def test_accept_by_user_invite(
     )
     assert existing_collab.status is CollaborationStatus.ACTIVE
     fake_transaction.commit.assert_called_once()
-    fake_scheduler.schedule_send_collaboration_accepted_email.assert_called_once()
+    fake_notifications.publish.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -66,12 +63,10 @@ async def test_accept_rejects_wrong_user(
     fake_transaction: AsyncMock,
     fake_collab_gateway: AsyncMock,
     fake_user_gateway: AsyncMock,
-    fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
     existing_collab: ProductCollaboration,
     invitee_user: User,
-    actor_user: User,
 ) -> None:
     fake_collab_gateway.with_id.return_value = existing_collab
     # actor != collaborator_id
@@ -90,7 +85,6 @@ async def test_accept_rejects_wrong_user(
         transaction=fake_transaction,
         collab_gateway=fake_collab_gateway,
         user_gateway=fake_user_gateway,
-        scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
     )
@@ -110,7 +104,6 @@ async def test_accept_email_invite_requires_email_match(
     fake_transaction: AsyncMock,
     fake_collab_gateway: AsyncMock,
     fake_user_gateway: AsyncMock,
-    fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
     product_id: object,
@@ -146,7 +139,6 @@ async def test_accept_email_invite_requires_email_match(
         transaction=fake_transaction,
         collab_gateway=fake_collab_gateway,
         user_gateway=fake_user_gateway,
-        scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
     )
@@ -166,7 +158,6 @@ async def test_404_when_collaboration_missing(
     fake_transaction: AsyncMock,
     fake_collab_gateway: AsyncMock,
     fake_user_gateway: AsyncMock,
-    fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
 ) -> None:
@@ -176,7 +167,6 @@ async def test_404_when_collaboration_missing(
         transaction=fake_transaction,
         collab_gateway=fake_collab_gateway,
         user_gateway=fake_user_gateway,
-        scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
     )

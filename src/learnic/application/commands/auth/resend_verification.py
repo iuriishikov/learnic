@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
@@ -8,11 +12,11 @@ from learnic.application.common.security.email_tokens import (
     EmailTokenPurpose,
     EmailTokenStore,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.signup_sessions import (
     SignupSessionStore,
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
-from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
@@ -42,7 +46,7 @@ class ResendVerificationCommandHandler:
         signup_sessions: SignupSessionStore,
         email_tokens: EmailTokenStore,
         scheduler: TaskScheduler,
-        config: SecurityConfig,
+        config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
@@ -70,6 +74,17 @@ class ResendVerificationCommandHandler:
             self._config.verify_email_token_ttl_seconds,
         )
         await self._transaction.commit()
-        await self._scheduler.schedule_send_verification_email(
-            user.email.value, raw_token,
+        base = self._config.frontend_base_url.rstrip("/")
+        link = f"{base}/confirm/email?token={raw_token}"
+        await self._scheduler.schedule_send_email(
+            to=user.email.value,
+            subject="Подтверждение email",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Подтвердите ваш email, нажав на кнопку ниже:",
+                ),
+                EmailButton(label="Подтвердить email", url=link),
+                EmailParagraph.text("Ссылка действует 24 часа."),
+            ],
         )

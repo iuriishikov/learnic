@@ -1,10 +1,8 @@
+from collections.abc import Sequence
 from typing import Protocol
 
+from learnic.application.common.email.components import EmailComponent
 from learnic.entities.cohort.ids import WebinarScheduleID
-from learnic.entities.product.ids import ProductID
-from learnic.entities.product_collaboration.ids import (
-    ProductCollaborationID,
-)
 from learnic.entities.user.models import UserID
 
 
@@ -40,96 +38,23 @@ class TaskScheduler(Protocol):
         self,
         to: str,
         subject: str,
-        html: str,
-        text: str | None = None,
+        components: Sequence[EmailComponent],
     ) -> None:
-        """Enqueue an ad-hoc HTML email for async delivery.
+        """Enqueue an email built from typed body components.
+
+        Every transactional email — verification, password reset,
+        collaboration flows, in-app notification fanout — goes through
+        this single method. Callers describe the body as a list of
+        :class:`EmailComponent` instances; the scheduler implementation
+        renders them into HTML + plain-text alternative before handing
+        the result to :class:`EmailSender` via the worker.
 
         Args:
             to: Recipient email address.
             subject: Email subject line.
-            html: Rendered HTML body.
-            text: Optional plain-text alternative.
+            components: Ordered body of the email — typed components
+                rendered into the branded base layout.
         """
-        ...
-
-    async def schedule_send_verification_email(
-        self,
-        to: str,
-        raw_token: str,
-    ) -> None:
-        """Enqueue delivery of an email-verification link.
-
-        Args:
-            to: Recipient email address.
-            raw_token: Single-use token; the worker builds the verify
-                URL from the configured frontend base URL.
-        """
-        ...
-
-    async def schedule_send_password_reset_email(
-        self,
-        to: str,
-        raw_token: str,
-    ) -> None:
-        """Enqueue delivery of a password-reset link.
-
-        Args:
-            to: Recipient email address.
-            raw_token: Single-use token; the worker builds the reset URL
-                from the configured frontend base URL.
-        """
-        ...
-
-    async def schedule_send_collaboration_invite_email(
-        self,
-        to: str,
-        product_id: ProductID,
-        collaboration_id: ProductCollaborationID,
-        raw_token: str,
-    ) -> None:
-        """Send the collaboration invite link to ``to``.
-
-        The worker builds a URL of the shape
-        ``{frontend}/products/{product_id}/collaboration-invitation/
-        {collaboration_id}/accept?token={raw_token}`` so the SPA
-        can route to the accept page; if the user is not signed in
-        the SPA bounces through ``/login?next=...``.
-        """
-        ...
-
-    async def schedule_send_collaboration_accepted_email(
-        self,
-        to: str,
-        product_id: ProductID,
-        collaborator_id: UserID,
-    ) -> None:
-        """Notify the inviter that an invite was accepted."""
-        ...
-
-    async def schedule_send_collaboration_revoked_email(
-        self,
-        to: str,
-        product_id: ProductID,
-    ) -> None:
-        """Notify a collaborator that their access was revoked."""
-        ...
-
-    async def schedule_send_collaboration_grants_updated_email(
-        self,
-        to: str,
-        product_id: ProductID,
-    ) -> None:
-        """Notify a collaborator that their grants changed."""
-        ...
-
-    async def schedule_send_collaboration_left_email(
-        self,
-        to: str,
-        product_id: ProductID,
-        collaborator_id: UserID,
-    ) -> None:
-        """Notify the product owner that a collaborator left."""
         ...
 
     async def schedule_send_web_push(

@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from learnic.entities.file.models import File, FileID
+from learnic.entities.file.ids import FileID
+from learnic.entities.file.models import File
 from learnic.entities.file.value_objects import (
     ContentType,
     FileSize,
@@ -18,18 +19,6 @@ from learnic.entities.user.value_objects import (
     LastName,
     PasswordHash,
 )
-from learnic.infrastructure.configs import S3Config
-
-
-@pytest.fixture
-def s3_config() -> S3Config:
-    return S3Config(
-        endpoint="http://localhost:9000",
-        access_key="test",
-        secret_key="test",
-        bucket="learnic",
-        region="us-east-1",
-    )
 
 
 @pytest.fixture
@@ -39,13 +28,6 @@ def fake_transaction() -> AsyncMock:
     tx.rollback = AsyncMock()
     tx.flush = AsyncMock()
     return tx
-
-
-@pytest.fixture
-def fake_entity_saver() -> MagicMock:
-    saver = MagicMock()
-    saver.add_one = MagicMock()
-    return saver
 
 
 @pytest.fixture
@@ -63,12 +45,30 @@ def fake_files_gateway() -> AsyncMock:
 
 
 @pytest.fixture
-def fake_file_storage() -> AsyncMock:
-    storage = AsyncMock()
-    storage.put = AsyncMock()
-    storage.delete = AsyncMock()
-    storage.presigned_get_url = AsyncMock(return_value="http://signed/url")
-    return storage
+def fake_file_uploads() -> AsyncMock:
+    """Stub ``FileUploadService`` for handlers that mutate file state.
+
+    ``upload`` returns a fresh ``File`` so callers get a real ``oid``
+    to link via ``user.set_avatar(file.oid)``; ``soft_delete_previous``
+    is just an awaitable so we can assert it was (or wasn't) called.
+    """
+
+    def _build_file(data: bytes, content_type: str, uploaded_by: UserID) -> File:
+        return File(
+            oid=FileID(uuid.uuid4()),
+            storage_name=StorageName(str(uuid.uuid4())),
+            bucket=StorageBucket("test-bucket"),
+            content_type=ContentType(content_type),
+            size_bytes=FileSize(len(data)),
+            uploaded_by=uploaded_by,
+            uploaded_at=datetime.now(timezone.utc),
+            deleted_at=None,
+        )
+
+    svc = MagicMock()
+    svc.upload = AsyncMock(side_effect=_build_file)
+    svc.soft_delete_previous = AsyncMock()
+    return svc
 
 
 @pytest.fixture

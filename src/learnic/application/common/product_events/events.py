@@ -7,6 +7,8 @@ from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.role.ids import RoleID
+from learnic.entities.role.models import Role
 from learnic.entities.user.models import UserID
 
 
@@ -14,13 +16,14 @@ class ProductEventKind(StrEnum):
     """Discriminator for product-level events.
 
     These events cover product metadata mutations (name, description,
-    duration, cover, status), webinar defaults, Q&A entries, and
+    duration, cover, status), webinar defaults, Q&A entries, the
     collaboration lifecycle (invite / accept / revoke / grants
-    update) — i.e. everything an author or collaborator can change
-    from the product screens that is not course-content (modules /
-    lessons / blocks / releases). Cohorts (and their schedules /
-    sessions) live under their own management screens and are
-    intentionally not covered yet.
+    update), and the per-product role catalogue (create / update /
+    delete custom role) — i.e. everything an author or collaborator
+    can change from the product screens that is not course-content
+    (modules / lessons / blocks / releases). Cohorts (and their
+    schedules / sessions) live under their own management screens
+    and are intentionally not covered yet.
     """
 
     NAME_CHANGED = "name_changed"
@@ -48,6 +51,10 @@ class ProductEventKind(StrEnum):
     COLLABORATION_DECLINED = "collaboration_declined"
     COLLABORATION_REVOKED = "collaboration_revoked"
     COLLABORATION_GRANTS_UPDATED = "collaboration_grants_updated"
+
+    ROLE_CREATED = "role_created"
+    ROLE_UPDATED = "role_updated"
+    ROLE_DELETED = "role_deleted"
 
 
 @dataclass(slots=True, frozen=True)
@@ -89,3 +96,36 @@ def make_collaboration_payload(
     if invited_email is not None:
         payload["invited_email"] = invited_email
     return payload
+
+
+def make_role_payload(role: Role) -> dict[str, Any]:
+    """Build the ``ROLE_CREATED`` / ``ROLE_UPDATED`` payload from a role.
+
+    The shape mirrors ``RoleSchema`` returned by ``GET /roles/{id}``
+    so the SPA can splice the projection into its catalogue cache
+    without an extra REST round-trip. ``permissions`` is sorted by
+    string for deterministic envelopes.
+    """
+    if role.permissions is None:
+        msg = "role.permissions must be loaded before publishing a role event"
+        raise AssertionError(msg)
+    return {
+        "oid": str(role.oid),
+        "product_id": str(role.product_id),
+        "name": role.name.value,
+        "description": (
+            role.description.value if role.description is not None else None
+        ),
+        "position": role.position.value,
+        "permissions": sorted(p.value for p in role.permissions.permissions),
+        "created_by": (
+            str(role.created_by) if role.created_by is not None else None
+        ),
+        "created_at": role.created_at.isoformat(),
+        "updated_at": role.updated_at.isoformat(),
+    }
+
+
+def make_role_deleted_payload(role_id: RoleID) -> dict[str, Any]:
+    """Build the ``ROLE_DELETED`` payload — just the deleted role's id."""
+    return {"role_id": str(role_id)}

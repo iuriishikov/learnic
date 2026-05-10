@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, Final
+from typing import Any, Final, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -12,28 +12,23 @@ from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.notifications.gateway import (
     NotificationGateway,
 )
+from learnic.application.common.notifications.kind_spec import (
+    NotificationKindRegistry,
+    NotificationKindSpec,
+    RefRequest,
+    ResolvedRefs,
+)
 from learnic.application.common.notifications.reader import NotificationReader
 from learnic.application.common.notifications.views import (
-    AccessRevokedView,
     CategoryCount,
     CollaborationSnapshotView,
-    InviteAcceptedView,
-    InviteDeclinedView,
-    InviteSentView,
     NotificationCounters,
-    NotificationDetailsView,
     NotificationListPage,
     NotificationView,
     ProductRefView,
 )
 from learnic.application.common.persistence.user_ref import UserRefView
-from learnic.entities.notification.details import (
-    AccessRevokedDetails,
-    InviteAcceptedDetails,
-    InviteDeclinedDetails,
-    InviteSentDetails,
-    NotificationDetails,
-)
+from learnic.entities.notification.details import NotificationDetails
 from learnic.entities.notification.enums import (
     NotificationCategory,
     NotificationKind,
@@ -47,20 +42,36 @@ from learnic.entities.product_collaboration.ids import (
 )
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.notifications.specs._persistence import (
+    NotificationKindPersistence,
+)
 from learnic.infrastructure.persistence.models.notification import (
-    notification_access_revoked_table,
-    notification_invite_accepted_table,
-    notification_invite_declined_table,
-    notification_invite_sent_table,
     notifications_table,
 )
 from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.product_collaboration import (
     product_collaborations_table,
 )
+from learnic.infrastructure.persistence.models.refresh_token import (
+    refresh_tokens_table,
+)
 from learnic.infrastructure.persistence.models.user import users_table
 
 _logger = logging.getLogger(__name__)
+
+
+def _persistence(
+    spec: NotificationKindSpec[Any, Any],
+) -> NotificationKindPersistence[Any]:
+    """Narrow a registered spec to its persistence half.
+
+    Concrete specs in :mod:`learnic.infrastructure.notifications.specs`
+    implement both the application :class:`NotificationKindSpec` and
+    the infrastructure :class:`NotificationKindPersistence`
+    Protocols. The registry returns the application view; this
+    cast surfaces the SA Core methods to the gateway / reader.
+    """
+    return cast("NotificationKindPersistence[Any]", spec)
 
 
 class NotificationGatewayAlchemy(NotificationGateway):
@@ -68,15 +79,18 @@ class NotificationGatewayAlchemy(NotificationGateway):
 
     Inserts go through SA Core for both the parent and the subtype
     row inside the same caller transaction — the caller drives
-    commit. ``flush()`` materialises the parent before the subtype
-    insert so the composite ``(notification_id, kind)`` foreign key
-    has a target. Loads rebuild :class:`Notification` from the
-    parent row and delegate subtype hydration to the matching
-    table.
+    commit. Loads rebuild :class:`Notification` from the parent
+    row and delegate subtype hydration through the kind spec
+    registry, so adding a new kind never touches this class.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        kind_registry: NotificationKindRegistry,
+    ) -> None:
         self._session: Final = session
+        self._kinds: Final = kind_registry
 
     @override
     async def add(self, notification: Notification) -> None:
@@ -91,55 +105,13 @@ class NotificationGatewayAlchemy(NotificationGateway):
                 read_at=notification.read_at,
             ),
         )
-        await self._insert_subtype(notification)
-
-    async def _insert_subtype(self, notification: Notification) -> None:
-        details = notification.details
-        if isinstance(details, InviteSentDetails):
-            await self._session.execute(
-                sa.insert(notification_invite_sent_table).values(
-                    notification_id=notification.oid,
-                    kind=notification.kind.value,
-                    collaboration_id=details.collaboration_id,
-                    product_id=details.product_id,
-                ),
-            )
-            return
-        if isinstance(details, InviteAcceptedDetails):
-            await self._session.execute(
-                sa.insert(notification_invite_accepted_table).values(
-                    notification_id=notification.oid,
-                    kind=notification.kind.value,
-                    collaboration_id=details.collaboration_id,
-                    product_id=details.product_id,
-                    collaborator_id=details.collaborator_id,
-                ),
-            )
-            return
-        if isinstance(details, InviteDeclinedDetails):
-            await self._session.execute(
-                sa.insert(notification_invite_declined_table).values(
-                    notification_id=notification.oid,
-                    kind=notification.kind.value,
-                    collaboration_id=details.collaboration_id,
-                    product_id=details.product_id,
-                    decliner_id=details.decliner_id,
-                ),
-            )
-            return
-        if isinstance(details, AccessRevokedDetails):
-            await self._session.execute(
-                sa.insert(notification_access_revoked_table).values(
-                    notification_id=notification.oid,
-                    kind=notification.kind.value,
-                    collaboration_id=details.collaboration_id,
-                    product_id=details.product_id,
-                    revoker_id=details.revoker_id,
-                ),
-            )
-            return
-        raise NotImplementedError(
-            f"Unsupported notification details: {type(details).__name__}",
+        spec = _persistence(
+            self._kinds.by_details_type(type(notification.details)),
+        )
+        await self._session.execute(
+            sa.insert(spec.table).values(
+                spec.insert_values(notification, notification.details),
+            ),
         )
 
     @override
@@ -153,88 +125,16 @@ class NotificationGatewayAlchemy(NotificationGateway):
         notification = (await self._session.execute(stmt)).scalar_one_or_none()
         if notification is None:
             return None
-        notification.details = await self._load_details(
-            notification.oid,
-            notification.kind,
-        )
+        spec = _persistence(self._kinds.by_kind(notification.kind))
+        row = (
+            await self._session.execute(
+                sa.select(*spec.load_columns()).where(
+                    spec.table.c.notification_id == notification.oid,
+                ),
+            )
+        ).one()
+        notification.details = spec.row_to_details(row)
         return notification
-
-    async def _load_details(
-        self,
-        notification_id: NotificationID,
-        kind: NotificationKind,
-    ) -> NotificationDetails:
-        if kind is NotificationKind.INVITE_SENT:
-            row = (
-                await self._session.execute(
-                    sa.select(
-                        notification_invite_sent_table.c.collaboration_id,
-                        notification_invite_sent_table.c.product_id,
-                    ).where(
-                        notification_invite_sent_table.c.notification_id
-                        == notification_id,
-                    ),
-                )
-            ).one()
-            return InviteSentDetails(
-                collaboration_id=ProductCollaborationID(row.collaboration_id),
-                product_id=ProductID(row.product_id),
-            )
-        if kind is NotificationKind.INVITE_ACCEPTED:
-            row = (
-                await self._session.execute(
-                    sa.select(
-                        notification_invite_accepted_table.c.collaboration_id,
-                        notification_invite_accepted_table.c.product_id,
-                        notification_invite_accepted_table.c.collaborator_id,
-                    ).where(
-                        notification_invite_accepted_table.c.notification_id
-                        == notification_id,
-                    ),
-                )
-            ).one()
-            return InviteAcceptedDetails(
-                collaboration_id=ProductCollaborationID(row.collaboration_id),
-                product_id=ProductID(row.product_id),
-                collaborator_id=UserID(row.collaborator_id),
-            )
-        if kind is NotificationKind.INVITE_DECLINED:
-            row = (
-                await self._session.execute(
-                    sa.select(
-                        notification_invite_declined_table.c.collaboration_id,
-                        notification_invite_declined_table.c.product_id,
-                        notification_invite_declined_table.c.decliner_id,
-                    ).where(
-                        notification_invite_declined_table.c.notification_id
-                        == notification_id,
-                    ),
-                )
-            ).one()
-            return InviteDeclinedDetails(
-                collaboration_id=ProductCollaborationID(row.collaboration_id),
-                product_id=ProductID(row.product_id),
-                decliner_id=UserID(row.decliner_id),
-            )
-        if kind is NotificationKind.ACCESS_REVOKED:
-            row = (
-                await self._session.execute(
-                    sa.select(
-                        notification_access_revoked_table.c.collaboration_id,
-                        notification_access_revoked_table.c.product_id,
-                        notification_access_revoked_table.c.revoker_id,
-                    ).where(
-                        notification_access_revoked_table.c.notification_id
-                        == notification_id,
-                    ),
-                )
-            ).one()
-            return AccessRevokedDetails(
-                collaboration_id=ProductCollaborationID(row.collaboration_id),
-                product_id=ProductID(row.product_id),
-                revoker_id=UserID(row.revoker_id),
-            )
-        raise NotImplementedError(f"Unknown notification kind: {kind!r}")
 
     @override
     async def update_read_state(self, notification: Notification) -> None:
@@ -261,27 +161,32 @@ class NotificationGatewayAlchemy(NotificationGateway):
 class NotificationReaderAlchemy(NotificationReader):
     """Postgres-backed read-side for :class:`NotificationView`.
 
-    Query strategy is two-shot: one paginated select on
-    ``notifications`` joined with ``users`` (actor) for every base
-    field, then a follow-up batched ``IN`` lookup per kind to
-    hydrate the polymorphic subtype rows. Counter queries hit a
-    grouped aggregate over the same recipient — no subtype joins,
-    so they stay cheap.
+    Two-shot query: one paginated select on ``notifications``
+    joined with ``users`` (actor) for every base field, then a
+    follow-up batched ``IN`` lookup per kind to hydrate the
+    polymorphic subtype rows. Counter queries hit a grouped
+    aggregate over the same recipient — no subtype joins, so
+    they stay cheap.
 
-    The reader also resolves the recipient's current
-    ``MANAGE_COLLABORATORS`` permission against each referenced
-    product via :class:`Authorizer` so the SPA can hide management
-    CTAs (revoke / re-invite) for users who lost the permission
-    after the notification was published.
+    Reference resolution (products, users, collaboration
+    snapshots, ``MANAGE_COLLABORATORS`` flags) is centralised:
+    every spec declares what its details point at via
+    :meth:`NotificationKindSpec.references`, the reader merges
+    those requests across the batch, runs one query per entity
+    type, and lets each spec compose the final view via
+    :meth:`NotificationKindSpec.to_view`. Adding a new kind never
+    touches this class — only the spec.
     """
 
     def __init__(
         self,
         session: AsyncSession,
         authorizer: Authorizer,
+        kind_registry: NotificationKindRegistry,
     ) -> None:
         self._session: Final = session
         self._authorizer: Final = authorizer
+        self._kinds: Final = kind_registry
 
     @override
     async def list_for(
@@ -297,10 +202,7 @@ class NotificationReaderAlchemy(NotificationReader):
         if category is not None:
             stmt = stmt.where(notifications_table.c.category == category.value)
         if cursor is not None:
-            try:
-                cursor_dt = datetime.fromisoformat(cursor)
-            except ValueError:
-                cursor_dt = None
+            cursor_dt = _parse_cursor(cursor)
             if cursor_dt is not None:
                 stmt = stmt.where(
                     notifications_table.c.created_at < cursor_dt,
@@ -317,19 +219,8 @@ class NotificationReaderAlchemy(NotificationReader):
             return NotificationListPage(items=(), next_cursor=None)
 
         details_by_id = await self._load_details_for_rows(rows)
-        product_refs = await self._load_product_refs(rows, details_by_id)
-        collab_refs = await self._load_collaboration_refs(details_by_id)
-        user_refs = await self._load_user_refs(details_by_id)
-        manage_perms = await self._load_manage_permissions(recipient_id, details_by_id)
-
-        items = self._project_rows(
-            rows,
-            details_by_id,
-            product_refs,
-            collab_refs,
-            user_refs,
-            manage_perms,
-        )
+        refs = await self._resolve_refs(recipient_id, details_by_id)
+        items = self._project_rows(rows, details_by_id, refs)
         next_cursor = rows[-1].created_at.isoformat() if has_more else None
         return NotificationListPage(items=items, next_cursor=next_cursor)
 
@@ -347,43 +238,8 @@ class NotificationReaderAlchemy(NotificationReader):
         if row is None:
             return None
         details_by_id = await self._load_details_for_rows([row])
-        product_refs = await self._load_product_refs([row], details_by_id)
-        collab_refs = await self._load_collaboration_refs(details_by_id)
-        user_refs = await self._load_user_refs(details_by_id)
-        manage_perms = await self._load_manage_permissions(recipient_id, details_by_id)
-        return self._row_to_view(
-            row,
-            details_by_id,
-            product_refs,
-            collab_refs,
-            user_refs,
-            manage_perms,
-        )
-
-    def _project_rows(
-        self,
-        rows: Sequence[sa.Row[Any]],
-        details_by_id: dict[UUID, NotificationDetails],
-        product_refs: dict[UUID, ProductRefView],
-        collab_refs: dict[UUID, CollaborationSnapshotView],
-        user_refs: dict[UUID, UserRefView],
-        manage_perms: dict[UUID, bool],
-    ) -> tuple[NotificationView, ...]:
-        return tuple(
-            view
-            for view in (
-                self._row_to_view(
-                    row,
-                    details_by_id,
-                    product_refs,
-                    collab_refs,
-                    user_refs,
-                    manage_perms,
-                )
-                for row in rows
-            )
-            if view is not None
-        )
+        refs = await self._resolve_refs(recipient_id, details_by_id)
+        return self._row_to_view(row, details_by_id, refs)
 
     @override
     async def list_invite_sent_for_collaboration(
@@ -391,17 +247,19 @@ class NotificationReaderAlchemy(NotificationReader):
         recipient_id: UserID,
         collaboration_id: ProductCollaborationID,
     ) -> tuple[NotificationView, ...]:
+        invite_sent_spec = _persistence(
+            self._kinds.by_kind(NotificationKind.INVITE_SENT),
+        )
         stmt = (
             self._select_with_actor()
             .join(
-                notification_invite_sent_table,
-                notification_invite_sent_table.c.notification_id
-                == notifications_table.c.oid,
+                invite_sent_spec.table,
+                invite_sent_spec.table.c.notification_id == notifications_table.c.oid,
             )
             .where(
                 notifications_table.c.recipient_id == recipient_id,
                 notifications_table.c.kind == NotificationKind.INVITE_SENT.value,
-                notification_invite_sent_table.c.collaboration_id == collaboration_id,
+                invite_sent_spec.table.c.collaboration_id == collaboration_id,
             )
             .order_by(notifications_table.c.created_at.desc())
         )
@@ -409,18 +267,8 @@ class NotificationReaderAlchemy(NotificationReader):
         if not rows:
             return ()
         details_by_id = await self._load_details_for_rows(rows)
-        product_refs = await self._load_product_refs(rows, details_by_id)
-        collab_refs = await self._load_collaboration_refs(details_by_id)
-        user_refs = await self._load_user_refs(details_by_id)
-        manage_perms = await self._load_manage_permissions(recipient_id, details_by_id)
-        return self._project_rows(
-            rows,
-            details_by_id,
-            product_refs,
-            collab_refs,
-            user_refs,
-            manage_perms,
-        )
+        refs = await self._resolve_refs(recipient_id, details_by_id)
+        return self._project_rows(rows, details_by_id, refs)
 
     @override
     async def counters_for(
@@ -458,6 +306,20 @@ class NotificationReaderAlchemy(NotificationReader):
             by_category=buckets,
         )
 
+    # --------------------------- internals --------------------------- #
+
+    def _project_rows(
+        self,
+        rows: Sequence[sa.Row[Any]],
+        details_by_id: dict[UUID, NotificationDetails],
+        refs: ResolvedRefs,
+    ) -> tuple[NotificationView, ...]:
+        return tuple(
+            view
+            for view in (self._row_to_view(row, details_by_id, refs) for row in rows)
+            if view is not None
+        )
+
     def _select_with_actor(self) -> sa.Select[Any]:
         return sa.select(
             notifications_table.c.oid,
@@ -482,176 +344,108 @@ class NotificationReaderAlchemy(NotificationReader):
         self,
         rows: Sequence[sa.Row[Any]],
     ) -> dict[UUID, NotificationDetails]:
-        invite_sent_ids = [
-            row.oid
-            for row in rows
-            if NotificationKind(row.kind) is NotificationKind.INVITE_SENT
-        ]
-        invite_accepted_ids = [
-            row.oid
-            for row in rows
-            if NotificationKind(row.kind) is NotificationKind.INVITE_ACCEPTED
-        ]
-        invite_declined_ids = [
-            row.oid
-            for row in rows
-            if NotificationKind(row.kind) is NotificationKind.INVITE_DECLINED
-        ]
-        access_revoked_ids = [
-            row.oid
-            for row in rows
-            if NotificationKind(row.kind) is NotificationKind.ACCESS_REVOKED
-        ]
+        ids_by_kind: dict[NotificationKind, list[UUID]] = {}
+        for row in rows:
+            ids_by_kind.setdefault(NotificationKind(row.kind), []).append(row.oid)
         result: dict[UUID, NotificationDetails] = {}
-
-        if invite_sent_ids:
+        for kind, ids in ids_by_kind.items():
+            spec = _persistence(self._kinds.by_kind(kind))
             sub_rows = (
                 await self._session.execute(
-                    sa.select(
-                        notification_invite_sent_table.c.notification_id,
-                        notification_invite_sent_table.c.collaboration_id,
-                        notification_invite_sent_table.c.product_id,
-                    ).where(
-                        notification_invite_sent_table.c.notification_id.in_(
-                            invite_sent_ids,
-                        ),
+                    sa.select(*spec.load_columns()).where(
+                        spec.table.c.notification_id.in_(ids),
                     ),
                 )
             ).all()
             for sub in sub_rows:
-                result[sub.notification_id] = InviteSentDetails(
-                    collaboration_id=ProductCollaborationID(
-                        sub.collaboration_id,
-                    ),
-                    product_id=ProductID(sub.product_id),
-                )
-
-        if invite_accepted_ids:
-            sub_rows = (
-                await self._session.execute(
-                    sa.select(
-                        notification_invite_accepted_table.c.notification_id,
-                        notification_invite_accepted_table.c.collaboration_id,
-                        notification_invite_accepted_table.c.product_id,
-                        notification_invite_accepted_table.c.collaborator_id,
-                    ).where(
-                        notification_invite_accepted_table.c.notification_id.in_(
-                            invite_accepted_ids,
-                        ),
-                    ),
-                )
-            ).all()
-            for sub in sub_rows:
-                result[sub.notification_id] = InviteAcceptedDetails(
-                    collaboration_id=ProductCollaborationID(
-                        sub.collaboration_id,
-                    ),
-                    product_id=ProductID(sub.product_id),
-                    collaborator_id=UserID(sub.collaborator_id),
-                )
-
-        if invite_declined_ids:
-            sub_rows = (
-                await self._session.execute(
-                    sa.select(
-                        notification_invite_declined_table.c.notification_id,
-                        notification_invite_declined_table.c.collaboration_id,
-                        notification_invite_declined_table.c.product_id,
-                        notification_invite_declined_table.c.decliner_id,
-                    ).where(
-                        notification_invite_declined_table.c.notification_id.in_(
-                            invite_declined_ids,
-                        ),
-                    ),
-                )
-            ).all()
-            for sub in sub_rows:
-                result[sub.notification_id] = InviteDeclinedDetails(
-                    collaboration_id=ProductCollaborationID(
-                        sub.collaboration_id,
-                    ),
-                    product_id=ProductID(sub.product_id),
-                    decliner_id=UserID(sub.decliner_id),
-                )
-
-        if access_revoked_ids:
-            sub_rows = (
-                await self._session.execute(
-                    sa.select(
-                        notification_access_revoked_table.c.notification_id,
-                        notification_access_revoked_table.c.collaboration_id,
-                        notification_access_revoked_table.c.product_id,
-                        notification_access_revoked_table.c.revoker_id,
-                    ).where(
-                        notification_access_revoked_table.c.notification_id.in_(
-                            access_revoked_ids,
-                        ),
-                    ),
-                )
-            ).all()
-            for sub in sub_rows:
-                result[sub.notification_id] = AccessRevokedDetails(
-                    collaboration_id=ProductCollaborationID(
-                        sub.collaboration_id,
-                    ),
-                    product_id=ProductID(sub.product_id),
-                    revoker_id=UserID(sub.revoker_id),
-                )
-
+                result[sub.notification_id] = spec.row_to_details(sub)
         return result
 
-    async def _load_product_refs(
+    async def _resolve_refs(
         self,
-        rows: Sequence[sa.Row[Any]],
+        recipient_id: UserID,
         details_by_id: dict[UUID, NotificationDetails],
-    ) -> dict[UUID, ProductRefView]:
-        product_ids: set[UUID] = set()
-        for row in rows:
-            details = details_by_id.get(row.oid)
-            if isinstance(
-                details,
-                (
-                    InviteSentDetails,
-                    InviteAcceptedDetails,
-                    InviteDeclinedDetails,
-                    AccessRevokedDetails,
-                ),
-            ):
-                product_ids.add(details.product_id)
-        if not product_ids:
+    ) -> ResolvedRefs:
+        request = RefRequest.empty()
+        for details in details_by_id.values():
+            spec = self._kinds.by_details_type(type(details))
+            request.merge(spec.references(details))
+        products = await self._fetch_products(request.product_ids)
+        users = await self._fetch_users(request.user_ids)
+        collaborations = await self._fetch_collaborations(
+            request.collaboration_ids,
+        )
+        manage_perms = await self._fetch_manage_perms(
+            recipient_id,
+            request.products_needing_manage_perm,
+        )
+        session_active = await self._fetch_session_active(
+            recipient_id,
+            request.session_family_ids,
+        )
+        return ResolvedRefs(
+            products=products,
+            users=users,
+            collaborations=collaborations,
+            manage_perms=manage_perms,
+            session_active=session_active,
+        )
+
+    async def _fetch_products(
+        self,
+        ids: set[ProductID],
+    ) -> dict[ProductID, ProductRefView]:
+        if not ids:
             return {}
-        prod_rows = (
+        rows = (
             await self._session.execute(
                 sa.select(
                     products_table.c.oid,
                     products_table.c.name,
-                ).where(products_table.c.oid.in_(product_ids)),
+                ).where(products_table.c.oid.in_(ids)),
             )
         ).all()
         return {
-            prod.oid: ProductRefView(
-                oid=ProductID(prod.oid),
-                name=prod.name,
+            ProductID(row.oid): ProductRefView(
+                oid=ProductID(row.oid),
+                name=row.name,
             )
-            for prod in prod_rows
+            for row in rows
         }
 
-    async def _load_collaboration_refs(
+    async def _fetch_users(
         self,
-        details_by_id: dict[UUID, NotificationDetails],
-    ) -> dict[UUID, CollaborationSnapshotView]:
-        collaboration_ids: set[UUID] = set()
-        for details in details_by_id.values():
-            if isinstance(
-                details,
-                (
-                    InviteSentDetails,
-                    InviteAcceptedDetails,
-                    InviteDeclinedDetails,
-                ),
-            ):
-                collaboration_ids.add(details.collaboration_id)
-        if not collaboration_ids:
+        ids: set[UserID],
+    ) -> dict[UserID, UserRefView]:
+        if not ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                sa.select(
+                    users_table.c.oid,
+                    users_table.c.email,
+                    users_table.c.first_name,
+                    users_table.c.last_name,
+                    users_table.c.patronymic,
+                ).where(users_table.c.oid.in_(ids)),
+            )
+        ).all()
+        return {
+            UserID(row.oid): UserRefView(
+                oid=UserID(row.oid),
+                email=row.email or "",
+                first_name=row.first_name or "",
+                last_name=row.last_name or "",
+                patronymic=row.patronymic,
+            )
+            for row in rows
+        }
+
+    async def _fetch_collaborations(
+        self,
+        ids: set[ProductCollaborationID],
+    ) -> dict[ProductCollaborationID, CollaborationSnapshotView]:
+        if not ids:
             return {}
         rows = (
             await self._session.execute(
@@ -663,12 +457,12 @@ class NotificationReaderAlchemy(NotificationReader):
                     product_collaborations_table.c.revoked_at,
                     product_collaborations_table.c.invite_expires_at,
                 ).where(
-                    product_collaborations_table.c.oid.in_(collaboration_ids),
+                    product_collaborations_table.c.oid.in_(ids),
                 ),
             )
         ).all()
         return {
-            row.oid: CollaborationSnapshotView(
+            ProductCollaborationID(row.oid): CollaborationSnapshotView(
                 status=CollaborationStatus(row.status),
                 accepted_at=row.accepted_at,
                 declined_at=row.declined_at,
@@ -678,78 +472,47 @@ class NotificationReaderAlchemy(NotificationReader):
             for row in rows
         }
 
-    async def _load_user_refs(
-        self,
-        details_by_id: dict[UUID, NotificationDetails],
-    ) -> dict[UUID, UserRefView]:
-        """Hydrate every user referenced inside the loaded details.
-
-        Covers the ``collaborator_id`` from ``invite_accepted``, the
-        ``decliner_id`` from ``invite_declined`` and the
-        ``revoker_id`` from ``access_revoked`` in a single ``IN``
-        lookup. The HTTP boundary (``UserRefSchema``) requires a
-        non-empty ``full_name``, so a real DB row is mandatory —
-        falling back to a stub user ref with empty name strings
-        breaks Pydantic validation at the route.
-        """
-        user_ids: set[UUID] = set()
-        for details in details_by_id.values():
-            if isinstance(details, InviteAcceptedDetails):
-                user_ids.add(details.collaborator_id)
-            elif isinstance(details, InviteDeclinedDetails):
-                user_ids.add(details.decliner_id)
-            elif isinstance(details, AccessRevokedDetails):
-                user_ids.add(details.revoker_id)
-        if not user_ids:
-            return {}
-        rows = (
-            await self._session.execute(
-                sa.select(
-                    users_table.c.oid,
-                    users_table.c.email,
-                    users_table.c.first_name,
-                    users_table.c.last_name,
-                    users_table.c.patronymic,
-                ).where(users_table.c.oid.in_(user_ids)),
-            )
-        ).all()
-        return {
-            row.oid: UserRefView(
-                oid=UserID(row.oid),
-                email=row.email or "",
-                first_name=row.first_name or "",
-                last_name=row.last_name or "",
-                patronymic=row.patronymic,
-            )
-            for row in rows
-        }
-
-    async def _load_manage_permissions(
+    async def _fetch_session_active(
         self,
         recipient_id: UserID,
-        details_by_id: dict[UUID, NotificationDetails],
+        family_ids: set[UUID],
     ) -> dict[UUID, bool]:
-        """Resolve ``MANAGE_COLLABORATORS`` per referenced product.
+        """Return a `family_id -> still-active?` map for the recipient.
 
-        Per-product check via :class:`Authorizer` — the SPA needs
-        the flag only on cards that expose a management CTA
-        (``invite_accepted`` revoke / ``invite_declined`` re-invite),
-        so we only resolve it for products mentioned by those kinds.
+        Active = a refresh-token row exists for the family that belongs
+        to the recipient, has no ``revoked_at``, and has not expired.
+        Anything else (revoked, expired, missing) maps to ``False`` so
+        the panel can hide the "Logout from this device" CTA on cards
+        whose session is already gone.
         """
-        product_ids: set[UUID] = set()
-        for details in details_by_id.values():
-            if isinstance(
-                details,
-                (InviteAcceptedDetails, InviteDeclinedDetails),
-            ):
-                product_ids.add(details.product_id)
-        if not product_ids:
+        if not family_ids:
             return {}
-        result: dict[UUID, bool] = {}
+        now = datetime.now(timezone.utc)
+        rows = (
+            await self._session.execute(
+                sa.select(refresh_tokens_table.c.family_id)
+                .where(
+                    refresh_tokens_table.c.family_id.in_(family_ids),
+                    refresh_tokens_table.c.user_id == recipient_id,
+                    refresh_tokens_table.c.revoked_at.is_(None),
+                    refresh_tokens_table.c.expires_at > now,
+                )
+                .distinct(),
+            )
+        ).all()
+        active = {row.family_id for row in rows}
+        return {family_id: family_id in active for family_id in family_ids}
+
+    async def _fetch_manage_perms(
+        self,
+        recipient_id: UserID,
+        product_ids: set[ProductID],
+    ) -> dict[ProductID, bool]:
+        result: dict[ProductID, bool] = {}
         for product_id in product_ids:
             permissions = await self._authorizer.effective_permissions(
                 recipient_id,
-                AuthzTarget.for_product(ProductID(product_id)),
+                AuthzTarget.for_product(product_id),
             )
             result[product_id] = (
                 permissions is not None
@@ -761,129 +524,45 @@ class NotificationReaderAlchemy(NotificationReader):
         self,
         row: sa.Row[Any],
         details_by_id: dict[UUID, NotificationDetails],
-        product_refs: dict[UUID, ProductRefView],
-        collab_refs: dict[UUID, CollaborationSnapshotView],
-        user_refs: dict[UUID, UserRefView],
-        manage_perms: dict[UUID, bool],
+        refs: ResolvedRefs,
     ) -> NotificationView | None:
         kind = NotificationKind(row.kind)
         details = details_by_id.get(row.oid)
-        details_view = self._build_details_view(
-            details, row, product_refs, collab_refs, user_refs, manage_perms
-        )
-        if details_view is None:
+        if details is None:
             _logger.warning(
                 "Skipping notification %s (%s): subtype row missing",
                 row.oid,
                 kind.value,
             )
             return None
-        actor = self._build_actor(row)
+        spec = self._kinds.by_kind(kind)
+        details_view = spec.to_view(details, refs)
         return NotificationView(
             oid=NotificationID(row.oid),
             recipient_id=UserID(row.recipient_id),
             kind=kind,
             category=NotificationCategory(row.category),
-            actor=actor,
+            actor=_build_actor(row),
             created_at=row.created_at,
             read_at=row.read_at,
             details=details_view,
         )
 
-    def _build_actor(self, row: sa.Row[Any]) -> UserRefView | None:
-        if row.actor_id is None:
-            return None
-        return UserRefView(
-            oid=UserID(row.actor_id),
-            email=row.actor_email or "",
-            first_name=row.actor_first_name or "",
-            last_name=row.actor_last_name or "",
-            patronymic=row.actor_patronymic,
-        )
 
-    def _build_details_view(
-        self,
-        details: NotificationDetails | None,
-        row: sa.Row[Any],  # noqa: ARG002
-        product_refs: dict[UUID, ProductRefView],
-        collab_refs: dict[UUID, CollaborationSnapshotView],
-        user_refs: dict[UUID, UserRefView],
-        manage_perms: dict[UUID, bool],
-    ) -> NotificationDetailsView | None:
-        if isinstance(details, InviteSentDetails):
-            product = product_refs.get(details.product_id) or ProductRefView(
-                oid=details.product_id,
-                name="",
-            )
-            return InviteSentView(
-                collaboration_id=details.collaboration_id,
-                product=product,
-                collaboration=collab_refs.get(details.collaboration_id),
-            )
-        if isinstance(details, InviteAcceptedDetails):
-            product = product_refs.get(details.product_id) or ProductRefView(
-                oid=details.product_id,
-                name="",
-            )
-            collaborator = user_refs.get(
-                details.collaborator_id
-            ) or _user_ref_placeholder(details.collaborator_id)
-            return InviteAcceptedView(
-                collaboration_id=details.collaboration_id,
-                product=product,
-                collaborator=collaborator,
-                collaboration=collab_refs.get(details.collaboration_id),
-                viewer_can_manage_collaborators=manage_perms.get(
-                    details.product_id, False
-                ),
-            )
-        if isinstance(details, InviteDeclinedDetails):
-            product = product_refs.get(details.product_id) or ProductRefView(
-                oid=details.product_id,
-                name="",
-            )
-            decliner = user_refs.get(
-                details.decliner_id
-            ) or _user_ref_placeholder(details.decliner_id)
-            return InviteDeclinedView(
-                collaboration_id=details.collaboration_id,
-                product=product,
-                decliner=decliner,
-                collaboration=collab_refs.get(details.collaboration_id),
-                viewer_can_manage_collaborators=manage_perms.get(
-                    details.product_id, False
-                ),
-            )
-        if isinstance(details, AccessRevokedDetails):
-            product = product_refs.get(details.product_id) or ProductRefView(
-                oid=details.product_id,
-                name="",
-            )
-            revoker = user_refs.get(
-                details.revoker_id
-            ) or _user_ref_placeholder(details.revoker_id)
-            return AccessRevokedView(
-                collaboration_id=details.collaboration_id,
-                product=product,
-                revoker=revoker,
-            )
+def _build_actor(row: sa.Row[Any]) -> UserRefView | None:
+    if row.actor_id is None:
         return None
-
-
-def _user_ref_placeholder(user_id: UserID) -> UserRefView:
-    """Defensive fallback for a user row that vanished mid-flight.
-
-    The HTTP boundary (``UserRefSchema``) requires a non-empty
-    ``full_name``, so we must never produce empty name strings.
-    Falling back to a single-character bullet keeps the schema
-    happy and gives the SPA a recognisable placeholder for the
-    rare race where a user was deleted between the notification
-    insert and the read-time JOIN.
-    """
     return UserRefView(
-        oid=user_id,
-        email="",
-        first_name="—",
-        last_name="",
-        patronymic=None,
+        oid=UserID(row.actor_id),
+        email=row.actor_email or "",
+        first_name=row.actor_first_name or "",
+        last_name=row.actor_last_name or "",
+        patronymic=row.actor_patronymic,
     )
+
+
+def _parse_cursor(cursor: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(cursor)
+    except ValueError:
+        return None

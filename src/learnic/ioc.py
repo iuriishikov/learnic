@@ -342,8 +342,8 @@ from learnic.application.commands.user.cover.remove import (
 from learnic.application.commands.user.cover.set import (
     SetUserCoverCommandHandler,
 )
+from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.email.sender import EmailSender
-from learnic.application.common.email.service import EmailService
 from learnic.application.common.persistence.cohort import (
     CohortGateway,
     CohortReader,
@@ -389,6 +389,9 @@ from learnic.application.common.notifications.event_bus import (
 )
 from learnic.application.common.notifications.gateway import (
     NotificationGateway,
+)
+from learnic.application.common.notifications.kind_spec import (
+    NotificationKindRegistry,
 )
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
@@ -466,6 +469,7 @@ from learnic.application.common.security.access_tokens import (
 from learnic.application.common.security.email_tokens import EmailTokenStore
 from learnic.application.common.security.html import HtmlSanitizer
 from learnic.application.common.security.passwords import PasswordHasher
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
 )
@@ -474,6 +478,10 @@ from learnic.application.common.security.signup_sessions import (
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.application.common.storage.file_storage import FileStorage
+from learnic.application.common.storage.file_uploads import (
+    DefaultStorageBucket,
+    FileUploadService,
+)
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.queries.presence.get_user_presence import (
     GetUserPresenceQueryHandler,
@@ -581,10 +589,9 @@ from learnic.infrastructure.email.adapters.rusender import (
     RusenderEmailSender,
 )
 from learnic.infrastructure.email.renderer import (
-    EmailRenderer,
+    JinjaEmailRenderer,
     build_environment,
 )
-from learnic.infrastructure.email.service import TemplatedEmailService
 from learnic.infrastructure.persistence.adapters.email_token import (
     EmailTokenStoreAlchemy,
 )
@@ -631,6 +638,7 @@ from learnic.infrastructure.persistence.adapters.product_qa import (
 from learnic.infrastructure.notifications.event_bus_redis import (
     NotificationEventBusRedis,
 )
+from learnic.infrastructure.notifications.specs import default_registry
 from learnic.infrastructure.persistence.adapters.notification import (
     NotificationGatewayAlchemy,
     NotificationReaderAlchemy,
@@ -755,6 +763,14 @@ class ConfigsProvider(Provider):
 
     @provide
     def security_config(self, configs: Configs) -> SecurityConfig:
+        return configs.security
+
+    @provide
+    def security_policies(self, configs: Configs) -> SecurityPolicies:
+        # ``SecurityConfig`` structurally satisfies ``SecurityPolicies``
+        # (matching attribute names + types); the explicit ``provides``
+        # is what handlers actually depend on so the application layer
+        # never imports the concrete config class.
         return configs.security
 
     @provide
@@ -954,6 +970,7 @@ class GatewaysProvider(Provider):
         RoleHierarchyService,
         provides=RoleHierarchy,
     )
+    file_upload_service = provide(FileUploadService)
 
 
 class SecurityProvider(Provider):
@@ -1019,6 +1036,10 @@ class S3Provider(Provider):
         client: S3Client,
     ) -> FileStorage:
         return S3FileStorage(client)
+
+    @provide
+    def default_bucket(self, s3: S3Config) -> DefaultStorageBucket:
+        return DefaultStorageBucket(s3.bucket)
 
 
 class TasksProvider(Provider):
@@ -1087,6 +1108,10 @@ class NotificationEventsProvider(Provider):
         NotificationEventBusRedis,
         provides=NotificationEventBus,
     )
+
+    @provide(scope=Scope.APP)
+    def kind_registry(self) -> NotificationKindRegistry:
+        return default_registry()
 
 
 class ConfirmEventsProvider(Provider):
@@ -1353,7 +1378,7 @@ class EmailProvider(Provider):
 
     @provide
     def email_renderer(self, env: Environment) -> EmailRenderer:
-        return EmailRenderer(env=env)
+        return JinjaEmailRenderer(env=env)
 
     @provide(scope=Scope.REQUEST)
     def email_sender(
@@ -1367,14 +1392,6 @@ class EmailProvider(Provider):
             from_email=rusender.from_email,
             from_name=rusender.from_name,
         )
-
-    @provide(scope=Scope.REQUEST)
-    def email_service(
-        self,
-        renderer: EmailRenderer,
-        sender: EmailSender,
-    ) -> EmailService:
-        return TemplatedEmailService(renderer=renderer, sender=sender)
 
 
 def setup_providers(configs: Configs) -> AsyncContainer:

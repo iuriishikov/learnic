@@ -84,8 +84,7 @@ def fake_signup_sessions() -> AsyncMock:
 @pytest.fixture
 def fake_scheduler() -> AsyncMock:
     sch = AsyncMock()
-    sch.schedule_send_verification_email = AsyncMock()
-    sch.schedule_send_password_reset_email = AsyncMock()
+    sch.schedule_send_email = AsyncMock()
     return sch
 
 

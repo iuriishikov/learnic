@@ -7,6 +7,11 @@ from learnic.application.common.collaboration.event_bus import (
 from learnic.application.common.collaboration.events import (
     ContentEvent,
     ContentEventKind,
+    block_added_payload,
+    block_updated_payload,
+    lesson_added_payload,
+    lesson_moved_payload,
+    module_added_payload,
 )
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -42,5 +47,10 @@ __all__ = [
     "ContentEvent",
     "ContentEventBus",
     "ContentEventKind",
+    "block_added_payload",
+    "block_updated_payload",
+    "lesson_added_payload",
+    "lesson_moved_payload",
+    "module_added_payload",
     "publish_content_event",
 ]

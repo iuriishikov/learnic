@@ -5,6 +5,7 @@ from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
     ContentEventKind,
+    block_updated_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -88,8 +89,5 @@ class UpdateRutubeVideoBlockCommandHandler:
             kind=ContentEventKind.BLOCK_UPDATED,
             product_id=block.product_id,
             actor_id=data.actor_id,
-            payload={
-                "block_id": str(block.oid),
-                "type": BlockType.RUTUBE_VIDEO.value,
-            },
+            payload=block_updated_payload(block),
         )

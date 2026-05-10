@@ -3,6 +3,10 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.auth.role_hierarchy import RoleHierarchy
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
@@ -18,6 +22,7 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.enums import CollaborationStatus
@@ -55,6 +60,7 @@ class RevokeCollaborationCommandHandler:
         scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
+        security: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -64,6 +70,7 @@ class RevokeCollaborationCommandHandler:
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
+        self._security: Final = security
 
     async def run(
         self,
@@ -92,9 +99,19 @@ class RevokeCollaborationCommandHandler:
         collab.revoke()
         await self._transaction.commit()
         if recipient_email is not None:
-            await self._scheduler.schedule_send_collaboration_revoked_email(
+            base = self._security.frontend_base_url.rstrip("/")
+            link = f"{base}/products/{collab.product_id}"
+            await self._scheduler.schedule_send_email(
                 to=recipient_email,
-                product_id=collab.product_id,
+                subject="Доступ к продукту отозван",
+                components=[
+                    EmailParagraph.text("Здравствуйте!"),
+                    EmailParagraph.text(
+                        "Доступ к продукту был отозван. Если это произошло "
+                        "по ошибке — свяжитесь с автором продукта.",
+                    ),
+                    EmailButton(label="Открыть Learnic", url=link),
+                ],
             )
         await publish_product_event(
             self._event_bus,

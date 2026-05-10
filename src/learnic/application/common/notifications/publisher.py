@@ -1,6 +1,7 @@
 import logging
 from typing import Final, final
 
+from learnic.application.common.email.components import EmailParagraph
 from learnic.application.common.notification_preferences.reader import (
     NotificationPreferencesReader,
 )
@@ -12,8 +13,12 @@ from learnic.application.common.notifications.event_bus import (
 from learnic.application.common.notifications.gateway import (
     NotificationGateway,
 )
+from learnic.application.common.notifications.kind_spec import (
+    NotificationKindRegistry,
+)
 from learnic.application.common.notifications.reader import NotificationReader
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.notification.enums import NotificationChannel
 from learnic.entities.notification.models import Notification
@@ -59,6 +64,8 @@ class NotificationPublisher:
         event_bus: NotificationEventBus,
         preferences: NotificationPreferencesReader,
         scheduler: TaskScheduler,
+        kind_registry: NotificationKindRegistry,
+        user_gateway: UserGateway,
     ) -> None:
         self._transaction: Final = transaction
         self._gateway: Final = gateway
@@ -66,6 +73,8 @@ class NotificationPublisher:
         self._event_bus: Final = event_bus
         self._preferences: Final = preferences
         self._scheduler: Final = scheduler
+        self._kinds: Final = kind_registry
+        self._user_gateway: Final = user_gateway
 
     async def publish(self, notification: Notification) -> None:
         await self._gateway.add(notification)
@@ -81,6 +90,7 @@ class NotificationPublisher:
             NotificationCreatedEvent(notification=view),
         )
         await self._dispatch_push(notification)
+        await self._dispatch_email(notification)
 
     async def _dispatch_push(self, notification: Notification) -> None:
         """Schedule a Web Push delivery for the recipient if opted in.
@@ -99,7 +109,8 @@ class NotificationPublisher:
             )
             if not push_enabled:
                 return
-            title, body = _render_push_text(notification)
+            spec = self._kinds.by_kind(notification.kind)
+            title, body = spec.push_title, spec.push_body
             await self._scheduler.schedule_send_web_push(
                 user_id=notification.recipient_id,
                 title=title,
@@ -111,6 +122,40 @@ class NotificationPublisher:
         except Exception:
             _logger.exception(
                 "Web Push dispatch failed for notification %s",
+                notification.oid,
+            )
+
+    async def _dispatch_email(self, notification: Notification) -> None:
+        """Schedule an email delivery for the recipient if opted in.
+
+        Mirrors :meth:`_dispatch_push`: read the recipient's matrix at
+        publish time and enqueue only when the email channel is enabled
+        for this category. The publisher resolves the recipient's
+        address and assembles the typed component list; the scheduler
+        owns the render step and hands the rendered payload to the
+        worker. Failures are isolated — an SMTP / broker hiccup must
+        not roll back the source command.
+        """
+        try:
+            email_enabled = await self._preferences.is_channel_enabled(
+                notification.recipient_id,
+                NotificationChannel.EMAIL,
+                notification.category,
+            )
+            if not email_enabled:
+                return
+            user = await self._user_gateway.with_id(notification.recipient_id)
+            if user is None:
+                return
+            spec = self._kinds.by_kind(notification.kind)
+            await self._scheduler.schedule_send_email(
+                to=user.email.value,
+                subject=spec.email_subject,
+                components=[EmailParagraph.text(spec.email_body)],
+            )
+        except Exception:
+            _logger.exception(
+                "Notification email dispatch failed for notification %s",
                 notification.oid,
             )
 
@@ -128,36 +173,3 @@ class NotificationPublisher:
                 recipient_id,
                 NotificationUpdatedEvent(notification=view),
             )
-
-
-def _render_push_text(notification: Notification) -> tuple[str, str]:
-    """Render the system-banner copy from a notification entity.
-
-    Kept tiny and kind-aware on purpose — email/web-push copy
-    rendering belongs in a templating module long-term, but the
-    in-app categories have stable wording so a switch keeps the
-    publisher self-contained for now.
-    """
-    from learnic.entities.notification.enums import NotificationKind
-
-    if notification.kind is NotificationKind.INVITE_SENT:
-        return (
-            "New collaboration invite",
-            "You have been invited to collaborate on a product.",
-        )
-    if notification.kind is NotificationKind.INVITE_ACCEPTED:
-        return (
-            "Invite accepted",
-            "Your collaboration invite was accepted.",
-        )
-    if notification.kind is NotificationKind.INVITE_DECLINED:
-        return (
-            "Invite declined",
-            "Your collaboration invite was declined.",
-        )
-    if notification.kind is NotificationKind.ACCESS_REVOKED:
-        return (
-            "Access revoked",
-            "Your access to a product was revoked.",
-        )
-    return ("New notification", "Open the app to see the details.")

@@ -57,6 +57,7 @@ def _build_handler(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
 ) -> InviteCollaboratorByUserCommandHandler:
     return InviteCollaboratorByUserCommandHandler(
         transaction=fake_transaction,
@@ -71,6 +72,7 @@ def _build_handler(
         scheduler=fake_scheduler,
         event_bus=fake_event_bus,
         notifications=fake_notifications,
+        security=security_config,
     )
 
 
@@ -108,6 +110,7 @@ async def test_invites_and_schedules_email(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -131,6 +134,7 @@ async def test_invites_and_schedules_email(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     oid = await handler.run(
         _command(actor_id, product.oid, invitee_id, role_id),
@@ -139,7 +143,7 @@ async def test_invites_and_schedules_email(
     assert oid is not None
     fake_collab_saver.save.assert_called_once()
     fake_transaction.commit.assert_called_once()
-    fake_scheduler.schedule_send_collaboration_invite_email.assert_called_once()
+    fake_scheduler.schedule_send_email.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -156,6 +160,7 @@ async def test_refuses_to_invite_owner(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     role_id: RoleID,
@@ -175,6 +180,7 @@ async def test_refuses_to_invite_owner(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     with pytest.raises(CannotInviteOwnerError):
         await handler.run(
@@ -197,6 +203,7 @@ async def test_refuses_when_user_missing(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -218,6 +225,7 @@ async def test_refuses_when_user_missing(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(
@@ -239,6 +247,7 @@ async def test_refuses_when_collaboration_exists(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -262,6 +271,7 @@ async def test_refuses_when_collaboration_exists(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     with pytest.raises(CollaborationAlreadyExistsError):
         await handler.run(
@@ -283,6 +293,7 @@ async def test_refuses_when_role_missing(
     fake_scheduler: AsyncMock,
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
+    security_config,
     product: Product,
     actor_id: UserID,
     invitee_id: UserID,
@@ -305,6 +316,7 @@ async def test_refuses_when_role_missing(
         fake_scheduler,
         fake_event_bus,
         fake_notifications,
+        security_config,
     )
     bogus_role = RoleID(uuid.uuid4())
     with pytest.raises(EntityNotFoundError):

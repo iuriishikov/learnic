@@ -5,6 +5,7 @@ from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
     ContentEventKind,
+    lesson_moved_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -88,6 +89,7 @@ class MoveCourseLessonCommandHandler:
             target_module.oid,
         )
         next_position = max((lsn.position for lsn in target_lessons), default=-1) + 1
+        from_module_id = lesson.module_id  # captured before the mutation
         lesson.move_to_module(target_module.oid, next_position)
         await self._transaction.commit()
         await publish_content_event(
@@ -95,9 +97,10 @@ class MoveCourseLessonCommandHandler:
             kind=ContentEventKind.LESSON_MOVED,
             product_id=lesson.product_id,
             actor_id=data.actor_id,
-            payload={
-                "lesson_id": str(lesson.oid),
-                "to_module_id": str(target_module.oid),
-                "position": lesson.position,
-            },
+            payload=lesson_moved_payload(
+                lesson_id=lesson.oid,
+                from_module_id=from_module_id,
+                to_module_id=target_module.oid,
+                position=lesson.position,
+            ),
         )

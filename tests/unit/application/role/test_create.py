@@ -38,6 +38,7 @@ async def test_creates_role_when_authorized(
     fake_role_gateway: AsyncMock,
     fake_role_reader: AsyncMock,
     fake_role_saver: AsyncMock,
+    fake_event_bus: AsyncMock,
     product: Product,
     author_id: UserID,
 ) -> None:
@@ -50,6 +51,7 @@ async def test_creates_role_when_authorized(
         role_gateway=fake_role_gateway,
         role_reader=fake_role_reader,
         role_saver=fake_role_saver,
+        event_bus=fake_event_bus,
     )
     role_id = await handler.run(_command(author_id, product.oid))
 
@@ -57,6 +59,7 @@ async def test_creates_role_when_authorized(
     fake_authorizer.require.assert_called_once()
     fake_role_saver.save.assert_called_once()
     fake_transaction.commit.assert_called_once()
+    fake_event_bus.publish.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -67,6 +70,7 @@ async def test_404_when_product_missing(
     fake_role_gateway: AsyncMock,
     fake_role_reader: AsyncMock,
     fake_role_saver: AsyncMock,
+    fake_event_bus: AsyncMock,
     author_id: UserID,
 ) -> None:
     fake_product_gateway.with_id.return_value = None
@@ -78,6 +82,7 @@ async def test_404_when_product_missing(
         role_gateway=fake_role_gateway,
         role_reader=fake_role_reader,
         role_saver=fake_role_saver,
+        event_bus=fake_event_bus,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(_command(author_id, ProductID(uuid.uuid4())))
@@ -92,6 +97,7 @@ async def test_conflict_when_name_already_taken(
     fake_role_gateway: AsyncMock,
     fake_role_reader: AsyncMock,
     fake_role_saver: AsyncMock,
+    fake_event_bus: AsyncMock,
     product: Product,
     author_id: UserID,
 ) -> None:
@@ -105,8 +111,10 @@ async def test_conflict_when_name_already_taken(
         role_gateway=fake_role_gateway,
         role_reader=fake_role_reader,
         role_saver=fake_role_saver,
+        event_bus=fake_event_bus,
     )
     with pytest.raises(RoleNameAlreadyTakenError):
         await handler.run(_command(author_id, product.oid))
     fake_role_saver.save.assert_not_called()
     fake_transaction.commit.assert_not_called()
+    fake_event_bus.publish.assert_not_called()

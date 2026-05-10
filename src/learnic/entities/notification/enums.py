@@ -15,19 +15,29 @@ class NotificationKind(StrEnum):
     INVITE_ACCEPTED = "invite_accepted"
     INVITE_DECLINED = "invite_declined"
     ACCESS_REVOKED = "access_revoked"
+    NEW_LOGIN = "new_login"
 
 
 class NotificationCategory(StrEnum):
     """Tab grouping in the notifications panel.
 
     Mirrors the segmented control in the panel mock-ups —
-    ``View all`` aggregates every category, ``Invites`` is the
-    invite tab, ``Files`` and ``Jobs`` are reserved for future
+    ``View all`` aggregates every category. ``Teaching`` covers
+    everything an author or collaborator does on the teaching side
+    (invites, access changes, future content events). ``Learning``
+    is the student-side counterpart — events that surface to a
+    learner (course progress, deadlines, instructor messages,
+    future content events on courses they are enrolled in).
+    ``Security`` covers account-safety events (new login, password
+    changed, suspicious activity) so the user sees them in a
+    dedicated tab. ``Files`` and ``Jobs`` are reserved for future
     notification kinds. ``OTHER`` catches anything that does not
     fit a dedicated tab so the panel never shows an empty bucket.
     """
 
-    INVITES = "invites"
+    TEACHING = "teaching"
+    LEARNING = "learning"
+    SECURITY = "security"
     FILES = "files"
     JOBS = "jobs"
     OTHER = "other"

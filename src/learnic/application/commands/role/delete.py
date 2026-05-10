@@ -8,6 +8,12 @@ from learnic.application.common.errors import (
 )
 from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_role_deleted_payload,
+    publish_product_event,
+)
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -35,10 +41,12 @@ class DeleteCustomRoleCommandHandler:
         transaction: Transaction,
         authorizer: Authorizer,
         role_gateway: RoleGateway,
+        event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
         self._role_gateway: Final = role_gateway
+        self._event_bus: Final = event_bus
 
     async def run(self, data: DeleteCustomRoleCommand) -> None:
         role = await self._role_gateway.with_id(data.role_id)
@@ -53,3 +61,10 @@ class DeleteCustomRoleCommandHandler:
             raise RoleInUseError(role.oid)
         await self._role_gateway.delete(role)
         await self._transaction.commit()
+        await publish_product_event(
+            self._event_bus,
+            kind=ProductEventKind.ROLE_DELETED,
+            product_id=role.product_id,
+            actor_id=data.actor_id,
+            payload=make_role_deleted_payload(role.oid),
+        )

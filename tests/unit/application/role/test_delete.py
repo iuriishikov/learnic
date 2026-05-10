@@ -44,6 +44,7 @@ async def test_deletes_when_not_in_use(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_role_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     author_id: UserID,
     product_id: ProductID,
 ) -> None:
@@ -55,12 +56,14 @@ async def test_deletes_when_not_in_use(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
         role_gateway=fake_role_gateway,
+        event_bus=fake_event_bus,
     )
     await handler.run(
         DeleteCustomRoleCommand(actor_id=author_id, role_id=role.oid),
     )
     fake_role_gateway.delete.assert_called_once_with(role)
     fake_transaction.commit.assert_called_once()
+    fake_event_bus.publish.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -68,6 +71,7 @@ async def test_refuses_when_in_use(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_role_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     author_id: UserID,
     product_id: ProductID,
 ) -> None:
@@ -79,6 +83,7 @@ async def test_refuses_when_in_use(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
         role_gateway=fake_role_gateway,
+        event_bus=fake_event_bus,
     )
     with pytest.raises(RoleInUseError):
         await handler.run(
@@ -89,6 +94,7 @@ async def test_refuses_when_in_use(
         )
     fake_role_gateway.delete.assert_not_called()
     fake_transaction.commit.assert_not_called()
+    fake_event_bus.publish.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -96,6 +102,7 @@ async def test_404_when_role_missing(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,
     fake_role_gateway: AsyncMock,
+    fake_event_bus: AsyncMock,
     author_id: UserID,
 ) -> None:
     fake_role_gateway.with_id.return_value = None
@@ -104,6 +111,7 @@ async def test_404_when_role_missing(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
         role_gateway=fake_role_gateway,
+        event_bus=fake_event_bus,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(
@@ -113,3 +121,4 @@ async def test_404_when_role_missing(
             ),
         )
     fake_authorizer.require.assert_not_called()
+    fake_event_bus.publish.assert_not_called()

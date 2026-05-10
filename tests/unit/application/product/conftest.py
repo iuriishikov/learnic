@@ -1,8 +1,17 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from learnic.entities.file.ids import FileID
+from learnic.entities.file.models import File
+from learnic.entities.file.value_objects import (
+    ContentType,
+    FileSize,
+    StorageBucket,
+    StorageName,
+)
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import (
     DurationHours,
@@ -68,17 +77,30 @@ def fake_event_bus() -> AsyncMock:
 
 
 @pytest.fixture
-def fake_file_storage() -> AsyncMock:
-    storage = AsyncMock()
-    storage.put = AsyncMock()
-    return storage
+def fake_file_uploads() -> MagicMock:
+    """Stub ``FileUploadService`` for product-creation tests.
 
+    ``upload`` returns a fresh ``File`` entity so the handler can
+    link its ``oid`` into the new product's ``cover_file_id``;
+    ``soft_delete_previous`` is a no-op async stub.
+    """
 
-@pytest.fixture
-def fake_s3_config() -> MagicMock:
-    config = MagicMock()
-    config.bucket = "test-bucket"
-    return config
+    def _build_file(data: bytes, content_type: str, uploaded_by: UserID) -> File:
+        return File(
+            oid=FileID(uuid.uuid4()),
+            storage_name=StorageName(str(uuid.uuid4())),
+            bucket=StorageBucket("test-bucket"),
+            content_type=ContentType(content_type),
+            size_bytes=FileSize(len(data)),
+            uploaded_by=uploaded_by,
+            uploaded_at=datetime.now(timezone.utc),
+            deleted_at=None,
+        )
+
+    svc = MagicMock()
+    svc.upload = AsyncMock(side_effect=_build_file)
+    svc.soft_delete_previous = AsyncMock()
+    return svc
 
 
 @pytest.fixture

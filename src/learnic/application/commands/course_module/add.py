@@ -5,6 +5,7 @@ from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
     ContentEventKind,
+    module_added_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -92,10 +93,6 @@ class AddCourseModuleCommandHandler:
             kind=ContentEventKind.MODULE_ADDED,
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload={
-                "module_id": str(module.oid),
-                "title": module.title.value,
-                "position": module.position,
-            },
+            payload=module_added_payload(module),
         )
         return module.oid

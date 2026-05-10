@@ -1,14 +1,18 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
     EmailTokenPurpose,
     EmailTokenStore,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
-from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,7 +34,7 @@ class RequestPasswordResetCommandHandler:
         user_gateway: UserGateway,
         email_tokens: EmailTokenStore,
         scheduler: TaskScheduler,
-        config: SecurityConfig,
+        config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
@@ -49,6 +53,18 @@ class RequestPasswordResetCommandHandler:
             self._config.reset_password_token_ttl_seconds,
         )
         await self._transaction.commit()
-        await self._scheduler.schedule_send_password_reset_email(
-            user.email.value, raw_token
+
+        base = self._config.frontend_base_url.rstrip("/")
+        link = f"{base}/reset-password?token={raw_token}"
+        await self._scheduler.schedule_send_email(
+            to=user.email.value,
+            subject="Сброс пароля",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Чтобы установить новый пароль, нажмите на кнопку ниже:",
+                ),
+                EmailButton(label="Сбросить пароль", url=link),
+                EmailParagraph.text("Ссылка действует 1 час."),
+            ],
         )

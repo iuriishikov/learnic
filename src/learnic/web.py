@@ -155,6 +155,7 @@ shown) before opening the socket.
 - Collaboration: `collaboration_invited`,
   `collaboration_accepted`, `collaboration_declined`,
   `collaboration_revoked`, `collaboration_grants_updated`.
+- Role catalogue: `role_created`, `role_updated`, `role_deleted`.
 
 `payload` carries id-level fields plus the new value when trivial
 (e.g. `name_changed` → `{"name": "..."}`); for non-trivial changes
@@ -195,10 +196,18 @@ kind:
   `payload.collaborator_id` matches the current user, refetch
   `…/collaborations/me/permissions`.
 
-Role-catalogue mutations (create / update / delete custom role)
-are **not** broadcast on this channel — clients should re-call
-`GET /products/{product_id}/roles` on demand. Client → server
-messages are not interpreted yet.
+`role_*` events carry the full role projection on
+`role_created` / `role_updated` (same shape as `RoleSchema` from
+`GET /roles/{id}` — `oid`, `product_id`, `name`, `description`,
+`position`, `permissions[]`, `created_by`, `created_at`,
+`updated_at`) so the SPA can splice or replace the row in its
+catalogue without an extra REST round-trip. `role_deleted`
+carries only `{"role_id": "<UUID>"}` — the SPA drops the row by
+id. Crucially, `role_updated` doubles as a permission-change
+signal for every collaborator that holds this role: the SPA must
+recompute their effective permissions (drop the role from the
+local cache, re-derive any UI gating) when the event arrives.
+Client → server messages are not interpreted yet.
 
 ### `WS /courses/{course_id}/events` — course-content deltas
 
@@ -225,11 +234,44 @@ channel, with `kind` drawn from `ContentEventKind`.
   `blocks_reordered`.
 - Release: `release_created`, `draft_reset`.
 
-`payload` carries id-level info — apply small changes (e.g.
-`module_renamed` carries the new title) directly, and refetch the
-affected lesson or block via REST for content-heavy changes (e.g.
-`block_updated` only carries `block_id` + `type`). Client → server
-messages are not interpreted yet.
+`payload` is rich enough for the SPA to apply every `kind` in
+place via `setQueryData` without a follow-up REST round-trip.
+Container events (`module_added`, `lesson_added`, `block_added`,
+`block_updated`) carry a full snapshot of the affected entity in
+the same shape as the corresponding `GET /products/{id}/content/draft`
+sub-tree — the SPA reuses its existing draft types to splice it in.
+Concretely:
+
+- `module_added` → `{"module": {"oid", "title", "description",
+  "position", "lessons": []}}`. New modules always have an empty
+  `lessons` list; the field is included so the SPA can splice the
+  module into its draft cache without first synthesizing the empty
+  array.
+- `lesson_added` → `{"module_id", "lesson": {"oid", "title",
+  "position", "blocks": []}}`. `module_id` is the parent; `lesson`
+  matches `CourseDraftLessonSchema`.
+- `lesson_moved` → `{"lesson_id", "from_module_id", "to_module_id",
+  "position"}`. `from_module_id` is the lesson's previous module so
+  the SPA can locate the lesson in its draft cache without a tree
+  scan.
+- `block_added` → `{"lesson_id", "block": <LessonBlockSchema>}`.
+  The block snapshot is the discriminated union over `type`
+  (`html` / `katex` / `code` / `rutube_video`) — same field set
+  the REST draft endpoint returns for that block type. The SPA
+  appends `block` to the parent lesson's `blocks` array.
+- `block_updated` → `{"block": <LessonBlockSchema>}`. Full
+  post-mutation snapshot; the SPA replaces the block by `oid`.
+- `module_renamed`, `module_description_updated`,
+  `modules_reordered`, `module_deleted`,
+  `lesson_renamed`, `lessons_reordered`, `lesson_deleted`,
+  `block_deleted`, `blocks_reordered` all carry the small
+  id-level fields needed to patch the cache (titles, ordered
+  id arrays, the deleted entity's id).
+- `release_created`, `draft_reset` carry `{"release_id", "ordinal",
+  "version", "kind"}` — refetch `GET /products/{id}/content/releases`
+  for the full release record (notes, released_by, released_at).
+
+Client → server messages are not interpreted yet.
 
 ### `WS /users/me/notifications` — per-user notification deltas
 
@@ -308,6 +350,17 @@ inside the `created` / `updated` envelopes):
   status across reloads.
 - `invite_accepted` — an invitee accepted; the inviter's panel
   shows the new collaborator's avatar + name.
+- `invite_declined` — an invitee declined; the inviter's panel
+  shows the decliner's avatar + name and an optional Re-invite
+  CTA when the recipient still holds `MANAGE_COLLABORATORS`.
+- `access_revoked` — a collaborator's active access was revoked;
+  the recipient's panel shows the read-only "access revoked"
+  card with the revoker's avatar + name.
+- `new_login` — a successful login landed on the user's account;
+  the recipient's panel shows a security card with the device
+  label / User-Agent / IP captured at the HTTP boundary. No
+  actor — the card uses a security-shield avatar and reads
+  "New login from <device>". Belongs to the `security` tab.
 
 **`details.collaboration` snapshot.** Both `invite_sent` and
 `invite_accepted` carry an embedded snapshot of the underlying
@@ -623,7 +676,7 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "In-app notification panel for the bell icon. "
             "`GET /users/me/notifications` returns a cursor-paginated "
             "list, optionally filtered by tab "
-            "(`?category=invites|files|jobs|other`). "
+            "(`?category=teaching|learning|security|files|jobs|other`). "
             "`GET /users/me/notifications/counters` returns per-tab "
             "totals + unread for the segmented control and the bell "
             "badge. `POST /users/me/notifications/{id}/read` flips "

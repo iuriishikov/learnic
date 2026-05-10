@@ -60,7 +60,9 @@ class CategoryToggleSchema(BaseModel):
     new category is added.
     """
 
-    invites: bool
+    teaching: bool
+    learning: bool
+    security: bool
     files: bool
     jobs: bool
     other: bool
@@ -79,13 +81,17 @@ class NotificationPreferencesSchema(BaseModel):
             "examples": [
                 {
                     "push": {
-                        "invites": True,
+                        "teaching": True,
+                        "learning": True,
+                        "security": True,
                         "files": True,
                         "jobs": True,
                         "other": True,
                     },
                     "email": {
-                        "invites": True,
+                        "teaching": True,
+                        "learning": True,
+                        "security": False,
                         "files": False,
                         "jobs": False,
                         "other": False,
@@ -113,7 +119,9 @@ def _toggles_from_dict(
     flags: dict[NotificationCategory, bool],
 ) -> CategoryToggleSchema:
     return CategoryToggleSchema(
-        invites=flags.get(NotificationCategory.INVITES, False),
+        teaching=flags.get(NotificationCategory.TEACHING, False),
+        learning=flags.get(NotificationCategory.LEARNING, False),
+        security=flags.get(NotificationCategory.SECURITY, False),
         files=flags.get(NotificationCategory.FILES, False),
         jobs=flags.get(NotificationCategory.JOBS, False),
         other=flags.get(NotificationCategory.OTHER, False),
@@ -124,7 +132,9 @@ def _toggles_to_dict(
     schema: CategoryToggleSchema,
 ) -> dict[NotificationCategory, bool]:
     return {
-        NotificationCategory.INVITES: schema.invites,
+        NotificationCategory.TEACHING: schema.teaching,
+        NotificationCategory.LEARNING: schema.learning,
+        NotificationCategory.SECURITY: schema.security,
         NotificationCategory.FILES: schema.files,
         NotificationCategory.JOBS: schema.jobs,
         NotificationCategory.OTHER: schema.other,

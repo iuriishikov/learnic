@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from learnic.entities.product.ids import ProductID
+from learnic.infrastructure.configs import SecurityConfig
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle
 from learnic.entities.product_collaboration.enums import CollaborationStatus
@@ -107,12 +108,17 @@ def fake_lineage_reader() -> AsyncMock:
 @pytest.fixture
 def fake_scheduler() -> AsyncMock:
     sched = AsyncMock()
-    sched.schedule_send_collaboration_invite_email = AsyncMock()
-    sched.schedule_send_collaboration_accepted_email = AsyncMock()
-    sched.schedule_send_collaboration_revoked_email = AsyncMock()
-    sched.schedule_send_collaboration_grants_updated_email = AsyncMock()
-    sched.schedule_send_collaboration_left_email = AsyncMock()
+    sched.schedule_send_email = AsyncMock()
     return sched
+
+
+@pytest.fixture
+def security_config() -> SecurityConfig:
+    return SecurityConfig(
+        jwt_secret="test-secret-at-least-32-bytes-long!",
+        frontend_base_url="http://0.0.0.0:8000",
+        cookie_secure=False,
+    )
 
 
 @pytest.fixture

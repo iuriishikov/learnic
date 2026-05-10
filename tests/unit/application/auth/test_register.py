@@ -69,9 +69,11 @@ async def test_register_success_mints_tokens_and_schedules_email(
     fake_email_tokens.issue.assert_awaited_once()
     fake_signup_sessions.issue.assert_awaited_once()
     fake_transaction.commit.assert_awaited_once()
-    fake_scheduler.schedule_send_verification_email.assert_awaited_once_with(
-        "new@example.com", "raw-email-token"
-    )
+    fake_scheduler.schedule_send_email.assert_awaited_once()
+    sent = fake_scheduler.schedule_send_email.await_args.kwargs
+    assert sent["to"] == "new@example.com"
+    assert sent["subject"] == "Подтверждение email"
+    assert len(sent["components"]) > 0
 
 
 async def test_register_rejects_existing_email(
@@ -110,4 +112,4 @@ async def test_register_rejects_existing_email(
 
     fake_entity_saver.add_one.assert_not_called()
     fake_transaction.commit.assert_not_called()
-    fake_scheduler.schedule_send_verification_email.assert_not_called()
+    fake_scheduler.schedule_send_email.assert_not_called()

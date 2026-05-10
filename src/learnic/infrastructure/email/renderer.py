@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Final
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from typing_extensions import override
 
 from learnic.application.common.email.components import (
     EmailButton,
@@ -19,6 +20,10 @@ from learnic.application.common.email.components import (
     InlineBold,
     InlineLink,
     InlineText,
+)
+from learnic.application.common.email.renderer import (
+    EmailRenderer,
+    RenderedEmail,
 )
 from learnic.infrastructure.email.constants import (
     BACKGROUND_COLOR,
@@ -52,7 +57,7 @@ _COMPONENT_TEMPLATES: Final[Mapping[type[EmailComponent], str]] = {
 
 
 def build_environment() -> Environment:
-    """Build the shared Jinja Environment used by :class:`EmailRenderer`.
+    """Build the shared Jinja Environment used by :class:`JinjaEmailRenderer`.
 
     Templates are loaded from ``infrastructure/email/templates`` and HTML
     autoescape is enabled — every ``{{ value }}`` interpolation is XSS-safe
@@ -64,13 +69,31 @@ def build_environment() -> Environment:
     )
 
 
-class EmailRenderer:
-    """Renders typed components into a branded HTML body and text alternative."""
+class JinjaEmailRenderer(EmailRenderer):
+    """Jinja-backed implementation of :class:`EmailRenderer`.
+
+    Renders typed components into the branded base layout (HTML)
+    plus a plain-text alternative. The output goes straight to
+    :meth:`TaskScheduler.schedule_send_email`; nothing else in the
+    code base renders email bodies.
+    """
 
     def __init__(self, env: Environment) -> None:
         self._env: Final = env
 
-    def render_html(
+    @override
+    def render(
+        self,
+        recipient: str,
+        subject: str,
+        components: Sequence[EmailComponent],
+    ) -> RenderedEmail:
+        return RenderedEmail(
+            html=self._render_html(recipient, subject, components),
+            text=self._render_text(components),
+        )
+
+    def _render_html(
         self,
         recipient: str,
         subject: str,
@@ -99,7 +122,7 @@ class EmailRenderer:
             copyright_year=datetime.now(timezone.utc).year,
         )
 
-    def render_text(self, components: Sequence[EmailComponent]) -> str:
+    def _render_text(self, components: Sequence[EmailComponent]) -> str:
         chunks = [self._component_text(c) for c in components]
         body = "\n\n".join(chunk for chunk in chunks if chunk)
         signature = f"С уважением,\nкоманда {BRAND_NAME}"

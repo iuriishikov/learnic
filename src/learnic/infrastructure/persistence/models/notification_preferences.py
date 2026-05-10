@@ -28,7 +28,13 @@ notification_preferences_table = sa.Table(
         primary_key=True,
     ),
     sa.Column(
-        "push_invites",
+        "push_teaching",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("true"),
+    ),
+    sa.Column(
+        "push_learning",
         sa.Boolean,
         nullable=False,
         server_default=sa.text("true"),
@@ -46,13 +52,25 @@ notification_preferences_table = sa.Table(
         server_default=sa.text("true"),
     ),
     sa.Column(
+        "push_security",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("true"),
+    ),
+    sa.Column(
         "push_other",
         sa.Boolean,
         nullable=False,
         server_default=sa.text("true"),
     ),
     sa.Column(
-        "email_invites",
+        "email_teaching",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column(
+        "email_learning",
         sa.Boolean,
         nullable=False,
         server_default=sa.text("false"),
@@ -65,6 +83,12 @@ notification_preferences_table = sa.Table(
     ),
     sa.Column(
         "email_jobs",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column(
+        "email_security",
         sa.Boolean,
         nullable=False,
         server_default=sa.text("false"),

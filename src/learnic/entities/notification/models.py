@@ -9,6 +9,7 @@ from learnic.entities.notification.details import (
     InviteAcceptedDetails,
     InviteDeclinedDetails,
     InviteSentDetails,
+    NewLoginDetails,
     NotificationDetails,
 )
 from learnic.entities.notification.enums import (
@@ -69,7 +70,7 @@ class Notification(BaseEntity[NotificationID]):
             oid=NotificationID(uuid.uuid4()),
             recipient_id=recipient_id,
             kind=NotificationKind.INVITE_SENT,
-            category=NotificationCategory.INVITES,
+            category=NotificationCategory.TEACHING,
             actor_id=actor_id,
             created_at=moment,
             read_at=None,
@@ -95,7 +96,7 @@ class Notification(BaseEntity[NotificationID]):
             oid=NotificationID(uuid.uuid4()),
             recipient_id=recipient_id,
             kind=NotificationKind.INVITE_ACCEPTED,
-            category=NotificationCategory.INVITES,
+            category=NotificationCategory.TEACHING,
             actor_id=actor_id,
             created_at=moment,
             read_at=None,
@@ -122,7 +123,7 @@ class Notification(BaseEntity[NotificationID]):
             oid=NotificationID(uuid.uuid4()),
             recipient_id=recipient_id,
             kind=NotificationKind.INVITE_DECLINED,
-            category=NotificationCategory.INVITES,
+            category=NotificationCategory.TEACHING,
             actor_id=actor_id,
             created_at=moment,
             read_at=None,
@@ -149,7 +150,7 @@ class Notification(BaseEntity[NotificationID]):
             oid=NotificationID(uuid.uuid4()),
             recipient_id=recipient_id,
             kind=NotificationKind.ACCESS_REVOKED,
-            category=NotificationCategory.INVITES,
+            category=NotificationCategory.TEACHING,
             actor_id=actor_id,
             created_at=moment,
             read_at=None,
@@ -157,5 +158,33 @@ class Notification(BaseEntity[NotificationID]):
                 collaboration_id=collaboration_id,
                 product_id=product_id,
                 revoker_id=revoker_id,
+            ),
+        )
+
+    @classmethod
+    def for_new_login(
+        cls,
+        *,
+        recipient_id: UserID,
+        session_id: uuid.UUID,
+        device_label: str | None,
+        user_agent: str | None,
+        ip_address: str | None,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.NEW_LOGIN,
+            category=NotificationCategory.SECURITY,
+            actor_id=None,
+            created_at=moment,
+            read_at=None,
+            details=NewLoginDetails(
+                device_label=device_label,
+                user_agent=user_agent,
+                ip_address=ip_address,
+                session_id=session_id,
             ),
         )

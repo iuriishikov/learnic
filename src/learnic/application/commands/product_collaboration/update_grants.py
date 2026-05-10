@@ -6,6 +6,10 @@ from learnic.application.common.auth.resource_lineage import (
     ResourceLineageReader,
 )
 from learnic.application.common.auth.role_hierarchy import RoleHierarchy
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
@@ -20,6 +24,7 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
@@ -62,6 +67,7 @@ class UpdateCollaborationGrantsCommandHandler:
         lineage: ResourceLineageReader,
         scheduler: TaskScheduler,
         event_bus: ProductEventBus,
+        security: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -72,6 +78,7 @@ class UpdateCollaborationGrantsCommandHandler:
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
+        self._security: Final = security
 
     async def run(
         self,
@@ -108,9 +115,19 @@ class UpdateCollaborationGrantsCommandHandler:
                 collab.collaborator_id,
             )
             if collaborator is not None:
-                await self._scheduler.schedule_send_collaboration_grants_updated_email(
+                base = self._security.frontend_base_url.rstrip("/")
+                link = f"{base}/products/{collab.product_id}"
+                await self._scheduler.schedule_send_email(
                     to=collaborator.email.value,
-                    product_id=collab.product_id,
+                    subject="Изменены права совместной работы",
+                    components=[
+                        EmailParagraph.text("Здравствуйте!"),
+                        EmailParagraph.text(
+                            "Ваши права для совместной работы над продуктом "
+                            "были обновлены.",
+                        ),
+                        EmailButton(label="Открыть продукт", url=link),
+                    ],
                 )
         await publish_product_event(
             self._event_bus,

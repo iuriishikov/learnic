@@ -20,7 +20,6 @@ from learnic.application.common.product_events import (
     make_collaboration_payload,
     publish_product_event,
 )
-from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -45,9 +44,10 @@ class AcceptCollaborationInAppCommandHandler:
     ``actor.email == invited_email`` for by-email invites) is the
     only authorisation gate. The expiration check still applies.
 
-    On success an "invite accepted" email goes to the inviter and a
-    notification is published to them, mirroring the email-link
-    accept flow.
+    On success an in-app notification is published to the inviter,
+    mirroring the email-link accept flow; the accompanying email is
+    dispatched by ``NotificationPublisher`` based on the recipient's
+    preference matrix.
     """
 
     def __init__(
@@ -55,14 +55,12 @@ class AcceptCollaborationInAppCommandHandler:
         transaction: Transaction,
         collab_gateway: ProductCollaborationGateway,
         user_gateway: UserGateway,
-        scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._collab_gateway: Final = collab_gateway
         self._user_gateway: Final = user_gateway
-        self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
 
@@ -86,13 +84,6 @@ class AcceptCollaborationInAppCommandHandler:
             raise InviteEmailMismatchError
         collab.accept_in_app(data.actor_id)
         await self._transaction.commit()
-        inviter = await self._user_gateway.with_id(collab.invited_by)
-        if inviter is not None:
-            await self._scheduler.schedule_send_collaboration_accepted_email(
-                to=inviter.email.value,
-                product_id=collab.product_id,
-                collaborator_id=data.actor_id,
-            )
         await publish_product_event(
             self._event_bus,
             kind=ProductEventKind.COLLABORATION_ACCEPTED,

@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -100,8 +101,43 @@ class AccessRevokedView:
     revoker: UserRefView
 
 
+@dataclass(slots=True, frozen=True)
+class NewLoginView:
+    """Read-side projection of ``new_login`` notifications.
+
+    Sent to the user whenever a successful login lands on their
+    account. ``device_label`` is the short human-readable form of
+    the User-Agent (e.g. ``"Chrome on macOS"``) and is what the
+    panel surfaces by default. ``user_agent`` and ``ip_address``
+    are kept around for a future "see details" expander.
+
+    ``session_id`` mirrors the refresh-token ``family_id`` minted
+    at login. It is the identifier the panel passes to
+    ``DELETE /auth/sessions/{session_id}`` for the inline
+    "Logout from this device" CTA on the security card.
+
+    ``session_revoked`` is the live state of that refresh-token
+    family at read time: ``True`` when the family has been
+    revoked OR has expired OR no longer exists, ``False`` when a
+    matching active row is present. The panel uses it to derive
+    the initial CTA state across reloads — the local
+    "I just clicked Logout" status doesn't survive a refresh, but
+    this flag does.
+    """
+
+    device_label: str | None
+    user_agent: str | None
+    ip_address: str | None
+    session_id: uuid.UUID
+    session_revoked: bool
+
+
 NotificationDetailsView = (
-    InviteSentView | InviteAcceptedView | InviteDeclinedView | AccessRevokedView
+    InviteSentView
+    | InviteAcceptedView
+    | InviteDeclinedView
+    | AccessRevokedView
+    | NewLoginView
 )
 
 

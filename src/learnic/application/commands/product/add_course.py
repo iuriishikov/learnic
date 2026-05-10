@@ -8,14 +8,8 @@ from learnic.application.common.persistence.transaction import (
     Transaction,
 )
 from learnic.application.common.security.html import HtmlSanitizer
-from learnic.application.common.storage.file_storage import FileStorage
+from learnic.application.common.storage.file_uploads import FileUploadService
 from learnic.entities.file.ids import FileID
-from learnic.entities.file.models import File
-from learnic.entities.file.value_objects import (
-    ContentType,
-    FileSize,
-    StorageBucket,
-)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import (
@@ -24,7 +18,6 @@ from learnic.entities.product.value_objects import (
     ProductTitle,
 )
 from learnic.entities.user.models import UserID
-from learnic.infrastructure.configs import S3Config
 
 
 @dataclass(slots=True, frozen=True)
@@ -63,15 +56,13 @@ class AddCourseProductCommandHandler:
         entity_saver: EntitySaver,
         product_reader: ProductReader,
         html_sanitizer: HtmlSanitizer,
-        file_storage: FileStorage,
-        s3_config: S3Config,
+        file_uploads: FileUploadService,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
         self._product_reader: Final = product_reader
         self._html_sanitizer: Final = html_sanitizer
-        self._file_storage: Final = file_storage
-        self._s3_config: Final = s3_config
+        self._file_uploads: Final = file_uploads
 
     async def run(self, data: AddCourseProductCommand) -> ProductID:
         name = ProductTitle(data.name)
@@ -121,19 +112,9 @@ class AddCourseProductCommandHandler:
     ) -> FileID | None:
         if cover is None or cover_content_type is None:
             return None
-        bucket = StorageBucket(self._s3_config.bucket)
-        file = File.create_file(
-            bucket=bucket,
-            content_type=ContentType(cover_content_type),
-            size_bytes=FileSize(len(cover)),
-            uploaded_by=author_id,
+        file = await self._file_uploads.upload(
+            cover,
+            cover_content_type,
+            author_id,
         )
-        await self._file_storage.put(
-            bucket=bucket.value,
-            name=file.storage_name.value,
-            data=cover,
-            content_type=cover_content_type,
-        )
-        self._entity_saver.add_one(file)
-        await self._transaction.flush()
         return file.oid

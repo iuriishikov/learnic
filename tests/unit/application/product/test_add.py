@@ -11,7 +11,6 @@ from learnic.application.commands.product.add_webinar import (
     AddWebinarProductCommandHandler,
 )
 from learnic.application.common.errors import ProductNameAlreadyTakenError
-from learnic.entities.file.models import File
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
@@ -26,8 +25,7 @@ async def test_add_course_persists_product_and_returns_id(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddCourseProductCommandHandler(
@@ -35,8 +33,7 @@ async def test_add_course_persists_product_and_returns_id(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     oid = await handler.run(
@@ -62,7 +59,7 @@ async def test_add_course_persists_product_and_returns_id(
     assert saved.author_id == author_id
     assert saved.webinar_details is None
     assert saved.cover_file_id is None
-    fake_file_storage.put.assert_not_awaited()
+    fake_file_uploads.upload.assert_not_awaited()
     fake_transaction.commit.assert_awaited_once()
 
 
@@ -71,8 +68,7 @@ async def test_add_course_with_cover_creates_file_and_uploads(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddCourseProductCommandHandler(
@@ -80,8 +76,7 @@ async def test_add_course_with_cover_creates_file_and_uploads(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     cover_bytes = b"\x89PNG\r\n\x1a\nfake-png-data"
@@ -96,22 +91,18 @@ async def test_add_course_with_cover_creates_file_and_uploads(
         ),
     )
 
-    # entity_saver.add_one called twice: File then Product
-    assert fake_entity_saver.add_one.call_count == 2
-    saved_file = fake_entity_saver.add_one.call_args_list[0].args[0]
-    saved_product = fake_entity_saver.add_one.call_args_list[1].args[0]
-    assert isinstance(saved_file, File)
+    fake_file_uploads.upload.assert_awaited_once_with(
+        cover_bytes,
+        "image/png",
+        author_id,
+    )
+    uploaded_file = fake_file_uploads.upload.await_args.args[0]
+    assert uploaded_file == cover_bytes
+    fake_entity_saver.add_one.assert_called_once()
+    saved_product = fake_entity_saver.add_one.call_args.args[0]
     assert isinstance(saved_product, Product)
     assert saved_product.oid == oid
-    assert saved_product.cover_file_id == saved_file.oid
-    assert saved_file.uploaded_by == author_id
-    assert saved_file.size_bytes.value == len(cover_bytes)
-    assert saved_file.content_type.value == "image/png"
-    fake_file_storage.put.assert_awaited_once()
-    put_kwargs = fake_file_storage.put.call_args.kwargs
-    assert put_kwargs["data"] == cover_bytes
-    assert put_kwargs["content_type"] == "image/png"
-    fake_transaction.flush.assert_awaited_once()
+    assert saved_product.cover_file_id is not None
     fake_transaction.commit.assert_awaited_once()
 
 
@@ -120,8 +111,7 @@ async def test_add_course_duplicate_name_raises(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     fake_product_reader.name_exists.return_value = True
@@ -130,8 +120,7 @@ async def test_add_course_duplicate_name_raises(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     with pytest.raises(ProductNameAlreadyTakenError):
@@ -143,7 +132,7 @@ async def test_add_course_duplicate_name_raises(
         )
 
     fake_entity_saver.add_one.assert_not_called()
-    fake_file_storage.put.assert_not_awaited()
+    fake_file_uploads.upload.assert_not_awaited()
     fake_transaction.commit.assert_not_called()
 
 
@@ -152,8 +141,7 @@ async def test_add_webinar_persists_product_and_details(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddWebinarProductCommandHandler(
@@ -161,8 +149,7 @@ async def test_add_webinar_persists_product_and_details(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     oid = await handler.run(
@@ -196,7 +183,7 @@ async def test_add_webinar_persists_product_and_details(
     assert details_arg.total_lessons.value == 8
     assert details_arg.default_max_participants is not None
     assert details_arg.default_max_participants.value == 50
-    fake_file_storage.put.assert_not_awaited()
+    fake_file_uploads.upload.assert_not_awaited()
     fake_transaction.commit.assert_awaited_once()
 
 
@@ -205,8 +192,7 @@ async def test_add_webinar_with_cover_uploads_file(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddWebinarProductCommandHandler(
@@ -214,8 +200,7 @@ async def test_add_webinar_with_cover_uploads_file(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     cover = b"jpeg-bytes"
@@ -236,14 +221,12 @@ async def test_add_webinar_with_cover_uploads_file(
         ),
     )
 
-    # add_one called 3 times: File, Product, WebinarDetails
-    assert fake_entity_saver.add_one.call_count == 3
-    saved_file = fake_entity_saver.add_one.call_args_list[0].args[0]
-    saved_product = fake_entity_saver.add_one.call_args_list[1].args[0]
-    assert isinstance(saved_file, File)
+    fake_file_uploads.upload.assert_awaited_once_with(cover, "image/jpeg", author_id)
+    # add_one called 2 times: Product, WebinarDetails (file is persisted by service).
+    assert fake_entity_saver.add_one.call_count == 2
+    saved_product = fake_entity_saver.add_one.call_args_list[0].args[0]
     assert saved_product.oid == oid
-    assert saved_product.cover_file_id == saved_file.oid
-    fake_file_storage.put.assert_awaited_once()
+    assert saved_product.cover_file_id is not None
 
 
 async def test_add_webinar_duplicate_name_raises(
@@ -251,8 +234,7 @@ async def test_add_webinar_duplicate_name_raises(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     fake_product_reader.name_exists.return_value = True
@@ -261,8 +243,7 @@ async def test_add_webinar_duplicate_name_raises(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     with pytest.raises(ProductNameAlreadyTakenError):
@@ -282,8 +263,7 @@ async def test_add_course_name_only(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddCourseProductCommandHandler(
@@ -291,8 +271,7 @@ async def test_add_course_name_only(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     oid = await handler.run(
@@ -309,7 +288,7 @@ async def test_add_course_name_only(
     assert saved.description is None
     assert saved.total_duration_in_hours is None
     assert saved.cover_file_id is None
-    fake_file_storage.put.assert_not_awaited()
+    fake_file_uploads.upload.assert_not_awaited()
     fake_transaction.commit.assert_awaited_once()
 
 
@@ -318,8 +297,7 @@ async def test_add_webinar_name_only_skips_details(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddWebinarProductCommandHandler(
@@ -327,8 +305,7 @@ async def test_add_webinar_name_only_skips_details(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     oid = await handler.run(
@@ -354,8 +331,7 @@ async def test_add_course_invalid_field_does_not_commit(
     fake_entity_saver: MagicMock,
     fake_product_reader: AsyncMock,
     fake_html_sanitizer: MagicMock,
-    fake_file_storage: AsyncMock,
-    fake_s3_config: MagicMock,
+    fake_file_uploads: MagicMock,
     author_id: UserID,
 ) -> None:
     handler = AddCourseProductCommandHandler(
@@ -363,8 +339,7 @@ async def test_add_course_invalid_field_does_not_commit(
         entity_saver=fake_entity_saver,
         product_reader=fake_product_reader,
         html_sanitizer=fake_html_sanitizer,
-        file_storage=fake_file_storage,
-        s3_config=fake_s3_config,
+        file_uploads=fake_file_uploads,
     )
 
     with pytest.raises(ProductFieldTooLongError):

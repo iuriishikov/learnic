@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
@@ -8,6 +9,12 @@ from learnic.application.common.errors import (
 )
 from learnic.application.common.persistence.role import RoleGateway, RoleSaver
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.product_events import (
+    ProductEventBus,
+    ProductEventKind,
+    make_role_payload,
+    publish_product_event,
+)
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
 )
@@ -47,11 +54,13 @@ class UpdateCustomRoleCommandHandler:
         authorizer: Authorizer,
         role_gateway: RoleGateway,
         role_saver: RoleSaver,
+        event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
         self._role_gateway: Final = role_gateway
         self._role_saver: Final = role_saver
+        self._event_bus: Final = event_bus
 
     async def run(self, data: UpdateCustomRoleCommand) -> None:
         role = await self._role_gateway.with_id(data.role_id)
@@ -94,3 +103,16 @@ class UpdateCustomRoleCommandHandler:
         if permissions_changed:
             await self._role_saver.replace_permissions(role)
         await self._transaction.commit()
+        # The DB stamps `updated_at` via `onupdate=func.now()`; the
+        # in-memory entity still carries the load-time value, so
+        # bump it here to a coherent post-commit timestamp before
+        # publishing — keeps the WS payload consistent with what a
+        # subsequent `GET /roles/{id}` would return.
+        role.updated_at = datetime.now(timezone.utc)
+        await publish_product_event(
+            self._event_bus,
+            kind=ProductEventKind.ROLE_UPDATED,
+            product_id=role.product_id,
+            actor_id=data.actor_id,
+            payload=make_role_payload(role),
+        )

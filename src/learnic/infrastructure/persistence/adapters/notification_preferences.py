@@ -20,14 +20,18 @@ from learnic.infrastructure.persistence.models.notification_preferences import (
 
 
 _PUSH_COLUMNS: Final[dict[NotificationCategory, str]] = {
-    NotificationCategory.INVITES: "push_invites",
+    NotificationCategory.TEACHING: "push_teaching",
+    NotificationCategory.LEARNING: "push_learning",
+    NotificationCategory.SECURITY: "push_security",
     NotificationCategory.FILES: "push_files",
     NotificationCategory.JOBS: "push_jobs",
     NotificationCategory.OTHER: "push_other",
 }
 
 _EMAIL_COLUMNS: Final[dict[NotificationCategory, str]] = {
-    NotificationCategory.INVITES: "email_invites",
+    NotificationCategory.TEACHING: "email_teaching",
+    NotificationCategory.LEARNING: "email_learning",
+    NotificationCategory.SECURITY: "email_security",
     NotificationCategory.FILES: "email_files",
     NotificationCategory.JOBS: "email_jobs",
     NotificationCategory.OTHER: "email_other",

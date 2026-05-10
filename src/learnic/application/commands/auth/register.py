@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.components import (
+    EmailButton,
+    EmailParagraph,
+)
 from learnic.application.common.errors import EmailAlreadyRegisteredError
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
@@ -17,6 +21,7 @@ from learnic.application.common.security.signup_sessions import (
 )
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.user.models import User, UserID
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.entities.user.value_objects import (
     Email,
     FirstName,
@@ -24,7 +29,6 @@ from learnic.entities.user.value_objects import (
     Patronymic,
     RawPassword,
 )
-from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,7 +57,7 @@ class RegisterCommandHandler:
         email_tokens: EmailTokenStore,
         signup_sessions: SignupSessionStore,
         scheduler: TaskScheduler,
-        config: SecurityConfig,
+        config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
@@ -92,8 +96,19 @@ class RegisterCommandHandler:
         )
         await self._transaction.commit()
 
-        await self._scheduler.schedule_send_verification_email(
-            user.email.value, verify_token
+        base = self._config.frontend_base_url.rstrip("/")
+        link = f"{base}/confirm/email?token={verify_token}"
+        await self._scheduler.schedule_send_email(
+            to=user.email.value,
+            subject="Подтверждение email",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Подтвердите ваш email, нажав на кнопку ниже:",
+                ),
+                EmailButton(label="Подтвердить email", url=link),
+                EmailParagraph.text("Ссылка действует 24 часа."),
+            ],
         )
         return RegisterResult(
             user_id=user.oid,
