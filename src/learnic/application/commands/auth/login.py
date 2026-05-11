@@ -60,8 +60,8 @@ class LoginCommandHandler:
         if not user.email_verified:
             raise EmailNotVerifiedError
 
-        access = self._access_tokens.issue(user.oid)
         refresh = await self._refresh_store.issue(user.oid, device=data.device)
+        access = self._access_tokens.issue(user.oid, refresh.record.family_id)
         await self._transaction.commit()
 
         try:

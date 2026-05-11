@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 
 import aioboto3
 import httpx
@@ -342,6 +342,28 @@ from learnic.application.commands.user.cover.remove import (
 from learnic.application.commands.user.cover.set import (
     SetUserCoverCommandHandler,
 )
+from learnic.application.commands.user_experience.add import (
+    AddUserExperienceCommandHandler,
+)
+from learnic.application.commands.user_experience.delete import (
+    DeleteUserExperienceCommandHandler,
+)
+from learnic.application.commands.user_experience.icon.remove import (
+    RemoveUserExperienceIconCommandHandler,
+)
+from learnic.application.commands.user_experience.icon.set import (
+    SetUserExperienceIconCommandHandler,
+)
+from learnic.application.commands.user_experience.update import (
+    UpdateUserExperienceCommandHandler,
+)
+from learnic.application.common.persistence.user_experience import (
+    UserExperienceGateway,
+    UserExperienceReader,
+)
+from learnic.application.queries.user_experience.list_for_user import (
+    ListUserExperiencesQueryHandler,
+)
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.email.sender import EmailSender
 from learnic.application.common.persistence.cohort import (
@@ -384,6 +406,9 @@ from learnic.application.common.persistence.product_qa import (
     ProductQAGateway,
     ProductQAReader,
 )
+from learnic.application.common.notifications.channels import (
+    DeliveryChannel,
+)
 from learnic.application.common.notifications.event_bus import (
     NotificationEventBus,
 )
@@ -393,12 +418,14 @@ from learnic.application.common.notifications.gateway import (
 from learnic.application.common.notifications.kind_spec import (
     NotificationKindRegistry,
 )
+from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
 )
 from learnic.application.common.notifications.reader import (
     NotificationReader,
 )
+from learnic.entities.notification.enums import NotificationChannel
 from learnic.application.common.notification_preferences.gateway import (
     NotificationPreferencesGateway,
 )
@@ -635,9 +662,15 @@ from learnic.infrastructure.persistence.adapters.product_qa import (
     ProductQAMapperAlchemy,
     ProductQAReaderAlchemy,
 )
+from learnic.infrastructure.notifications.channels.email import EmailChannel
+from learnic.infrastructure.notifications.channels.in_app import InAppChannel
+from learnic.infrastructure.notifications.channels.web_push import (
+    WebPushChannel,
+)
 from learnic.infrastructure.notifications.event_bus_redis import (
     NotificationEventBusRedis,
 )
+from learnic.infrastructure.notifications.notifier import NotifierService
 from learnic.infrastructure.notifications.specs import default_registry
 from learnic.infrastructure.persistence.adapters.notification import (
     NotificationGatewayAlchemy,
@@ -701,6 +734,10 @@ from learnic.infrastructure.persistence.adapters.transaction import (
 from learnic.infrastructure.persistence.adapters.user import (
     UserMapperAlchemy,
     UserReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.user_experience import (
+    UserExperienceMapperAlchemy,
+    UserExperienceReaderAlchemy,
 )
 from learnic.infrastructure.collaboration.event_bus_redis import (
     ContentEventBusRedis,
@@ -832,6 +869,14 @@ class GatewaysProvider(Provider):
     product_qa_reader = provide(
         ProductQAReaderAlchemy,
         provides=ProductQAReader,
+    )
+    user_experience_gateway = provide(
+        UserExperienceMapperAlchemy,
+        provides=UserExperienceGateway,
+    )
+    user_experience_reader = provide(
+        UserExperienceReaderAlchemy,
+        provides=UserExperienceReader,
     )
     cohort_gateway = provide(
         CohortMapperAlchemy,
@@ -1114,6 +1159,34 @@ class NotificationEventsProvider(Provider):
         return default_registry()
 
 
+class NotificationChannelsProvider(Provider):
+    scope = Scope.REQUEST
+
+    email_channel = provide(EmailChannel)
+    push_channel = provide(WebPushChannel)
+    in_app_channel = provide(InAppChannel)
+    notifier = provide(NotifierService, provides=Notifier)
+
+    @provide
+    def channels(
+        self,
+        email_channel: EmailChannel,
+        push_channel: WebPushChannel,
+        in_app_channel: InAppChannel,
+    ) -> Mapping[NotificationChannel, DeliveryChannel]:
+        # Channel registration is here (not in IoC of each spec) because
+        # the spec doesn't choose channels — the publisher does. Adding
+        # a new channel = a new ``provide(...)`` line above plus a new
+        # entry in this mapping; spec classes get the new channel
+        # automatically (default :meth:`render` returns ``None`` so
+        # uninterested kinds skip it).
+        return {
+            NotificationChannel.EMAIL: email_channel,
+            NotificationChannel.PUSH: push_channel,
+            NotificationChannel.IN_APP: in_app_channel,
+        }
+
+
 class ConfirmEventsProvider(Provider):
     scope = Scope.APP
 
@@ -1156,6 +1229,15 @@ class InteractorsProvider(Provider):
     change_user_last_name = provide(ChangeUserLastNameCommandHandler)
     change_user_patronymic = provide(ChangeUserPatronymicCommandHandler)
     change_user_description = provide(ChangeUserDescriptionCommandHandler)
+
+    add_user_experience = provide(AddUserExperienceCommandHandler)
+    update_user_experience = provide(UpdateUserExperienceCommandHandler)
+    delete_user_experience = provide(DeleteUserExperienceCommandHandler)
+    set_user_experience_icon = provide(SetUserExperienceIconCommandHandler)
+    remove_user_experience_icon = provide(
+        RemoveUserExperienceIconCommandHandler,
+    )
+    list_user_experiences = provide(ListUserExperiencesQueryHandler)
 
     add_course_product = provide(AddCourseProductCommandHandler)
     add_webinar_product = provide(AddWebinarProductCommandHandler)
@@ -1409,6 +1491,7 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         CollaborationProvider(),
         ProductEventsProvider(),
         NotificationEventsProvider(),
+        NotificationChannelsProvider(),
         ConfirmEventsProvider(),
         EmailProvider(),
         InteractorsProvider(),

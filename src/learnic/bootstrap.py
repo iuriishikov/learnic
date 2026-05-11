@@ -39,6 +39,9 @@ from learnic.infrastructure.persistence.models.product_collaboration import (
 )
 from learnic.infrastructure.persistence.models.role import map_role_table
 from learnic.infrastructure.persistence.models.user import map_user_table
+from learnic.infrastructure.persistence.models.user_experience import (
+    map_user_experience_table,
+)
 from learnic.infrastructure.persistence.models.webinar_enrollment import (
     map_webinar_enrollment_table,
 )
@@ -110,6 +113,10 @@ from learnic.presentation.http.routes.webinar_session import (
     router as webinar_session_router,
 )
 from learnic.presentation.http.routes.user import router as user_router
+from learnic.presentation.http.routes.user_experience import (
+    me_router as my_user_experiences_router,
+    router as user_experiences_router,
+)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -122,6 +129,8 @@ def setup_routes(app: FastAPI) -> None:
     app.include_router(root_router)
     app.include_router(auth_router)
     app.include_router(user_router)
+    app.include_router(user_experiences_router)
+    app.include_router(my_user_experiences_router)
     app.include_router(product_router)
     app.include_router(product_course_router)
     app.include_router(product_qa_router)
@@ -158,6 +167,7 @@ def setup_routes(app: FastAPI) -> None:
 
 def setup_map_tables() -> None:
     map_user_table()
+    map_user_experience_table()
     map_file_table()
     map_product_table()
     map_webinar_details_table()

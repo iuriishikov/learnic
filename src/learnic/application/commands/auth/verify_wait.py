@@ -65,8 +65,8 @@ class VerifyWaitCommandHandler:
         if not user.email_verified:
             return VerifyWaitResult(ready=False)
 
-        access = self._access_tokens.issue(user.oid)
         refresh = await self._refresh_store.issue(user.oid, device=data.device)
+        access = self._access_tokens.issue(user.oid, refresh.record.family_id)
         await self._signup_sessions.revoke(data.signup_session_token)
         await self._transaction.commit()
 

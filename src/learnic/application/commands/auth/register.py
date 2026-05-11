@@ -6,6 +6,8 @@ from learnic.application.common.email.components import (
     EmailParagraph,
 )
 from learnic.application.common.errors import EmailAlreadyRegisteredError
+from learnic.application.common.notifications.channels import EmailPayload
+from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
@@ -16,12 +18,15 @@ from learnic.application.common.security.email_tokens import (
     EmailTokenStore,
 )
 from learnic.application.common.security.passwords import PasswordHasher
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.signup_sessions import (
     SignupSessionStore,
 )
-from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.entities.notification.enums import (
+    NotificationCategory,
+    NotificationChannel,
+)
 from learnic.entities.user.models import User, UserID
-from learnic.application.common.security.policies import SecurityPolicies
 from learnic.entities.user.value_objects import (
     Email,
     FirstName,
@@ -56,7 +61,7 @@ class RegisterCommandHandler:
         hasher: PasswordHasher,
         email_tokens: EmailTokenStore,
         signup_sessions: SignupSessionStore,
-        scheduler: TaskScheduler,
+        notifier: Notifier,
         config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
@@ -65,7 +70,7 @@ class RegisterCommandHandler:
         self._hasher: Final = hasher
         self._email_tokens: Final = email_tokens
         self._signup_sessions: Final = signup_sessions
-        self._scheduler: Final = scheduler
+        self._notifier: Final = notifier
         self._config: Final = config
 
     async def run(self, data: RegisterCommand) -> RegisterResult:
@@ -98,17 +103,22 @@ class RegisterCommandHandler:
 
         base = self._config.frontend_base_url.rstrip("/")
         link = f"{base}/confirm/email?token={verify_token}"
-        await self._scheduler.schedule_send_email(
-            to=user.email.value,
-            subject="Подтверждение email",
-            components=[
-                EmailParagraph.text("Здравствуйте!"),
-                EmailParagraph.text(
-                    "Подтвердите ваш email, нажав на кнопку ниже:",
+        await self._notifier.send(
+            recipient_id=user.oid,
+            category=NotificationCategory.SECURITY,
+            payloads={
+                NotificationChannel.EMAIL: EmailPayload(
+                    subject="Подтверждение email",
+                    components=[
+                        EmailParagraph.text("Здравствуйте!"),
+                        EmailParagraph.text(
+                            "Подтвердите ваш email, нажав на кнопку ниже:",
+                        ),
+                        EmailButton(label="Подтвердить email", url=link),
+                        EmailParagraph.text("Ссылка действует 24 часа."),
+                    ],
                 ),
-                EmailButton(label="Подтвердить email", url=link),
-                EmailParagraph.text("Ссылка действует 24 часа."),
-            ],
+            },
         )
         return RegisterResult(
             user_id=user.oid,

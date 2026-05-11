@@ -95,7 +95,6 @@ from learnic.application.commands.course_module.update_description import (
 from learnic.application.common.errors import (
     CrossCourseLessonMoveError,
     InvalidReorderError,
-    NotACourseError,
     WrongBlockTypeError,
 )
 from learnic.application.common.persistence.course_content import (
@@ -130,6 +129,7 @@ from learnic.entities.course_module.constants import (
 )
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
@@ -139,7 +139,7 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_OWNER_FIELD_MAP,
     CROSS_COURSE_LESSON_MOVE_RULE,
     INVALID_REORDER_RULE,
-    NOT_A_COURSE_RULE,
+    PRODUCT_DOES_NOT_SUPPORT_RULE,
     WRONG_BLOCK_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
@@ -695,7 +695,7 @@ class CourseDraftSchema(BaseModel):
 
 
 _COURSE_AUTHOR_MAP = AUTHENTICATED_OWNER_FIELD_MAP | {
-    NotACourseError: NOT_A_COURSE_RULE,
+    ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE,
 }
 
 
@@ -731,7 +731,7 @@ async def add_module(
         InvalidTokenError: HTTP 401.
         NotResourceOwnerError: HTTP 403 — caller isn't the course author.
         EntityNotFoundError: HTTP 404 — course doesn't exist.
-        NotACourseError: HTTP 409 — product is a webinar.
+        ProductDoesNotSupportError: HTTP 409 — product is not a course.
         FieldError: HTTP 422 — VO invariants violated.
     """
     ctx = await auth.authenticate(request)
@@ -1166,7 +1166,7 @@ async def get_draft(
         InsufficientPermissionsError: HTTP 403 — caller has no
             collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404 — course not found.
-        NotACourseError: HTTP 409 — product is a webinar.
+        ProductDoesNotSupportError: HTTP 409 — product is not a course.
     """
     ctx = await auth.authenticate(request)
     view = await interactor.run(
@@ -1961,7 +1961,8 @@ class ResetCourseDraftSchema(BaseModel):
     operation_id="resetCourseDraft",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP | {NotACourseError: NOT_A_COURSE_RULE},
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE},
 )
 async def reset_draft(
     request: Request,
@@ -1998,7 +1999,7 @@ async def reset_draft(
         NotResourceOwnerError: HTTP 403 — caller isn't the course author.
         EntityNotFoundError: HTTP 404 — course not found, release
             not found, or the release belongs to a different course.
-        NotACourseError: HTTP 409 — product is a webinar.
+        ProductDoesNotSupportError: HTTP 409 — product is not a course.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(

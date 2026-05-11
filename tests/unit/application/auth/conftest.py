@@ -89,14 +89,23 @@ def fake_scheduler() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_notifier() -> AsyncMock:
+    """Stub ``Notifier`` for handlers that send transient notifications."""
+    notifier = AsyncMock()
+    notifier.send = AsyncMock()
+    return notifier
+
+
+@pytest.fixture
 def fake_access_tokens() -> MagicMock:
     svc = MagicMock()
     svc.issue = MagicMock(
-        side_effect=lambda uid: IssuedAccessToken(
+        side_effect=lambda uid, family_id: IssuedAccessToken(
             token="jwt",
             payload=AccessTokenPayload(
                 user_id=uid,
                 jti=uuid.uuid4(),
+                family_id=family_id,
                 expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
             ),
         )
@@ -132,8 +141,8 @@ def fake_refresh_store() -> AsyncMock:
 @pytest.fixture
 def fake_denylist() -> AsyncMock:
     dl = AsyncMock()
-    dl.is_denied = AsyncMock(return_value=False)
-    dl.deny = AsyncMock()
+    dl.is_family_denied = AsyncMock(return_value=False)
+    dl.deny_family = AsyncMock()
     dl.cleanup_expired = AsyncMock(return_value=0)
     return dl
 

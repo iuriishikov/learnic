@@ -11,13 +11,14 @@ from learnic.application.common.email.components import (
     EmailParagraph,
 )
 from learnic.application.common.errors import EntityNotFoundError
+from learnic.application.common.notifications.channels import EmailPayload
+from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
     ProductCollaborationSaver,
 )
 from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
-from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
     ProductEventBus,
     ProductEventKind,
@@ -25,10 +26,13 @@ from learnic.application.common.product_events import (
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
-from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
+)
+from learnic.entities.notification.enums import (
+    NotificationCategory,
+    NotificationChannel,
 )
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -63,9 +67,8 @@ class UpdateCollaborationGrantsCommandHandler:
         collab_gateway: ProductCollaborationGateway,
         collab_saver: ProductCollaborationSaver,
         role_gateway: RoleGateway,
-        user_gateway: UserGateway,
         lineage: ResourceLineageReader,
-        scheduler: TaskScheduler,
+        notifier: Notifier,
         event_bus: ProductEventBus,
         security: SecurityPolicies,
     ) -> None:
@@ -74,9 +77,8 @@ class UpdateCollaborationGrantsCommandHandler:
         self._hierarchy: Final = hierarchy
         self._collab_gateway: Final = collab_gateway
         self._collab_saver: Final = collab_saver
-        self._user_gateway: Final = user_gateway
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
-        self._scheduler: Final = scheduler
+        self._notifier: Final = notifier
         self._event_bus: Final = event_bus
         self._security: Final = security
 
@@ -111,24 +113,25 @@ class UpdateCollaborationGrantsCommandHandler:
         await self._collab_saver.replace_grants(collab)
         await self._transaction.commit()
         if collab.collaborator_id is not None:
-            collaborator = await self._user_gateway.with_id(
-                collab.collaborator_id,
+            base = self._security.frontend_base_url.rstrip("/")
+            link = f"{base}/products/{collab.product_id}"
+            await self._notifier.send(
+                recipient_id=collab.collaborator_id,
+                category=NotificationCategory.TEACHING,
+                payloads={
+                    NotificationChannel.EMAIL: EmailPayload(
+                        subject="Изменены права совместной работы",
+                        components=[
+                            EmailParagraph.text("Здравствуйте!"),
+                            EmailParagraph.text(
+                                "Ваши права для совместной работы над "
+                                "продуктом были обновлены.",
+                            ),
+                            EmailButton(label="Открыть продукт", url=link),
+                        ],
+                    ),
+                },
             )
-            if collaborator is not None:
-                base = self._security.frontend_base_url.rstrip("/")
-                link = f"{base}/products/{collab.product_id}"
-                await self._scheduler.schedule_send_email(
-                    to=collaborator.email.value,
-                    subject="Изменены права совместной работы",
-                    components=[
-                        EmailParagraph.text("Здравствуйте!"),
-                        EmailParagraph.text(
-                            "Ваши права для совместной работы над продуктом "
-                            "были обновлены.",
-                        ),
-                        EmailButton(label="Открыть продукт", url=link),
-                    ],
-                )
         await publish_product_event(
             self._event_bus,
             kind=ProductEventKind.COLLABORATION_GRANTS_UPDATED,

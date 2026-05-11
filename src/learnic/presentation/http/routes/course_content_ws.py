@@ -55,7 +55,7 @@ from learnic.application.common.errors import (
     InvalidTokenError,
 )
 from learnic.application.common.persistence.product import ProductGateway
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import Authenticator
@@ -93,7 +93,9 @@ async def course_content_ws(
 
         product_gateway = await request_scope.get(ProductGateway)
         product = await product_gateway.with_id(ProductID(course_id))
-        if product is None or product.type is not ProductType.COURSE:
+        if product is None or not product.supports(
+            ProductCapability.HAS_COURSE_CONTENT,
+        ):
             await websocket.close(code=4404, reason="course not found")
             return
 

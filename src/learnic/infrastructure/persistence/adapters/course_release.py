@@ -21,12 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.course_content import (
-    CodeBlockView,
-    CodeTabView,
-    HtmlBlockView,
-    KatexBlockView,
     LessonBlockView,
-    RutubeVideoBlockView,
 )
 from learnic.application.common.persistence.course_release import (
     CourseReleaseContentView,
@@ -37,8 +32,6 @@ from learnic.application.common.persistence.course_release import (
     ReleaseLessonView,
     ReleaseModuleView,
 )
-from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.course_release.enums import CourseReleaseKind
@@ -46,6 +39,10 @@ from learnic.entities.course_release.ids import CourseReleaseID
 from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.blocks.registry import (
+    BLOCK_SPECS,
+    spec_for_row,
+)
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
     html_blocks_table,
@@ -329,41 +326,15 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
         rows: Sequence[sa.Row[Any]],
         mapping: _IdMap,
     ) -> dict[sa.Table, list[dict[str, Any]]]:
+        """Route each block row to its subtype INSERT bucket via the registry."""
         buckets: dict[sa.Table, list[dict[str, Any]]] = {
-            course_release_html_blocks_table: [],
-            course_release_katex_blocks_table: [],
-            course_release_rutube_video_blocks_table: [],
-            course_release_code_blocks_table: [],
+            spec.release_subtype_table: [] for spec in BLOCK_SPECS.values()
         }
         for row in rows:
-            new_oid = mapping[row.oid]
-            block_type = (
-                row.type if isinstance(row.type, BlockType) else BlockType(row.type)
+            spec = spec_for_row(row)
+            buckets[spec.release_subtype_table].append(
+                spec.release_insert_value(row, mapping[row.oid]),
             )
-            if block_type is BlockType.HTML:
-                buckets[course_release_html_blocks_table].append(
-                    {"oid": new_oid, "html": row.html},
-                )
-            elif block_type is BlockType.KATEX:
-                buckets[course_release_katex_blocks_table].append(
-                    {"oid": new_oid, "source": row.source},
-                )
-            elif block_type is BlockType.CODE:
-                # Snapshots take the JSONB tabs payload as-is —
-                # release content is immutable so a deep copy isn't
-                # required (psycopg/asyncpg encodes the dict to JSON
-                # on insert independently per row).
-                buckets[course_release_code_blocks_table].append(
-                    {"oid": new_oid, "tabs": row.code_tabs},
-                )
-            else:  # RUTUBE_VIDEO
-                buckets[course_release_rutube_video_blocks_table].append(
-                    {
-                        "oid": new_oid,
-                        "external_id": row.rutube_external_id,
-                        "title": row.rutube_title,
-                    },
-                )
         return buckets
 
 
@@ -407,42 +378,8 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
 
 
 def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
-    block_type = row.type if isinstance(row.type, BlockType) else BlockType(row.type)
-    if block_type is BlockType.HTML:
-        return HtmlBlockView(
-            type=BlockType.HTML,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            html=row.html,
-        )
-    if block_type is BlockType.KATEX:
-        return KatexBlockView(
-            type=BlockType.KATEX,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            source=row.source,
-        )
-    if block_type is BlockType.CODE:
-        return CodeBlockView(
-            type=BlockType.CODE,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            tabs=[
-                CodeTabView(
-                    label=item["label"],
-                    source=item["source"],
-                    language=item["language"],
-                )
-                for item in row.code_tabs
-            ],
-        )
-    return RutubeVideoBlockView(
-        type=BlockType.RUTUBE_VIDEO,
-        oid=LessonBlockID(row.oid),
-        position=row.position,
-        external_id=row.rutube_external_id,
-        title=row.rutube_title,
-    )
+    """Hydrate a release block row into its view via the shared registry."""
+    return spec_for_row(row).row_to_view(row)
 
 
 class CourseReleaseReaderAlchemy(CourseReleaseReader):

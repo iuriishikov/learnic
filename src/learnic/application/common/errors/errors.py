@@ -95,26 +95,6 @@ class ProductNameAlreadyTakenError(ApplicationError):
         self.name = name
 
 
-class NotAWebinarError(ApplicationError):
-    """Raised when a webinar-only operation is attempted on a course product."""
-
-    def __init__(self, product_id: object) -> None:
-        super().__init__(
-            f"Product {product_id!r} is not a webinar product",
-        )
-        self.product_id = product_id
-
-
-class NotACourseError(ApplicationError):
-    """Raised when a course-only operation is attempted on a webinar product."""
-
-    def __init__(self, product_id: object) -> None:
-        super().__init__(
-            f"Product {product_id!r} is not a course product",
-        )
-        self.product_id = product_id
-
-
 class EnrollmentClosedError(ApplicationError):
     """Raised when enrolling into a cohort whose status isn't ``OPEN``."""
 

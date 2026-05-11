@@ -35,7 +35,10 @@ class RefreshCommandHandler:
             data.refresh_token,
             device=data.device,
         )
-        access = self._access_tokens.issue(refresh.record.user_id)
+        access = self._access_tokens.issue(
+            refresh.record.user_id,
+            refresh.record.family_id,
+        )
         await self._transaction.commit()
         return TokenPair(
             access_token=access.token,

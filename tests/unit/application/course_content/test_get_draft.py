@@ -6,8 +6,8 @@ import pytest
 from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
-    NotACourseError,
 )
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.application.common.persistence.course_content import (
     CourseDraftView,
     DraftLessonView,
@@ -130,7 +130,7 @@ async def test_get_draft_webinar_raises() -> None:
         product_gateway=product_gateway,
         content_reader=reader,
     )
-    with pytest.raises(NotACourseError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             GetCourseDraftQuery(
                 actor_id=author_id,

@@ -23,9 +23,9 @@ from learnic.application.common.errors import (
     AlreadyEnrolledError,
     CannotEnrollInUnreleasedCourseError,
     InsufficientPermissionsError,
-    NotACourseError,
     NotResourceOwnerError,
 )
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.role.permissions import Permission
 from learnic.entities.course_enrollment.enums import (
     CourseEnrollmentStatus,
@@ -177,7 +177,7 @@ async def test_enroll_into_webinar_raises(
         release_gateway=fake_release_gateway,
     )
 
-    with pytest.raises(NotACourseError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             EnrollStudentInCourseCommand(
                 student_id=student_id,

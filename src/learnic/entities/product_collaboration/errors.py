@@ -25,32 +25,20 @@ class EmptyGrantsError(FieldError):
     """
 
 
-class CannotAcceptInThisStatusError(DomainError):
-    """Raised when ``accept()`` is called on a non-pending collaboration."""
+class OperationNotAllowedInStatusError(DomainError):
+    """Raised when an operation is forbidden in the current status.
 
-    status: str
-
-
-class CannotDeclineInThisStatusError(DomainError):
-    """Raised when ``decline_in_app()`` is called on a non-pending collaboration."""
-
-    status: str
-
-
-class CannotRevokeInThisStatusError(DomainError):
-    """Raised when ``revoke()`` is called on a terminal collaboration.
-
-    Both ``REVOKED`` and ``DECLINED`` are terminal — the row is
-    preserved for audit and cannot be revoked again.
+    Carries the offending ``status`` and ``operation`` so callers
+    (the HTTP layer, logs, tests) can branch without parsing free
+    text. Replaces the legacy per-operation error family
+    (``CannotAcceptInThisStatusError`` / ``CannotDeclineInThisStatusError``
+    / ``CannotRevokeInThisStatusError`` / ``CannotMutateInactiveCollaborationError``);
+    the state-machine table in ``state_machine.py`` decides which
+    operations apply in which status.
     """
 
     status: str
-
-
-class CannotMutateInactiveCollaborationError(DomainError):
-    """Raised when grants are updated on a non-active collaboration."""
-
-    status: str
+    operation: str
 
 
 class InviteTokenMismatchError(DomainError):

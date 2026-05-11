@@ -5,7 +5,12 @@ from typing import Self
 
 from learnic.entities.common.base_entity import BaseEntity
 from learnic.entities.file.ids import FileID
+from learnic.entities.product.capabilities import (
+    PRODUCT_TYPE_CAPABILITIES,
+    ProductCapability,
+)
 from learnic.entities.product.enums import ProductStatus, ProductType
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import (
     AccessWindow,
@@ -53,6 +58,24 @@ class Product(BaseEntity[ProductID]):
     total_duration_in_hours: DurationHours | None = None
     cover_file_id: FileID | None = None
     webinar_details: WebinarDetails | None = None
+
+    def supports(self, capability: ProductCapability) -> bool:
+        """Return whether this product's type advertises ``capability``."""
+        return capability in PRODUCT_TYPE_CAPABILITIES[self.type]
+
+    def require_supports(self, capability: ProductCapability) -> None:
+        """Raise :class:`ProductDoesNotSupportError` if ``capability`` is unsupported.
+
+        Gates type-specific operations from one place instead of
+        repeating ``if product.type is not ProductType.X: raise NotAXError``
+        in every handler.
+        """
+        if not self.supports(capability):
+            raise ProductDoesNotSupportError(
+                product_id=self.oid,
+                product_type=self.type.value,
+                capability=capability.value,
+            )
 
     def rename(self, new_name: ProductTitle) -> None:
         self.name = new_name

@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Final, final
 
 from learnic.application.common.errors import EntityNotFoundError
@@ -10,26 +10,28 @@ from learnic.application.common.security.refresh_tokens import (
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
 class RevokeSessionCommand:
     user_id: UserID
     family_id: uuid.UUID
-    current_access_jti: uuid.UUID | None = None
-    current_access_expires_at: datetime | None = None
 
 
 @final
 class RevokeSessionCommandHandler:
     """Revoke a single refresh-token family owned by the caller.
 
-    The presence-check and ownership-check are folded into the same UPDATE
-    so that a missing or cross-user ``family_id`` produces an
-    ``EntityNotFoundError`` (HTTP 404) without leaking which case applies.
-    When the caller revokes the session they are *currently using* (e.g.
-    "Sign out this device"), the in-flight access JTI is added to the
-    denylist so the access cookie cannot outlive the refresh family.
+    Presence-check and ownership-check fold into the same UPDATE so
+    that a missing or cross-user ``family_id`` produces an
+    ``EntityNotFoundError`` (HTTP 404) without leaking which case
+    applies. Every successful revocation also writes the family to
+    the family denylist for one access-TTL window — that's how every
+    access JWT carrying the same ``fid`` claim (the suspect device's
+    cookie + any tabs that refreshed off it within the family) gets
+    rejected on the next request, instead of living to its natural
+    ``exp``.
     """
 
     def __init__(
@@ -37,10 +39,14 @@ class RevokeSessionCommandHandler:
         transaction: Transaction,
         refresh_store: RefreshTokenStore,
         denylist: TokenDenylist,
+        security_config: SecurityConfig,
     ) -> None:
         self._transaction: Final = transaction
         self._refresh_store: Final = refresh_store
         self._denylist: Final = denylist
+        self._access_ttl: Final = timedelta(
+            seconds=security_config.access_token_ttl_seconds,
+        )
 
     async def run(self, data: RevokeSessionCommand) -> None:
         revoked = await self._refresh_store.revoke_family_for_user(
@@ -49,12 +55,8 @@ class RevokeSessionCommandHandler:
         )
         if not revoked:
             raise EntityNotFoundError(data.family_id)
-        if (
-            data.current_access_jti is not None
-            and data.current_access_expires_at is not None
-        ):
-            await self._denylist.deny(
-                data.current_access_jti,
-                data.current_access_expires_at,
-            )
+        await self._denylist.deny_family(
+            data.family_id,
+            datetime.now(timezone.utc) + self._access_ttl,
+        )
         await self._transaction.commit()

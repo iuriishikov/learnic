@@ -95,8 +95,15 @@ class RefreshTokenStore(Protocol):
         """
         ...
 
-    async def revoke_all_for_user(self, user_id: UserID) -> None:
-        """Revoke every active refresh token for ``user_id``."""
+    async def revoke_all_for_user(self, user_id: UserID) -> set[uuid.UUID]:
+        """Revoke every active refresh token for ``user_id``.
+
+        Returns the set of distinct ``family_id`` values that were
+        actually flipped to revoked. Empty set when the user already
+        had no active sessions. Callers use this to populate the
+        family denylist so the matching access JWTs (still valid by
+        ``exp``) are rejected on the next request.
+        """
         ...
 
     async def resolve(self, presented: str) -> RefreshTokenRecord | None:

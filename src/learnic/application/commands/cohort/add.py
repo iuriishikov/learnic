@@ -3,10 +3,7 @@ from datetime import date
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotAWebinarError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
@@ -15,7 +12,7 @@ from learnic.application.common.persistence.transaction import (
 from learnic.entities.cohort.ids import CohortID
 from learnic.entities.cohort.models import Cohort
 from learnic.entities.cohort.value_objects import CohortName
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import ParticipantsLimit
 from learnic.entities.role.permissions import Permission
@@ -63,8 +60,7 @@ class AddCohortCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.MANAGE_RELEASES,
         )
-        if product.type is not ProductType.WEBINAR:
-            raise NotAWebinarError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COHORTS)
         cohort = Cohort.create(
             webinar_id=data.product_id,
             host_id=data.host_id,

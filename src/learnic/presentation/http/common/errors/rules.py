@@ -29,7 +29,7 @@ from learnic.application.common.errors import (
 )
 from learnic.entities.common.errors import FieldError
 from learnic.entities.product_collaboration.errors import (
-    CannotRevokeInThisStatusError,
+    OperationNotAllowedInStatusError,
 )
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
@@ -132,15 +132,17 @@ CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
-NOT_A_WEBINAR_RULE: Final[Rule] = rule(
+PRODUCT_DOES_NOT_SUPPORT_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
-    translator=_named,
+    translator=_field,
 )
+"""Replaces the legacy ``NOT_A_COURSE_RULE`` / ``NOT_A_WEBINAR_RULE``.
 
-NOT_A_COURSE_RULE: Final[Rule] = rule(
-    status=HTTPStatus.CONFLICT,
-    translator=_named,
-)
+Body shape: ``{"error": "ProductDoesNotSupport", "product_id": ...,
+"product_type": "course"|"webinar", "capability": "<capability>"}`` —
+the SPA can render a precise "this operation isn't available for X
+products" message without parsing free-form text.
+"""
 
 ENROLLMENT_CLOSED_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
@@ -238,15 +240,19 @@ COLLABORATION_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
 }
 
-CANNOT_REVOKE_IN_THIS_STATUS_RULE: Final[Rule] = rule(
+OPERATION_NOT_ALLOWED_IN_STATUS_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
-    translator=_named,
+    translator=_field,
 )
+"""409 with body ``{"error": "OperationNotAllowedInStatusError",
+"status": "...", "operation": "..."}`` for any collaboration mutation
+forbidden by the state machine (accept/decline/revoke/replace_grants
+in the wrong status)."""
 
 COLLABORATION_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
-    CannotRevokeInThisStatusError: CANNOT_REVOKE_IN_THIS_STATUS_RULE,
+    OperationNotAllowedInStatusError: OPERATION_NOT_ALLOWED_IN_STATUS_RULE,
 }
 
 ROLE_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {

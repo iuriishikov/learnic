@@ -7,10 +7,7 @@ from learnic.application.common.collaboration import (
     ContentEventKind,
     publish_content_event,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotACourseError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.course_draft import (
     CourseDraftResetter,
 )
@@ -20,7 +17,7 @@ from learnic.application.common.persistence.course_release import (
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.entities.course_release.ids import CourseReleaseID
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -79,8 +76,7 @@ class ResetCourseDraftCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.MANAGE_RELEASES,
         )
-        if product.type is not ProductType.COURSE:
-            raise NotACourseError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COURSE_CONTENT)
 
         release = await self._release_gateway.with_id(data.release_id)
         if release is None or release.product_id != data.product_id:

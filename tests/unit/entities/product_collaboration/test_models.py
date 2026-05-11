@@ -9,12 +9,10 @@ from learnic.entities.product_collaboration.constants import (
 )
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.errors import (
-    CannotAcceptInThisStatusError,
-    CannotMutateInactiveCollaborationError,
-    CannotRevokeInThisStatusError,
     EmptyGrantsError,
     InviteTokenExpiredError,
     InviteTokenMismatchError,
+    OperationNotAllowedInStatusError,
 )
 from learnic.entities.product_collaboration.grant import CollaborationGrant
 from learnic.entities.product_collaboration.models import (
@@ -143,7 +141,7 @@ class TestAccept:
         token = InviteToken("plain-token-value")
         collab = self._make_pending(token=token)
         collab.accept(_user(), token)
-        with pytest.raises(CannotAcceptInThisStatusError):
+        with pytest.raises(OperationNotAllowedInStatusError):
             collab.accept(_user(), token)
 
     def test_accept_rejects_expired(self) -> None:
@@ -195,7 +193,7 @@ class TestAcceptInApp:
         token = InviteToken("plain-token-value")
         collab = self._make_pending(token=token)
         collab.accept_in_app(_user())
-        with pytest.raises(CannotAcceptInThisStatusError):
+        with pytest.raises(OperationNotAllowedInStatusError):
             collab.accept_in_app(_user())
 
     def test_accept_in_app_rejects_expired(self) -> None:
@@ -246,7 +244,7 @@ class TestRevoke:
             token=token,
         )
         collab.revoke()
-        with pytest.raises(CannotRevokeInThisStatusError):
+        with pytest.raises(OperationNotAllowedInStatusError):
             collab.revoke()
 
 
@@ -260,7 +258,7 @@ class TestReplaceGrants:
             grants=_grants(),
             token=token,
         )
-        with pytest.raises(CannotMutateInactiveCollaborationError):
+        with pytest.raises(OperationNotAllowedInStatusError):
             collab.replace_grants(_grants())
 
     def test_active_replace_swaps_grants(self) -> None:

@@ -9,6 +9,8 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     NotResourceOwnerError,
 )
+from learnic.application.common.notifications.channels import EmailPayload
+from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
 )
@@ -17,7 +19,6 @@ from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
 )
 from learnic.application.common.persistence.transaction import Transaction
-from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
     ProductEventBus,
     ProductEventKind,
@@ -25,7 +26,10 @@ from learnic.application.common.product_events import (
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
-from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.entities.notification.enums import (
+    NotificationCategory,
+    NotificationChannel,
+)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
@@ -52,8 +56,7 @@ class LeaveProductCommandHandler:
         transaction: Transaction,
         product_gateway: ProductGateway,
         collab_gateway: ProductCollaborationGateway,
-        user_gateway: UserGateway,
-        scheduler: TaskScheduler,
+        notifier: Notifier,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
         security: SecurityPolicies,
@@ -61,8 +64,7 @@ class LeaveProductCommandHandler:
         self._transaction: Final = transaction
         self._product_gateway: Final = product_gateway
         self._collab_gateway: Final = collab_gateway
-        self._user_gateway: Final = user_gateway
-        self._scheduler: Final = scheduler
+        self._notifier: Final = notifier
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
         self._security: Final = security
@@ -82,21 +84,24 @@ class LeaveProductCommandHandler:
             raise EntityNotFoundError(data.product_id)
         collab.revoke()
         await self._transaction.commit()
-        owner = await self._user_gateway.with_id(product.author_id)
-        if owner is not None:
-            base = self._security.frontend_base_url.rstrip("/")
-            link = f"{base}/products/{data.product_id}"
-            await self._scheduler.schedule_send_email(
-                to=owner.email.value,
-                subject="Коллаборатор покинул продукт",
-                components=[
-                    EmailParagraph.text("Здравствуйте!"),
-                    EmailParagraph.text(
-                        "Один из коллабораторов покинул ваш продукт.",
-                    ),
-                    EmailButton(label="Открыть продукт", url=link),
-                ],
-            )
+        base = self._security.frontend_base_url.rstrip("/")
+        link = f"{base}/products/{data.product_id}"
+        await self._notifier.send(
+            recipient_id=product.author_id,
+            category=NotificationCategory.TEACHING,
+            payloads={
+                NotificationChannel.EMAIL: EmailPayload(
+                    subject="Коллаборатор покинул продукт",
+                    components=[
+                        EmailParagraph.text("Здравствуйте!"),
+                        EmailParagraph.text(
+                            "Один из коллабораторов покинул ваш продукт.",
+                        ),
+                        EmailButton(label="Открыть продукт", url=link),
+                    ],
+                ),
+            },
+        )
         await publish_product_event(
             self._event_bus,
             kind=ProductEventKind.COLLABORATION_REVOKED,

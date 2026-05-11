@@ -11,7 +11,6 @@ from learnic.application.commands.course_release.create import (
 from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
-    NotACourseError,
 )
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.ids import CourseReleaseID
@@ -19,6 +18,7 @@ from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.course_release.value_objects import (
     CourseReleaseVersion,
 )
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle
@@ -210,7 +210,7 @@ async def test_release_for_webinar_raises() -> None:
     ) = _make_handler()
     product_gw.with_id.return_value = webinar
 
-    with pytest.raises(NotACourseError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             CreateCourseReleaseCommand(
                 actor_id=author,

@@ -17,17 +17,11 @@ from learnic.entities.course_block.models import (
     LessonBlock,
     RutubeVideoBlock,
 )
-from learnic.entities.course_block.value_objects import (
-    CodeLanguage,
-    CodeSource,
-    CodeTabLabel,
-    HtmlContent,
-    KatexSource,
-    RutubeVideoID,
-    VideoTitle,
-)
 from learnic.entities.course_lesson.ids import CourseLessonID
-from learnic.entities.product.ids import ProductID
+from learnic.infrastructure.persistence.blocks.registry import (
+    _common_from_row,
+    spec_for_row,
+)
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
     html_blocks_table,
@@ -49,73 +43,16 @@ def _tabs_to_jsonb(tabs: list[CodeTab]) -> list[dict[str, str]]:
     ]
 
 
-def _jsonb_to_tabs(raw: Any) -> list[CodeTab]:
-    """Hydrate JSONB tabs back into VOs.
-
-    The stored shape is a list of ``{"label", "source", "language"}``
-    dicts. Anything else is a corruption — propagate as-is so the
-    failure surfaces in logs rather than silently falling back to an
-    empty block.
-    """
-    return [
-        CodeTab(
-            label=CodeTabLabel(item["label"]),
-            source=CodeSource(item["source"]),
-            language=CodeLanguage(item["language"]),
-        )
-        for item in raw
-    ]
-
-
 def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
     """Hydrate a parent + LEFT JOIN child row into a domain entity.
 
-    The caller's SELECT must include the type-specific columns
-    aliased as ``html``, ``source``, ``rutube_external_id``,
-    ``rutube_title``, ``code_source``, ``code_language``. Left
-    joins yield NULL for the other types' columns.
+    Discriminator dispatch lives in
+    :data:`learnic.infrastructure.persistence.blocks.registry.BLOCK_SPECS`
+    — adding a new :class:`BlockType` variant means a new spec
+    instance, not another ``elif`` branch here.
     """
-    block_type = BlockType(row.type)
-    if block_type is BlockType.HTML:
-        return HtmlBlock(
-            oid=LessonBlockID(row.oid),
-            lesson_id=CourseLessonID(row.lesson_id),
-            product_id=ProductID(row.product_id),
-            html=HtmlContent(row.html),
-            position=row.position,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-    if block_type is BlockType.KATEX:
-        return KatexBlock(
-            oid=LessonBlockID(row.oid),
-            lesson_id=CourseLessonID(row.lesson_id),
-            product_id=ProductID(row.product_id),
-            source=KatexSource(row.source),
-            position=row.position,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-    if block_type is BlockType.CODE:
-        return CodeBlock(
-            oid=LessonBlockID(row.oid),
-            lesson_id=CourseLessonID(row.lesson_id),
-            product_id=ProductID(row.product_id),
-            tabs=_jsonb_to_tabs(row.code_tabs),
-            position=row.position,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-    return RutubeVideoBlock(
-        oid=LessonBlockID(row.oid),
-        lesson_id=CourseLessonID(row.lesson_id),
-        product_id=ProductID(row.product_id),
-        external_id=RutubeVideoID(row.rutube_external_id),
-        position=row.position,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        title=(VideoTitle(row.rutube_title) if row.rutube_title is not None else None),
-    )
+    spec = spec_for_row(row)
+    return spec.row_to_entity(row, _common_from_row(row))
 
 
 def _select_blocks() -> sa.Select[Any]:

@@ -5,7 +5,6 @@ from learnic.application.common.errors import (
     AlreadyEnrolledError,
     CannotEnrollInUnreleasedCourseError,
     EntityNotFoundError,
-    NotACourseError,
 )
 from learnic.application.common.persistence.course_enrollment import (
     CourseEnrollmentGateway,
@@ -20,7 +19,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.entities.course_enrollment.ids import CourseEnrollmentID
 from learnic.entities.course_enrollment.models import CourseEnrollment
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
@@ -68,8 +67,7 @@ class EnrollStudentInCourseCommandHandler:
         product = await self._product_gateway.with_id(data.product_id)
         if product is None:
             raise EntityNotFoundError(data.product_id)
-        if product.type is not ProductType.COURSE:
-            raise NotACourseError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COURSE_ENROLLMENT)
         existing = await self._enrollment_gateway.with_product_and_student(
             data.product_id,
             data.student_id,

@@ -5,22 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.course_content import (
-    CodeBlockView,
-    CodeTabView,
     CourseContentReader,
     CourseDraftView,
     DraftLessonView,
     DraftModuleView,
-    HtmlBlockView,
-    KatexBlockView,
     LessonBlockView,
-    RutubeVideoBlockView,
 )
-from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.product.ids import ProductID
+from learnic.infrastructure.persistence.blocks.registry import spec_for_row
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
     html_blocks_table,
@@ -36,47 +30,9 @@ from learnic.infrastructure.persistence.models.course_module import (
 )
 
 
-def _jsonb_to_tab_views(raw: Any) -> list[CodeTabView]:
-    return [
-        CodeTabView(
-            label=item["label"],
-            source=item["source"],
-            language=item["language"],
-        )
-        for item in raw
-    ]
-
-
 def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
-    block_type = BlockType(row.type)
-    if block_type is BlockType.HTML:
-        return HtmlBlockView(
-            type=BlockType.HTML,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            html=row.html,
-        )
-    if block_type is BlockType.KATEX:
-        return KatexBlockView(
-            type=BlockType.KATEX,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            source=row.source,
-        )
-    if block_type is BlockType.CODE:
-        return CodeBlockView(
-            type=BlockType.CODE,
-            oid=LessonBlockID(row.oid),
-            position=row.position,
-            tabs=_jsonb_to_tab_views(row.code_tabs),
-        )
-    return RutubeVideoBlockView(
-        type=BlockType.RUTUBE_VIDEO,
-        oid=LessonBlockID(row.oid),
-        position=row.position,
-        external_id=row.rutube_external_id,
-        title=row.rutube_title,
-    )
+    """Hydrate a block row into its read-side view via the registry."""
+    return spec_for_row(row).row_to_view(row)
 
 
 class CourseContentReaderAlchemy(CourseContentReader):

@@ -491,6 +491,19 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
+        "name": "UserExperiences",
+        "description": (
+            "Per-user work / study timeline entries — icon, dates, "
+            "title, description, optional source URL. "
+            "`GET /users/{user_id}/experiences` is public; "
+            "everything under `/users/me/experiences/...` requires the "
+            "`accessCookie` scheme and mutates only the caller's own "
+            "rows (HTTP 403 `NotResourceOwner` otherwise). The icon is "
+            "managed through dedicated `POST` / `DELETE` "
+            "`/users/me/experiences/{experience_id}/icon` endpoints."
+        ),
+    },
+    {
         "name": "Products",
         "description": (
             "User-owned learning products — courses and webinars. "

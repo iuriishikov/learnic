@@ -32,13 +32,18 @@ class JwtAccessTokenService(AccessTokenService):
         )
 
     @override
-    def issue(self, user_id: UserID) -> IssuedAccessToken:
+    def issue(
+        self,
+        user_id: UserID,
+        family_id: uuid.UUID,
+    ) -> IssuedAccessToken:
         now = datetime.now(timezone.utc)
         expires_at = now + self._ttl
         jti = uuid.uuid4()
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "jti": str(jti),
+            "fid": str(family_id),
             "iat": int(now.timestamp()),
             "exp": int(expires_at.timestamp()),
         }
@@ -48,6 +53,7 @@ class JwtAccessTokenService(AccessTokenService):
             payload=AccessTokenPayload(
                 user_id=user_id,
                 jti=jti,
+                family_id=family_id,
                 expires_at=expires_at,
             ),
         )
@@ -63,9 +69,12 @@ class JwtAccessTokenService(AccessTokenService):
         except jwt.PyJWTError as exc:
             raise InvalidTokenError from exc
         try:
+            family_raw = claims.get("fid")
+            family_id = uuid.UUID(family_raw) if family_raw is not None else None
             return AccessTokenPayload(
                 user_id=UserID(uuid.UUID(claims["sub"])),
                 jti=uuid.UUID(claims["jti"]),
+                family_id=family_id,
                 expires_at=datetime.fromtimestamp(claims["exp"], tz=timezone.utc),
             )
         except (KeyError, ValueError, TypeError) as exc:

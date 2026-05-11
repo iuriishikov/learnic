@@ -81,8 +81,6 @@ from learnic.application.common.errors import (
     CannotEnrollInUnreleasedCourseError,
     CannotPublishCourseDirectlyError,
     EntityNotFoundError,
-    NotACourseError,
-    NotAWebinarError,
     ProductNameAlreadyTakenError,
     ProductNotArchivedError,
     ProductNotInDraftError,
@@ -152,6 +150,7 @@ from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
 )
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.course_enrollment.enums import (
     CourseEnrollmentStatus,
 )
@@ -168,8 +167,7 @@ from learnic.presentation.http.common.errors.rules import (
     CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE,
     CANNOT_PUBLISH_COURSE_DIRECTLY_RULE,
     ENTITY_NOT_FOUND_RULE,
-    NOT_A_COURSE_RULE,
-    NOT_A_WEBINAR_RULE,
+    PRODUCT_DOES_NOT_SUPPORT_RULE,
     PRODUCT_NAME_TAKEN_RULE,
     PRODUCT_NOT_ARCHIVED_RULE,
     PRODUCT_NOT_IN_DRAFT_RULE,
@@ -1585,7 +1583,8 @@ async def get_qa_list(
     operation_id="updateWebinarDefaults",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP | {NotAWebinarError: NOT_A_WEBINAR_RULE},
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE},
 )
 async def update_webinar_defaults(
     request: Request,
@@ -1614,7 +1613,7 @@ async def update_webinar_defaults(
         NotResourceOwnerError: Caller is not the product's author;
             HTTP 403.
         EntityNotFoundError: No product with the given id; HTTP 404.
-        NotAWebinarError: Product is a course, not a webinar;
+        ProductDoesNotSupportError: Product is a course, not a webinar;
             HTTP 409.
         FieldError: VO invariants violated; HTTP 422.
     """
@@ -1767,7 +1766,8 @@ class CohortListItemSchema(BaseModel):
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=CreatedCohortSchema,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP | {NotAWebinarError: NOT_A_WEBINAR_RULE},
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE},
 )
 async def add_cohort(
     request: Request,
@@ -1793,7 +1793,7 @@ async def add_cohort(
         NotResourceOwnerError: Caller is not the product's author;
             HTTP 403.
         EntityNotFoundError: No product with the given id; HTTP 404.
-        NotAWebinarError: Product is a course; HTTP 409.
+        ProductDoesNotSupportError: Product is a course; HTTP 409.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -1894,7 +1894,7 @@ class CourseEnrollmentListItemSchema(BaseModel):
     response_model=CreatedCourseEnrollmentSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP
     | {
-        NotACourseError: NOT_A_COURSE_RULE,
+        ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE,
         AlreadyEnrolledError: ALREADY_ENROLLED_RULE,
         CannotEnrollInUnreleasedCourseError: (CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE),
     },
@@ -1924,7 +1924,8 @@ async def enroll_in_course(
     Raises:
         InvalidTokenError: HTTP 401.
         EntityNotFoundError: HTTP 404.
-        NotACourseError: Product is a webinar, not a course; HTTP 409.
+        ProductDoesNotSupportError: Product is a webinar, not a course;
+            HTTP 409.
         AlreadyEnrolledError: HTTP 409.
         CannotEnrollInUnreleasedCourseError: Course has no
             releases yet; HTTP 409.

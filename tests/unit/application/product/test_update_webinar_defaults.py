@@ -6,11 +6,11 @@ from learnic.application.commands.product.update_webinar_defaults import (
     UpdateWebinarDefaultsCommand,
     UpdateWebinarDefaultsCommandHandler,
 )
-from learnic.application.common.errors import (
-    InsufficientPermissionsError,
-    NotAWebinarError,
+from learnic.application.common.errors import InsufficientPermissionsError
+from learnic.entities.product.errors import (
+    InvalidWebinarLessonsError,
+    ProductDoesNotSupportError,
 )
-from learnic.entities.product.errors import InvalidWebinarLessonsError
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle
 from learnic.entities.product.webinar_details import WebinarDetails
@@ -133,7 +133,7 @@ async def test_update_on_course_raises(
         event_bus=fake_event_bus,
     )
 
-    with pytest.raises(NotAWebinarError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             UpdateWebinarDefaultsCommand(
                 actor_id=author_id,

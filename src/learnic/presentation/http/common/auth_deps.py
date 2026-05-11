@@ -59,6 +59,7 @@ class AccessContext:
     user_id: UserID
     jti: uuid.UUID
     expires_at: datetime
+    family_id: uuid.UUID | None = None
 
 
 @final
@@ -80,21 +81,27 @@ class Authenticator:
         self._denylist: Final = denylist
 
     async def authenticate(self, request: Request) -> AccessContext:
-        """Decode the access cookie and check it isn't denylisted.
+        """Decode the access cookie and check its family isn't denied.
 
         Raises:
-            InvalidTokenError: cookie missing, malformed, expired or
-                denylisted.
+            InvalidTokenError: cookie missing, malformed, expired, or
+                its refresh-token family is in the family denylist
+                (logout, "Logout from this device", logout-all,
+                password reset).
         """
         token = request.cookies.get(ACCESS_COOKIE)
         if not token:
             raise InvalidTokenError
         payload = self._access_tokens.decode(token)
-        if await self._denylist.is_denied(payload.jti):
+        if (
+            payload.family_id is not None
+            and await self._denylist.is_family_denied(payload.family_id)
+        ):
             raise InvalidTokenError
         return AccessContext(
             user_id=payload.user_id,
             jti=payload.jti,
+            family_id=payload.family_id,
             expires_at=payload.expires_at,
         )
 
@@ -111,17 +118,21 @@ class Authenticator:
         the existing HTTP signature stable.
 
         Raises:
-            InvalidTokenError: cookie missing, malformed, expired or
-                denylisted.
+            InvalidTokenError: cookie missing, malformed, expired, or
+                its refresh-token family is in the family denylist.
         """
         token = websocket.cookies.get(ACCESS_COOKIE)
         if not token:
             raise InvalidTokenError
         payload = self._access_tokens.decode(token)
-        if await self._denylist.is_denied(payload.jti):
+        if (
+            payload.family_id is not None
+            and await self._denylist.is_family_denied(payload.family_id)
+        ):
             raise InvalidTokenError
         return AccessContext(
             user_id=payload.user_id,
             jti=payload.jti,
+            family_id=payload.family_id,
             expires_at=payload.expires_at,
         )

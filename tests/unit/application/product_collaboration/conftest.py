@@ -113,6 +113,14 @@ def fake_scheduler() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_notifier() -> AsyncMock:
+    """Stub ``Notifier`` for collab handlers that send transient notifications."""
+    notifier = AsyncMock()
+    notifier.send = AsyncMock()
+    return notifier
+
+
+@pytest.fixture
 def security_config() -> SecurityConfig:
     return SecurityConfig(
         jwt_secret="test-secret-at-least-32-bytes-long!",

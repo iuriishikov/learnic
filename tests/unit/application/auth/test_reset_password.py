@@ -17,11 +17,14 @@ async def test_reset_password_sets_new_hash_and_revokes_sessions(
     fake_email_tokens: AsyncMock,
     fake_hasher: MagicMock,
     fake_refresh_store: AsyncMock,
+    fake_denylist: AsyncMock,
+    security_config,
     verified_user,
 ) -> None:
     fake_email_tokens.consume.return_value = verified_user.oid
     fake_user_gateway.with_id.return_value = verified_user
     fake_hasher.hash.return_value = PasswordHash("new-hash")
+    fake_refresh_store.revoke_all_for_user.return_value = set()
 
     handler = ResetPasswordCommandHandler(
         transaction=fake_transaction,
@@ -29,6 +32,8 @@ async def test_reset_password_sets_new_hash_and_revokes_sessions(
         email_tokens=fake_email_tokens,
         hasher=fake_hasher,
         refresh_store=fake_refresh_store,
+        denylist=fake_denylist,
+        security_config=security_config,
     )
     await handler.run(ResetPasswordCommand(token="raw", new_password="newcorrecthorse"))
 
@@ -44,6 +49,8 @@ async def test_reset_password_missing_user_raises(
     fake_email_tokens: AsyncMock,
     fake_hasher: MagicMock,
     fake_refresh_store: AsyncMock,
+    fake_denylist: AsyncMock,
+    security_config,
     verified_user,
 ) -> None:
     fake_email_tokens.consume.return_value = verified_user.oid
@@ -55,6 +62,8 @@ async def test_reset_password_missing_user_raises(
         email_tokens=fake_email_tokens,
         hasher=fake_hasher,
         refresh_store=fake_refresh_store,
+        denylist=fake_denylist,
+        security_config=security_config,
     )
     with pytest.raises(InvalidTokenError):
         await handler.run(

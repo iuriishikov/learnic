@@ -27,11 +27,11 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
     InvalidReorderError,
-    NotACourseError,
 )
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.course_module.models import CourseModule
 from learnic.entities.course_module.value_objects import ModuleTitle
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.user.models import UserID
@@ -182,7 +182,7 @@ async def test_add_module_on_webinar_raises_not_a_course(
         event_bus=fake_event_bus,
     )
 
-    with pytest.raises(NotACourseError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             AddCourseModuleCommand(
                 actor_id=author_id,

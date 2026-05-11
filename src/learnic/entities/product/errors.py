@@ -1,4 +1,18 @@
-from learnic.entities.common.errors import FieldError
+from learnic.entities.common.errors import DomainError, FieldError
+
+
+class ProductDoesNotSupportError(DomainError):
+    """Raised when a product type does not support the requested capability.
+
+    Replaces the legacy ``NotACourseError`` / ``NotAWebinarError``
+    pair with a single error that carries enough context for the
+    SPA to localise a useful message — the offending product, its
+    type, and the capability the operation needed.
+    """
+
+    product_id: object
+    product_type: str
+    capability: str
 
 
 class EmptyProductFieldError(FieldError):

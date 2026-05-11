@@ -11,10 +11,7 @@ from learnic.application.commands.course_release.create import (
     CreateCourseReleaseCommand,
     CreateCourseReleaseCommandHandler,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotACourseError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.course_release import (
     CourseReleaseContentView,
     CourseReleaseSummaryView,
@@ -37,6 +34,7 @@ from learnic.entities.course_release.constants import RELEASE_NOTES_MAX_LEN
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.ids import CourseReleaseID
 from learnic.entities.course_release.models import CourseRelease
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
@@ -46,7 +44,7 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_MAP,
     AUTHENTICATED_OWNER_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
-    NOT_A_COURSE_RULE,
+    PRODUCT_DOES_NOT_SUPPORT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.course_content import (
@@ -81,7 +79,7 @@ _RELEASE_ID_PATH: Final = Path(
 )
 
 _COURSE_AUTHOR_MAP = AUTHENTICATED_OWNER_FIELD_MAP | {
-    NotACourseError: NOT_A_COURSE_RULE,
+    ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE,
 }
 
 
@@ -316,7 +314,8 @@ async def create_release(
         InvalidTokenError: HTTP 401.
         NotResourceOwnerError: HTTP 403.
         EntityNotFoundError: HTTP 404 — course not found.
-        NotACourseError: HTTP 409 — product is a webinar.
+        ProductDoesNotSupportError: HTTP 409 — product is not a
+            course (no release-related capabilities).
         FieldError: HTTP 422 — release-notes VO violation.
     """
     ctx = await auth.authenticate(request)
@@ -359,7 +358,7 @@ async def list_releases(
         InsufficientPermissionsError: HTTP 403 — caller has no
             collaboration with ``READ_PRODUCT``.
         EntityNotFoundError: HTTP 404.
-        NotACourseError: HTTP 409.
+        ProductDoesNotSupportError: HTTP 409 — product is not a course.
     """
     ctx = await auth.authenticate(request)
     views = await interactor.run(

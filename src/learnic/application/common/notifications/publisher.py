@@ -1,12 +1,12 @@
 import logging
+from collections.abc import Mapping
 from typing import Final, final
 
-from learnic.application.common.email.components import EmailParagraph
+from learnic.application.common.notifications.channels import DeliveryChannel
 from learnic.application.common.notification_preferences.reader import (
     NotificationPreferencesReader,
 )
 from learnic.application.common.notifications.event_bus import (
-    NotificationCreatedEvent,
     NotificationEventBus,
     NotificationUpdatedEvent,
 )
@@ -19,8 +19,10 @@ from learnic.application.common.notifications.kind_spec import (
 from learnic.application.common.notifications.reader import NotificationReader
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.tasks.scheduler import TaskScheduler
-from learnic.entities.notification.enums import NotificationChannel
+from learnic.entities.notification.enums import (
+    NotificationCategory,
+    NotificationChannel,
+)
 from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -32,28 +34,31 @@ _logger = logging.getLogger(__name__)
 
 @final
 class NotificationPublisher:
-    """Persist a notification and push it to the recipient's WS channel.
+    """Persist a notification and fan it out across enabled channels.
 
-    Producers (existing command handlers like
-    ``InviteCollaboratorByUserCommandHandler``) call
-    :meth:`publish` **after** their primary transaction commits.
-    The publisher opens its own commit cycle for the notification
-    row, hydrates a :class:`NotificationView` via the reader, and
-    forwards it on the per-user pub/sub channel — same pattern as
-    ``publish_product_event`` but with persistence in the middle.
+    The dispatch is channel-agnostic: a list of :class:`DeliveryChannel`
+    adapters is injected at construction, and every published
+    notification iterates over them. Adding a new channel (SMS,
+    Telegram, in-product banner) means writing a new ``DeliveryChannel``
+    implementation and wiring it in IoC — no edits here, no edits
+    to spec classes that don't care about the new channel.
+
+    Per-recipient channel selection still goes through
+    :class:`NotificationPreferencesReader`. The always-on
+    :data:`NotificationChannel.IN_APP` channel bypasses the reader
+    (it cannot be disabled). Channels for which the recipient's
+    preference matrix says "off" — and channels for which the
+    spec's :meth:`render` returns ``None`` — are skipped silently.
+
+    Failures inside an individual channel must not roll back the
+    source command; each channel adapter is expected to log and
+    swallow its own errors so siblings still deliver.
 
     :meth:`republish_for_collaboration` re-hydrates the recipient's
     surviving ``invite_sent`` card(s) for a collaboration whose
-    status just changed (accept / decline / revoke) and emits the
-    ``updated`` envelope so panels patch the embedded snapshot in
-    place. The notification rows themselves are immutable —
-    everything dynamic lives in the joined collaboration row.
-
-    Failures here are isolated from the source command — a Redis
-    or Postgres hiccup must not roll back the original invite. The
-    caller is expected to wrap the call in a try/except and log;
-    keeping the notification orchestration here avoids leaking
-    it into every command handler.
+    status just changed and emits the ``updated`` envelope so panels
+    patch the embedded snapshot in place — independent of the
+    delivery-channel fan-out above.
     """
 
     def __init__(
@@ -63,18 +68,18 @@ class NotificationPublisher:
         reader: NotificationReader,
         event_bus: NotificationEventBus,
         preferences: NotificationPreferencesReader,
-        scheduler: TaskScheduler,
         kind_registry: NotificationKindRegistry,
         user_gateway: UserGateway,
+        channels: Mapping[NotificationChannel, DeliveryChannel],
     ) -> None:
         self._transaction: Final = transaction
         self._gateway: Final = gateway
         self._reader: Final = reader
         self._event_bus: Final = event_bus
         self._preferences: Final = preferences
-        self._scheduler: Final = scheduler
         self._kinds: Final = kind_registry
         self._user_gateway: Final = user_gateway
+        self._channels: Final = channels
 
     async def publish(self, notification: Notification) -> None:
         await self._gateway.add(notification)
@@ -85,79 +90,46 @@ class NotificationPublisher:
         )
         if view is None:
             return
-        await self._event_bus.publish(
-            notification.recipient_id,
-            NotificationCreatedEvent(notification=view),
+        recipient = await self._user_gateway.with_id(notification.recipient_id)
+        if recipient is None:
+            return
+
+        spec = self._kinds.by_kind(notification.kind)
+
+        for channel_name, channel in self._channels.items():
+            try:
+                if not await self._is_channel_enabled(
+                    notification.recipient_id,
+                    channel_name,
+                    notification.category,
+                ):
+                    continue
+                payload = spec.render(channel_name, view)
+                if payload is None:
+                    continue
+                await channel.deliver(recipient, payload)
+            except Exception:
+                _logger.exception(
+                    "Channel %s failed for notification %s",
+                    channel_name.value,
+                    notification.oid,
+                )
+
+    async def _is_channel_enabled(
+        self,
+        recipient_id: UserID,
+        channel: NotificationChannel,
+        category: NotificationCategory,
+    ) -> bool:
+        # The in-app surface is the always-on bell-icon panel —
+        # user preferences cannot opt out of it.
+        if channel is NotificationChannel.IN_APP:
+            return True
+        return await self._preferences.is_channel_enabled(
+            recipient_id,
+            channel,
+            category,
         )
-        await self._dispatch_push(notification)
-        await self._dispatch_email(notification)
-
-    async def _dispatch_push(self, notification: Notification) -> None:
-        """Schedule a Web Push delivery for the recipient if opted in.
-
-        Real preference enforcement: the publisher reads the
-        recipient's matrix and only enqueues the fanout task when
-        push is enabled for this category. The worker re-checks
-        the preference too — defence in depth — so a stale enqueue
-        can't bypass an opt-out flipped between commit and consume.
-        """
-        try:
-            push_enabled = await self._preferences.is_channel_enabled(
-                notification.recipient_id,
-                NotificationChannel.PUSH,
-                notification.category,
-            )
-            if not push_enabled:
-                return
-            spec = self._kinds.by_kind(notification.kind)
-            title, body = spec.push_title, spec.push_body
-            await self._scheduler.schedule_send_web_push(
-                user_id=notification.recipient_id,
-                title=title,
-                body=body,
-                category=notification.category.value,
-                tag=str(notification.oid),
-                bypass_preferences=False,
-            )
-        except Exception:
-            _logger.exception(
-                "Web Push dispatch failed for notification %s",
-                notification.oid,
-            )
-
-    async def _dispatch_email(self, notification: Notification) -> None:
-        """Schedule an email delivery for the recipient if opted in.
-
-        Mirrors :meth:`_dispatch_push`: read the recipient's matrix at
-        publish time and enqueue only when the email channel is enabled
-        for this category. The publisher resolves the recipient's
-        address and assembles the typed component list; the scheduler
-        owns the render step and hands the rendered payload to the
-        worker. Failures are isolated — an SMTP / broker hiccup must
-        not roll back the source command.
-        """
-        try:
-            email_enabled = await self._preferences.is_channel_enabled(
-                notification.recipient_id,
-                NotificationChannel.EMAIL,
-                notification.category,
-            )
-            if not email_enabled:
-                return
-            user = await self._user_gateway.with_id(notification.recipient_id)
-            if user is None:
-                return
-            spec = self._kinds.by_kind(notification.kind)
-            await self._scheduler.schedule_send_email(
-                to=user.email.value,
-                subject=spec.email_subject,
-                components=[EmailParagraph.text(spec.email_body)],
-            )
-        except Exception:
-            _logger.exception(
-                "Notification email dispatch failed for notification %s",
-                notification.oid,
-            )
 
     async def republish_for_collaboration(
         self,

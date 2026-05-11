@@ -139,15 +139,17 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
         return result.first() is not None
 
     @override
-    async def revoke_all_for_user(self, user_id: UserID) -> None:
-        await self._session.execute(
+    async def revoke_all_for_user(self, user_id: UserID) -> set[uuid.UUID]:
+        result = await self._session.execute(
             sa.update(refresh_tokens_table)
             .where(
                 refresh_tokens_table.c.user_id == user_id,
                 refresh_tokens_table.c.revoked_at.is_(None),
             )
             .values(revoked_at=datetime.now(timezone.utc))
+            .returning(refresh_tokens_table.c.family_id)
         )
+        return {row.family_id for row in result}
 
     @override
     async def resolve(self, presented: str) -> RefreshTokenRecord | None:

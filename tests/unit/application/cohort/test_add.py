@@ -10,9 +10,9 @@ from learnic.application.commands.cohort.add import (
 from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
-    NotAWebinarError,
 )
 from learnic.entities.cohort.models import Cohort
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.models import Product
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -121,7 +121,7 @@ async def test_add_cohort_on_course_raises(
         authorizer=_allow_authorizer(),
     )
 
-    with pytest.raises(NotAWebinarError):
+    with pytest.raises(ProductDoesNotSupportError):
         await handler.run(
             AddCohortCommand(
                 actor_id=author_id,

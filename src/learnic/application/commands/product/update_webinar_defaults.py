@@ -2,10 +2,7 @@ from dataclasses import dataclass
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotAWebinarError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
@@ -16,7 +13,7 @@ from learnic.application.common.product_events import (
     ProductEventKind,
     publish_product_event,
 )
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import (
     AccessWindow,
@@ -51,7 +48,7 @@ class UpdateWebinarDefaultsCommandHandler:
     field on the sub-entity in one transaction. If the webinar was
     created without defaults, this handler creates the
     ``WebinarDetails`` row on first call. Refuses on course
-    products with :class:`NotAWebinarError`.
+    products with :class:`ProductDoesNotSupportError`.
     """
 
     def __init__(
@@ -77,8 +74,7 @@ class UpdateWebinarDefaultsCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.EDIT_DESCRIPTION,
         )
-        if product.type is not ProductType.WEBINAR:
-            raise NotAWebinarError(data.product_id)
+        product.require_supports(ProductCapability.HAS_WEBINAR_SETTINGS)
 
         total_lessons = WebinarLessonsCount(data.total_lessons)
         default_duration = WebinarSessionDuration(data.default_duration_minutes)

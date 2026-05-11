@@ -41,12 +41,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, ClassVar, Final, Protocol, TypeVar
 
+from learnic.application.common.email.components import EmailParagraph
+from learnic.application.common.notifications.channels import (
+    ChannelPayload,
+    EmailPayload,
+    InAppPayload,
+    PushPayload,
+)
 from learnic.application.common.notifications.views import (
     CollaborationSnapshotView,
     NotificationDetailsView,
     ProductRefView,
 )
 from learnic.application.common.persistence.user_ref import UserRefView
+from learnic.entities.notification.enums import NotificationChannel
 from learnic.entities.notification.details import NotificationDetails
 from learnic.entities.notification.enums import (
     NotificationCategory,
@@ -178,11 +186,46 @@ class NotificationKindSpec(Protocol[D, V]):
     # Email channel — same minimal copy contract as push: a static
     # subject + plain-text body. Personalisation (actor name,
     # product name) requires the resolved view; if a future kind
-    # needs it, the publisher can switch to passing the hydrated
-    # view into a richer ``email_components(view)`` method. Keep
-    # parity with push for now: one string per slot, no templating.
+    # needs it, override :meth:`render` to build a richer payload
+    # from the hydrated view.
     email_subject: ClassVar[str]
     email_body: ClassVar[str]
+
+    def render(
+        self,
+        channel: NotificationChannel,
+        view: V,
+    ) -> ChannelPayload | None:
+        """Return the per-channel payload for ``channel``.
+
+        Default implementation reads the ``push_*`` / ``email_*``
+        ClassVars and synthesises the standard payloads. Specs that
+        need richer or channel-specific copy (email with CTA button,
+        push with deep-link URL, future SMS / Telegram payloads)
+        override this method and inspect ``view`` for personalisation.
+
+        Returning ``None`` means "this kind has nothing to send on
+        this channel" — the dispatcher skips the channel silently.
+        Adding a new :class:`NotificationChannel` variant requires
+        no edits here: existing specs automatically return ``None``
+        for the unknown channel and the new channel's implementer
+        opts kinds in by overriding :meth:`render`.
+        """
+        cls = type(self)
+        if channel is NotificationChannel.EMAIL:
+            return EmailPayload(
+                subject=cls.email_subject,
+                components=[EmailParagraph.text(cls.email_body)],
+            )
+        if channel is NotificationChannel.PUSH:
+            return PushPayload(
+                title=cls.push_title,
+                body=cls.push_body,
+                category=cls.category.value,
+            )
+        if channel is NotificationChannel.IN_APP:
+            return InAppPayload(view=view)
+        return None
 
     def references(self, details: D) -> RefRequest:
         """Declare which products / users / collaborations ``details`` points at.

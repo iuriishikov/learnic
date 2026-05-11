@@ -7,10 +7,7 @@ from learnic.application.common.collaboration import (
     ContentEventKind,
     publish_content_event,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotACourseError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.course_release import (
     CourseReleaseGateway,
     CourseReleaseSnapshotter,
@@ -28,7 +25,8 @@ from learnic.application.common.product_events import (
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.course_release.value_objects import ReleaseNotes
-from learnic.entities.product.enums import ProductStatus, ProductType
+from learnic.entities.product.capabilities import ProductCapability
+from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -93,8 +91,7 @@ class CreateCourseReleaseCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.MANAGE_RELEASES,
         )
-        if product.type is not ProductType.COURSE:
-            raise NotACourseError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COURSE_RELEASES)
 
         previous = await self._release_gateway.latest_for_product(
             data.product_id,

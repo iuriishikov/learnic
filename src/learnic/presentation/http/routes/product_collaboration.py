@@ -924,9 +924,9 @@ async def revoke(
         InsufficientPermissionsError: Caller lacks
             `manage_collaborators`; HTTP 403.
         EntityNotFoundError: Collaboration missing; HTTP 404.
-        CannotRevokeInThisStatusError: Collaboration is already in a
-            terminal state (``revoked`` or ``declined``); HTTP 409
-            via ``CANNOT_REVOKE_IN_THIS_STATUS_RULE``.
+        OperationNotAllowedInStatusError: Collaboration is in a status
+            where ``revoke`` is forbidden (already terminal); HTTP 409
+            via ``OPERATION_NOT_ALLOWED_IN_STATUS_RULE``.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(

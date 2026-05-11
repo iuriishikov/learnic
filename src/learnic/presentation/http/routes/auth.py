@@ -542,7 +542,12 @@ async def logout(
     auth: FromDishka[Authenticator],
     cfg: FromDishka[SecurityConfig],
 ) -> None:
-    """Revoke this device's refresh family and deny the current access jti.
+    """Revoke this device's refresh family and deny it instantly.
+
+    The revoked ``family_id`` is added to the family denylist for one
+    access-TTL window so the in-flight access cookie (and any tabs
+    that refreshed off the same family) is rejected on the next
+    request, not after the access JWT's natural ``exp``.
 
     Args:
         request: Source of ``refresh_token`` and ``access_token`` cookies.
@@ -562,8 +567,7 @@ async def logout(
     await interactor.run(
         LogoutCommand(
             refresh_token=request.cookies.get(REFRESH_COOKIE),
-            access_jti=ctx.jti,
-            access_expires_at=ctx.expires_at,
+            access_family_id=ctx.family_id,
         )
     )
     clear_auth_cookies(response, cfg)
@@ -1096,10 +1100,15 @@ async def revoke_session(
     """Revoke one of the caller's active sessions.
 
     Used to remotely sign out a specific device from the
-    active-sessions list. If the targeted session belongs to the
-    caller's own refresh cookie, the cookie pair is cleared on this
-    response and the in-flight access JTI is added to the denylist
-    so the access cookie cannot outlive the refresh family.
+    active-sessions list. The revoked ``family_id`` is added to the
+    family denylist for one access-TTL window, so the in-flight
+    access JWT on that device (and any tabs that refreshed off the
+    same family) is rejected on the next request — no 20-minute
+    grace window.
+
+    If the targeted session belongs to the caller's own refresh
+    cookie, the cookie pair is also cleared on this response so the
+    SPA reflects the logout immediately.
 
     Args:
         request: Source of the access cookie (auth) and the refresh
@@ -1142,8 +1151,6 @@ async def revoke_session(
         RevokeSessionCommand(
             user_id=ctx.user_id,
             family_id=session_id,
-            current_access_jti=ctx.jti if is_current else None,
-            current_access_expires_at=ctx.expires_at if is_current else None,
         ),
     )
     if is_current:

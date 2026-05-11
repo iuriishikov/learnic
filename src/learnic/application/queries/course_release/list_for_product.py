@@ -2,16 +2,13 @@ from dataclasses import dataclass
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotACourseError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.course_release import (
     CourseReleaseReader,
     CourseReleaseSummaryView,
 )
 from learnic.application.common.persistence.product import ProductGateway
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -54,6 +51,5 @@ class ListCourseReleasesQueryHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.READ_PRODUCT,
         )
-        if product.type is not ProductType.COURSE:
-            raise NotACourseError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COURSE_RELEASES)
         return await self._release_reader.list_for_product(data.product_id)

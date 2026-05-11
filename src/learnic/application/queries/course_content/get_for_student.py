@@ -13,7 +13,7 @@ from learnic.application.common.persistence.product import ProductGateway
 from learnic.entities.course_enrollment.enums import (
     CourseEnrollmentStatus,
 )
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
@@ -58,7 +58,12 @@ class GetMyCourseContentQueryHandler:
         data: GetMyCourseContentQuery,
     ) -> CourseReleaseContentView:
         product = await self._product_gateway.with_id(data.product_id)
-        if product is None or product.type is not ProductType.COURSE:
+        if product is None or not product.supports(
+            ProductCapability.HAS_COURSE_CONTENT,
+        ):
+            # Webinar products are intentionally hidden under the
+            # course-content endpoint — surface as 404 rather than
+            # leaking type info via a separate error.
             raise EntityNotFoundError(data.product_id)
 
         enrollment = await self._enrollment_gateway.with_product_and_student(

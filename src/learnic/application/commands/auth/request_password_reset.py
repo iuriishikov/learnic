@@ -5,6 +5,8 @@ from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
 )
+from learnic.application.common.notifications.channels import EmailPayload
+from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
@@ -12,7 +14,10 @@ from learnic.application.common.security.email_tokens import (
     EmailTokenStore,
 )
 from learnic.application.common.security.policies import SecurityPolicies
-from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.entities.notification.enums import (
+    NotificationCategory,
+    NotificationChannel,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -33,13 +38,13 @@ class RequestPasswordResetCommandHandler:
         transaction: Transaction,
         user_gateway: UserGateway,
         email_tokens: EmailTokenStore,
-        scheduler: TaskScheduler,
+        notifier: Notifier,
         config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
         self._email_tokens: Final = email_tokens
-        self._scheduler: Final = scheduler
+        self._notifier: Final = notifier
         self._config: Final = config
 
     async def run(self, data: RequestPasswordResetCommand) -> None:
@@ -56,15 +61,20 @@ class RequestPasswordResetCommandHandler:
 
         base = self._config.frontend_base_url.rstrip("/")
         link = f"{base}/reset-password?token={raw_token}"
-        await self._scheduler.schedule_send_email(
-            to=user.email.value,
-            subject="Сброс пароля",
-            components=[
-                EmailParagraph.text("Здравствуйте!"),
-                EmailParagraph.text(
-                    "Чтобы установить новый пароль, нажмите на кнопку ниже:",
+        await self._notifier.send(
+            recipient_id=user.oid,
+            category=NotificationCategory.SECURITY,
+            payloads={
+                NotificationChannel.EMAIL: EmailPayload(
+                    subject="Сброс пароля",
+                    components=[
+                        EmailParagraph.text("Здравствуйте!"),
+                        EmailParagraph.text(
+                            "Чтобы установить новый пароль, нажмите на кнопку ниже:",
+                        ),
+                        EmailButton(label="Сбросить пароль", url=link),
+                        EmailParagraph.text("Ссылка действует 1 час."),
+                    ],
                 ),
-                EmailButton(label="Сбросить пароль", url=link),
-                EmailParagraph.text("Ссылка действует 1 час."),
-            ],
+            },
         )

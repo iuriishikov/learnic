@@ -8,10 +8,7 @@ from learnic.application.common.collaboration import (
     module_added_payload,
     publish_content_event,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    NotACourseError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.course_module import (
     CourseModuleGateway,
 )
@@ -26,7 +23,7 @@ from learnic.entities.course_module.value_objects import (
     ModuleDescription,
     ModuleTitle,
 )
-from learnic.entities.product.enums import ProductType
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -69,8 +66,7 @@ class AddCourseModuleCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.EDIT_MODULES,
         )
-        if product.type is not ProductType.COURSE:
-            raise NotACourseError(data.product_id)
+        product.require_supports(ProductCapability.HAS_COURSE_CONTENT)
 
         existing = await self._module_gateway.for_product(data.product_id)
         next_position = max((m.position for m in existing), default=-1) + 1

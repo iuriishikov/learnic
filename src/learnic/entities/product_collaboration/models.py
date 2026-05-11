@@ -10,10 +10,6 @@ from learnic.entities.product_collaboration.constants import (
 )
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.errors import (
-    CannotAcceptInThisStatusError,
-    CannotDeclineInThisStatusError,
-    CannotMutateInactiveCollaborationError,
-    CannotRevokeInThisStatusError,
     EmptyGrantsError,
     InviteTokenExpiredError,
     InviteTokenMismatchError,
@@ -21,6 +17,10 @@ from learnic.entities.product_collaboration.errors import (
 from learnic.entities.product_collaboration.grant import CollaborationGrant
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
+)
+from learnic.entities.product_collaboration.state_machine import (
+    CollaborationOp,
+    require_op,
 )
 from learnic.entities.product_collaboration.value_objects import (
     InviteToken,
@@ -79,8 +79,7 @@ class ProductCollaboration(BaseEntity[ProductCollaborationID]):
         ``invited_email`` before delegating here, after which we
         bind ``collaborator_id`` to ``accepting_user_id``.
         """
-        if self.status is not CollaborationStatus.PENDING_INVITE:
-            raise CannotAcceptInThisStatusError(self.status.value)
+        require_op(self.status, CollaborationOp.ACCEPT)
         if self.invite_token_hash is None:
             raise InviteTokenMismatchError
         if self.invite_token_hash != token.hashed():
@@ -113,8 +112,7 @@ class ProductCollaboration(BaseEntity[ProductCollaborationID]):
         validation is skipped because the in-app channel is itself
         authenticated as the recipient.
         """
-        if self.status is not CollaborationStatus.PENDING_INVITE:
-            raise CannotAcceptInThisStatusError(self.status.value)
+        require_op(self.status, CollaborationOp.ACCEPT)
         moment = now or datetime.now(timezone.utc)
         if self.invite_expires_at is not None and moment > self.invite_expires_at:
             raise InviteTokenExpiredError
@@ -146,8 +144,7 @@ class ProductCollaboration(BaseEntity[ProductCollaborationID]):
         ``declined_at`` is stamped, and the invite token / expiry
         are cleared so the dropped invite cannot be reused.
         """
-        if self.status is not CollaborationStatus.PENDING_INVITE:
-            raise CannotDeclineInThisStatusError(self.status.value)
+        require_op(self.status, CollaborationOp.DECLINE)
         moment = now or datetime.now(timezone.utc)
         if self.collaborator_id is None:
             self.collaborator_id = declining_user_id
@@ -157,11 +154,7 @@ class ProductCollaboration(BaseEntity[ProductCollaborationID]):
         self.invite_expires_at = None
 
     def revoke(self, *, now: datetime | None = None) -> None:
-        if self.status in (
-            CollaborationStatus.REVOKED,
-            CollaborationStatus.DECLINED,
-        ):
-            raise CannotRevokeInThisStatusError(self.status.value)
+        require_op(self.status, CollaborationOp.REVOKE)
         self.status = CollaborationStatus.REVOKED
         self.revoked_at = now or datetime.now(timezone.utc)
         self.invite_token_hash = None
@@ -174,10 +167,7 @@ class ProductCollaboration(BaseEntity[ProductCollaborationID]):
         keep their original prospective grants until accept/revoke,
         and revoked rows are immutable.
         """
-        if self.status is not CollaborationStatus.ACTIVE:
-            raise CannotMutateInactiveCollaborationError(
-                self.status.value,
-            )
+        require_op(self.status, CollaborationOp.REPLACE_GRANTS)
         if not new_grants:
             raise EmptyGrantsError
         self.grants = list(new_grants)
