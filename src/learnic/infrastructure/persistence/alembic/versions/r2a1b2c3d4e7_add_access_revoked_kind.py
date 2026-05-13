@@ -27,8 +27,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.execute(
-        "ALTER TYPE notification_kind ADD VALUE IF NOT EXISTS "
-        "'access_revoked'",
+        "ALTER TYPE notification_kind ADD VALUE IF NOT EXISTS 'access_revoked'",
     )
 
 

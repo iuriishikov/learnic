@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    DraftResetPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import EntityNotFoundError
@@ -86,16 +86,7 @@ class ResetCourseDraftCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.DRAFT_RESET,
+            payload=DraftResetPayload.from_entity(release),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload={
-                "release_id": str(release.oid),
-                "ordinal": release.ordinal,
-                "version": [
-                    release.version.major,
-                    release.version.minor,
-                    release.version.patch,
-                ],
-            },
         )

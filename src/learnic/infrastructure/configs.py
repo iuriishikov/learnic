@@ -101,7 +101,7 @@ class WebPushConfig(BaseSettings):
     ``vapid --gen`` (or any compliant tool) and committed to the
     secrets store; ``public_key`` is a URL-safe Base64 raw EC point
     on the P-256 curve. The frontend reads the public key via
-    ``GET /push/vapid-public-key`` to subscribe; the backend uses
+    ``GET /web-push/vapid-public-key`` to subscribe; the backend uses
     the private key to sign each push request to the browser
     vendor's push service.
 

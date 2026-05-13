@@ -3,8 +3,8 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
+    BlocksReorderedPayload,
     ContentEventBus,
-    ContentEventKind,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -80,11 +80,10 @@ class ReorderLessonBlocksCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.BLOCKS_REORDERED,
+            payload=BlocksReorderedPayload(
+                lesson_id=str(data.lesson_id),
+                ordered_ids=[str(oid) for oid in data.ordered_ids],
+            ),
             product_id=lesson.product_id,
             actor_id=data.actor_id,
-            payload={
-                "lesson_id": str(data.lesson_id),
-                "ordered_ids": [str(oid) for oid in data.ordered_ids],
-            },
         )

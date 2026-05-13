@@ -29,9 +29,8 @@ from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
+    CollaborationInvitedPayload,
     ProductEventBus,
-    ProductEventKind,
-    make_collaboration_payload,
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
@@ -188,13 +187,12 @@ class InviteCollaboratorByUserCommandHandler:
         )
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COLLABORATION_INVITED,
-            product_id=data.product_id,
-            actor_id=data.actor_id,
-            payload=make_collaboration_payload(
+            payload=CollaborationInvitedPayload.of(
                 collaboration_id=collab.oid,
                 collaborator_id=data.target_user_id,
             ),
+            product_id=data.product_id,
+            actor_id=data.actor_id,
         )
         await self._notifications.publish(
             Notification.for_invite_sent(

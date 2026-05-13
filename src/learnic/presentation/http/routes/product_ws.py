@@ -1,18 +1,21 @@
-"""Product-level WebSocket channel.
+"""Unified product WebSocket channel.
 
-Read-only push of :class:`ProductEvent` instances to the product
-author. Mutations stay on the REST API — this socket fans out
-post-commit deltas of product metadata (name / description /
-duration / cover / status), webinar defaults and Q&A entries so
-two tabs of the same author (or, later, a co-author) stay in sync
-without polling.
+Read-only push of every per-product event for one product. Two
+in-process buses fan in here:
 
-This channel is **separate** from the course-content channel
-(``WS /courses/{course_id}/events``): course-content events
-(modules / lessons / blocks / releases / draft reset) keep flowing
-through `ContentEventBus`; everything in this channel comes from
-`ProductEventBus`. Cohorts (and their schedules / sessions) are
-intentionally **not** covered yet.
+* :class:`ProductEventBus` — product-metadata, cover, status,
+  webinar defaults, Q&A, collaboration lifecycle, role catalogue.
+* :class:`ContentEventBus` — course-content edits (modules,
+  lessons, blocks, releases, draft reset). Only subscribed when
+  the target product supports
+  :attr:`ProductCapability.HAS_COURSE_CONTENT` — webinar products
+  see product events only.
+
+Both buses publish events that share the same wire envelope
+(``Event[...]`` with ``payload.KIND`` discriminator), so the
+multiplexed stream is a flat sequence of envelopes the SPA can
+dispatch on ``kind`` alone. Cohorts (and their schedules /
+sessions) are intentionally not covered yet.
 
 Protocol summary (kept here, not in OpenAPI — OpenAPI 3 doesn't
 model WebSockets):
@@ -28,24 +31,27 @@ model WebSockets):
   ``4403``.
 * **Lifecycle.** Server pushes events one-way until the client
   disconnects. No client→server messages are interpreted yet.
-* **Initial state.** Client first calls ``GET /products/{id}``
-  (and ``GET /products/{id}/qa`` if it cares about Q&A) over REST
-  to load the product, then opens this socket to receive deltas.
-  On reconnect, refetch + resubscribe — no event buffering /
-  replay.
+* **Initial state.** Client refetches every REST resource the
+  channel reflects (product, Q&A, collaborations, roles; for
+  courses also the draft tree and releases) before opening the
+  socket. On reconnect, refetch + resubscribe — no event
+  buffering / replay.
 
 Server → client message shape::
 
     {
-      "kind": "<ProductEventKind value>",
+      "kind": "<Payload.KIND>",     # e.g. "name_changed" or "module_added"
       "product_id": "<UUID>",
       "actor_id": "<UUID>",
-      "payload": { ... },          # type-specific fields
+      "payload": { ... },           # Payload-specific fields
       "occurred_at": "<ISO 8601>",
     }
 """
 
-from typing import Final
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import asdict
+from typing import Any, Final
 from uuid import UUID
 
 from dishka import AsyncContainer
@@ -55,14 +61,19 @@ from learnic.application.common.auth.authorizer import (
     Authorizer,
     AuthzTarget,
 )
+from learnic.application.common.collaboration.event_bus import (
+    ContentEventBus,
+)
 from learnic.application.common.errors import (
     InsufficientPermissionsError,
     InvalidTokenError,
 )
+from learnic.application.common.events.events import Event
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
 )
+from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import Authenticator
@@ -81,7 +92,7 @@ async def product_ws(
     websocket: WebSocket,
     product_id: UUID = _PRODUCT_ID_PATH,
 ) -> None:
-    """One-way push of :class:`ProductEvent` for a single product.
+    """One-way push of every product / content event for a product.
 
     See module-level docstring for the full protocol.
     """
@@ -100,6 +111,9 @@ async def product_ws(
         if product is None:
             await websocket.close(code=4404, reason="product not found")
             return
+        has_course_content = product.supports(
+            ProductCapability.HAS_COURSE_CONTENT,
+        )
 
         authorizer = await request_scope.get(Authorizer)
         try:
@@ -115,19 +129,84 @@ async def product_ws(
             )
             return
 
-    event_bus = await container.get(ProductEventBus)
+    product_event_bus = await container.get(ProductEventBus)
+    content_event_bus: ContentEventBus | None = None
+    if has_course_content:
+        content_event_bus = await container.get(ContentEventBus)
+
+    product_id_obj = ProductID(product_id)
+    streams: list[AsyncIterator[Event[Any]]] = [
+        product_event_bus.subscribe(product_id_obj),
+    ]
+    if content_event_bus is not None:
+        streams.append(content_event_bus.subscribe(product_id_obj))
 
     await websocket.accept()
     try:
-        async for event in event_bus.subscribe(ProductID(product_id)):
+        async for event in _fan_in(streams):
             await websocket.send_json(
                 {
-                    "kind": event.kind.value,
+                    "kind": type(event.payload).KIND,
                     "product_id": str(event.product_id),
                     "actor_id": str(event.actor_id),
-                    "payload": event.payload,
+                    "payload": asdict(event.payload),
                     "occurred_at": event.occurred_at.isoformat(),
                 },
             )
     except WebSocketDisconnect:
         pass
+
+
+async def _fan_in(
+    streams: list[AsyncIterator[Event[Any]]],
+) -> AsyncIterator[Event[Any]]:
+    """Merge several per-product event streams into one.
+
+    Each input stream keeps its own publish ordering; the relative
+    order across streams is whatever the underlying buses publish
+    in. The SPA does not depend on cross-bus sequencing — every
+    `kind` drives an independent slice of the React Query cache.
+
+    Cancellation: when the consumer stops iterating (the WS
+    disconnects or the handler exits), the generator's ``finally``
+    cancels the pump tasks, which propagates ``CancelledError``
+    into each subscribe iterator and runs its cleanup (unsubscribe
+    from Redis, release the pubsub object).
+    """
+    # `None` is the per-stream completion marker — `Event` is a
+    # dataclass and can never be `None`, so the discriminator is
+    # unambiguous and lets mypy narrow the queue item to `Event[Any]`
+    # after the sentinel and exception checks below.
+    queue: asyncio.Queue[Event[Any] | BaseException | None] = asyncio.Queue()
+
+    async def pump(stream: AsyncIterator[Event[Any]]) -> None:
+        try:
+            async for event in stream:
+                await queue.put(event)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:  # noqa: BLE001
+            await queue.put(exc)
+        finally:
+            await queue.put(None)
+
+    tasks = [asyncio.create_task(pump(s)) for s in streams]
+    pending = len(tasks)
+
+    try:
+        while pending > 0:
+            item = await queue.get()
+            if item is None:
+                pending -= 1
+                continue
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass

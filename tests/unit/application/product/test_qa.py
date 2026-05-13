@@ -22,6 +22,11 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
 )
+from learnic.application.common.product_events import (
+    QaDeletedPayload,
+    QaQuestionChangedPayload,
+    QaReorderedPayload,
+)
 from learnic.entities.product.models import Product
 from learnic.entities.product.qa import ProductQA
 from learnic.entities.product.value_objects import QAAnswer, QAQuestion
@@ -82,12 +87,12 @@ async def test_add_qa_persists_and_returns_id(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "qa_added"
+    assert type(event.payload).KIND == "qa_added"
     assert event.product_id == course_product.oid
-    assert event.payload["qa_id"] == str(qa_id)
-    assert event.payload["question"] == "Will I get a certificate?"
-    assert event.payload["answer"] == "Yes."
-    assert event.payload["position"] == 0
+    assert event.payload.qa_id == str(qa_id)
+    assert event.payload.question == "Will I get a certificate?"
+    assert event.payload.answer == "Yes."
+    assert event.payload.position == 0
 
 
 async def test_add_qa_non_owner_raises(
@@ -160,11 +165,11 @@ async def test_change_question_updates_value(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "qa_question_changed"
-    assert event.payload == {
-        "qa_id": str(existing_qa.oid),
-        "question": "New question?",
-    }
+    assert type(event.payload).KIND == "qa_question_changed"
+    assert event.payload == QaQuestionChangedPayload(
+        qa_id=str(existing_qa.oid),
+        question="New question?",
+    )
 
 
 async def test_change_question_missing_qa_raises(
@@ -266,8 +271,10 @@ async def test_reorder_updates_position(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "qa_reordered"
-    assert event.payload == {"qa_id": str(existing_qa.oid), "position": 5}
+    assert type(event.payload).KIND == "qa_reordered"
+    assert event.payload == QaReorderedPayload(
+        qa_id=str(existing_qa.oid), position=5,
+    )
 
 
 async def test_delete_qa_calls_gateway_delete(
@@ -301,5 +308,5 @@ async def test_delete_qa_calls_gateway_delete(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "qa_deleted"
-    assert event.payload == {"qa_id": str(existing_qa.oid)}
+    assert type(event.payload).KIND == "qa_deleted"
+    assert event.payload == QaDeletedPayload(qa_id=str(existing_qa.oid))

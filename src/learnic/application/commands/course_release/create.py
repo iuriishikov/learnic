@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    ReleaseCreatedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import EntityNotFoundError
@@ -19,7 +19,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    PublishedPayload,
     publish_product_event,
 )
 from learnic.entities.course_release.enums import CourseReleaseKind
@@ -122,30 +122,19 @@ class CreateCourseReleaseCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.RELEASE_CREATED,
+            payload=ReleaseCreatedPayload.from_entity(release),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload={
-                "release_id": str(release.oid),
-                "ordinal": release.ordinal,
-                "version": [
-                    release.version.major,
-                    release.version.minor,
-                    release.version.patch,
-                ],
-                "kind": release.kind.value,
-            },
         )
         if auto_published:
             assert product.published_at is not None
             await publish_product_event(
                 self._product_event_bus,
-                kind=ProductEventKind.PUBLISHED,
+                payload=PublishedPayload(
+                    status=product.status.value,
+                    published_at=product.published_at.isoformat(),
+                ),
                 product_id=product.oid,
                 actor_id=data.actor_id,
-                payload={
-                    "status": product.status.value,
-                    "published_at": product.published_at.isoformat(),
-                },
             )
         return release

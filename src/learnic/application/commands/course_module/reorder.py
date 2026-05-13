@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    ModulesReorderedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -75,8 +75,9 @@ class ReorderCourseModulesCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.MODULES_REORDERED,
+            payload=ModulesReorderedPayload(
+                ordered_ids=[str(oid) for oid in data.ordered_ids],
+            ),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload={"ordered_ids": [str(oid) for oid in data.ordered_ids]},
         )

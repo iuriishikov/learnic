@@ -65,8 +65,7 @@ def _unique_name(
     while True:
         existing = bind.execute(
             sa.text(
-                "SELECT 1 FROM roles "
-                "WHERE product_id = :pid AND name = :name LIMIT 1",
+                "SELECT 1 FROM roles WHERE product_id = :pid AND name = :name LIMIT 1",
             ),
             {"pid": product_id, "name": candidate},
         ).first()
@@ -74,9 +73,7 @@ def _unique_name(
             return candidate
         suffix += 1
         candidate = (
-            f"{base_name} (copy)"
-            if suffix == 1
-            else f"{base_name} (copy {suffix})"
+            f"{base_name} (copy)" if suffix == 1 else f"{base_name} (copy {suffix})"
         )
 
 
@@ -105,8 +102,7 @@ def _materialise_per_product_replacements(
     for product_id, system_role_id in pairs:
         source = bind.execute(
             sa.text(
-                "SELECT name, description "
-                "FROM roles WHERE oid = :oid",
+                "SELECT name, description FROM roles WHERE oid = :oid",
             ),
             {"oid": system_role_id},
         ).first()
@@ -116,8 +112,7 @@ def _materialise_per_product_replacements(
             row[0]
             for row in bind.execute(
                 sa.text(
-                    "SELECT permission FROM role_permissions "
-                    "WHERE role_id = :rid",
+                    "SELECT permission FROM role_permissions WHERE role_id = :rid",
                 ),
                 {"rid": system_role_id},
             ).fetchall()
@@ -156,10 +151,7 @@ def _materialise_per_product_replacements(
                     "INSERT INTO role_permissions (role_id, permission) "
                     "VALUES (:rid, :permission)",
                 ),
-                [
-                    {"rid": new_oid, "permission": p}
-                    for p in permissions
-                ],
+                [{"rid": new_oid, "permission": p} for p in permissions],
             )
 
         # Drop colliding grants on the new role first (the dest pair
@@ -301,9 +293,7 @@ def downgrade() -> None:
             {
                 "oid": _COMMENTOR_ID,
                 "name": "Commentor",
-                "description": (
-                    "Read access plus the ability to leave comments."
-                ),
+                "description": ("Read access plus the ability to leave comments."),
                 "position": 300,
             },
             {

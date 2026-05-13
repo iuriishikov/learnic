@@ -11,8 +11,7 @@ from learnic.application.common.persistence.role import RoleGateway, RoleSaver
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
-    make_role_payload,
+    RoleUpdatedPayload,
     publish_product_event,
 )
 from learnic.entities.role.errors import (
@@ -93,10 +92,7 @@ class UpdateCustomRoleCommandHandler:
                 AuthzTarget.for_product(role.product_id),
             )
             requested = expand_implied(frozenset(data.permissions))
-            if (
-                actor_perms is None
-                or not requested.issubset(actor_perms.permissions)
-            ):
+            if actor_perms is None or not requested.issubset(actor_perms.permissions):
                 raise CannotGrantPermissionsBeyondOwnSetError
             role.update_permissions(PermissionSet(data.permissions))
             permissions_changed = True
@@ -111,8 +107,7 @@ class UpdateCustomRoleCommandHandler:
         role.updated_at = datetime.now(timezone.utc)
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.ROLE_UPDATED,
+            payload=RoleUpdatedPayload.from_entity(role),
             product_id=role.product_id,
             actor_id=data.actor_id,
-            payload=make_role_payload(role),
         )

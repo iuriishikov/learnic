@@ -7,8 +7,8 @@ from learnic.application.common.persistence.file import FilesGateway
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    CoverRemovedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID
@@ -58,8 +58,7 @@ class RemoveProductCoverCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COVER_REMOVED,
+            payload=CoverRemovedPayload(),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={},
         )

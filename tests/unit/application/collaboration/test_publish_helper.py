@@ -3,9 +3,10 @@ from unittest.mock import AsyncMock
 
 from learnic.application.common.collaboration import (
     ContentEvent,
-    ContentEventKind,
+    ModuleRenamedPayload,
     publish_content_event,
 )
+from learnic.application.common.events import Event
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
@@ -15,20 +16,20 @@ async def test_publish_content_event_builds_and_forwards() -> None:
     bus.publish = AsyncMock()
     product_id = ProductID(uuid.uuid4())
     actor_id = UserID(uuid.uuid4())
+    payload = ModuleRenamedPayload(module_id="abc", title="x")
 
     await publish_content_event(
         bus,
-        kind=ContentEventKind.MODULE_RENAMED,
+        payload=payload,
         product_id=product_id,
         actor_id=actor_id,
-        payload={"module_id": "abc", "title": "x"},
     )
 
     bus.publish.assert_awaited_once()
     event: ContentEvent = bus.publish.call_args.args[0]
-    assert isinstance(event, ContentEvent)
-    assert event.kind is ContentEventKind.MODULE_RENAMED
+    assert isinstance(event, Event)
+    assert event.payload is payload
+    assert type(event.payload).KIND == "module_renamed"
     assert event.product_id == product_id
     assert event.actor_id == actor_id
-    assert event.payload == {"module_id": "abc", "title": "x"}
     assert event.occurred_at is not None

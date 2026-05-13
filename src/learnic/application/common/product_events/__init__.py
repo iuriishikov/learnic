@@ -1,52 +1,69 @@
-from datetime import datetime, timezone
-from typing import Any
-
+from learnic.application.common.events import publish_event
 from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
 )
-from learnic.application.common.product_events.events import (
-    ProductEvent,
-    ProductEventKind,
-    make_collaboration_payload,
-    make_role_deleted_payload,
-    make_role_payload,
+from learnic.application.common.product_events.events import ProductEvent
+from learnic.application.common.product_events.payloads import (
+    ArchivedPayload,
+    CollaborationAcceptedPayload,
+    CollaborationDeclinedPayload,
+    CollaborationGrantsUpdatedPayload,
+    CollaborationInvitedPayload,
+    CollaborationRevokedPayload,
+    CoverChangedPayload,
+    CoverRemovedPayload,
+    DeletedPayload,
+    DescriptionChangedPayload,
+    DurationChangedPayload,
+    NameChangedPayload,
+    ProductPayload,
+    PublishedPayload,
+    QaAddedPayload,
+    QaAnswerChangedPayload,
+    QaDeletedPayload,
+    QaQuestionChangedPayload,
+    QaReorderedPayload,
+    RoleCreatedPayload,
+    RoleDeletedPayload,
+    RoleUpdatedPayload,
+    UnarchivedPayload,
+    WebinarDefaultsUpdatedPayload,
+    payload_from_wire,
 )
-from learnic.entities.product.ids import ProductID
-from learnic.entities.user.models import UserID
 
-
-async def publish_product_event(
-    bus: ProductEventBus,
-    *,
-    kind: ProductEventKind,
-    product_id: ProductID,
-    actor_id: UserID,
-    payload: dict[str, Any],
-) -> None:
-    """Build a :class:`ProductEvent` with ``occurred_at`` and publish.
-
-    Thin helper so handlers don't repeat the timestamp + dataclass
-    construction in every mutation. Always called **after**
-    ``transaction.commit()`` so a rolled-back command never
-    publishes.
-    """
-    await bus.publish(
-        ProductEvent(
-            kind=kind,
-            product_id=product_id,
-            actor_id=actor_id,
-            payload=payload,
-            occurred_at=datetime.now(timezone.utc),
-        ),
-    )
+# Alias for migration ergonomics — handlers depend on
+# ``publish_product_event`` for documentation value, but it is
+# the generic helper under the hood.
+publish_product_event = publish_event
 
 
 __all__ = [
+    "ArchivedPayload",
+    "CollaborationAcceptedPayload",
+    "CollaborationDeclinedPayload",
+    "CollaborationGrantsUpdatedPayload",
+    "CollaborationInvitedPayload",
+    "CollaborationRevokedPayload",
+    "CoverChangedPayload",
+    "CoverRemovedPayload",
+    "DeletedPayload",
+    "DescriptionChangedPayload",
+    "DurationChangedPayload",
+    "NameChangedPayload",
     "ProductEvent",
     "ProductEventBus",
-    "ProductEventKind",
-    "make_collaboration_payload",
-    "make_role_deleted_payload",
-    "make_role_payload",
+    "ProductPayload",
+    "PublishedPayload",
+    "QaAddedPayload",
+    "QaAnswerChangedPayload",
+    "QaDeletedPayload",
+    "QaQuestionChangedPayload",
+    "QaReorderedPayload",
+    "RoleCreatedPayload",
+    "RoleDeletedPayload",
+    "RoleUpdatedPayload",
+    "UnarchivedPayload",
+    "WebinarDefaultsUpdatedPayload",
+    "payload_from_wire",
     "publish_product_event",
 ]

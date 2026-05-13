@@ -3,7 +3,7 @@
 Adds the ``'declined'`` value to the
 ``product_collaboration_status`` enum so the recipient of an
 in-app invite can explicitly reject it via
-``POST /collaborations/{id}/decline-in-app``. The companion
+``POST /collaborations/{id}/decline``. The companion
 ``declined_at`` column and the rebuilt partial unique index
 that excludes the new terminal state live in the next
 migration (``l6f7a8b9c0d1``) — PostgreSQL refuses to use a new
@@ -30,8 +30,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.execute(
-        "ALTER TYPE product_collaboration_status ADD VALUE IF NOT EXISTS "
-        "'declined'",
+        "ALTER TYPE product_collaboration_status ADD VALUE IF NOT EXISTS 'declined'",
     )
 
 

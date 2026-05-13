@@ -10,7 +10,7 @@ from learnic.application.common.persistence.product_qa import (
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    QaReorderedPayload,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductQAID
@@ -59,11 +59,10 @@ class ReorderProductQACommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.QA_REORDERED,
+            payload=QaReorderedPayload(
+                qa_id=str(qa.oid),
+                position=qa.position,
+            ),
             product_id=qa.product_id,
             actor_id=data.actor_id,
-            payload={
-                "qa_id": str(qa.oid),
-                "position": qa.position,
-            },
         )

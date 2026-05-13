@@ -3,8 +3,8 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
+    BlockDeletedPayload,
     ContentEventBus,
-    ContentEventKind,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -61,8 +61,7 @@ class DeleteLessonBlockCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.BLOCK_DELETED,
+            payload=BlockDeletedPayload(block_id=str(data.block_id)),
             product_id=product_id,
             actor_id=data.actor_id,
-            payload={"block_id": str(data.block_id)},
         )

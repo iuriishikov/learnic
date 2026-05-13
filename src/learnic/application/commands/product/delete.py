@@ -9,8 +9,8 @@ from learnic.application.common.errors import (
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    DeletedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.entities.product.enums import ProductStatus
@@ -61,8 +61,7 @@ class DeleteProductCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.DELETED,
+            payload=DeletedPayload(),
             product_id=product_id,
             actor_id=data.actor_id,
-            payload={},
         )

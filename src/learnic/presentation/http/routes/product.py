@@ -98,7 +98,6 @@ from learnic.application.common.pagination import (
     Pagination,
 )
 from learnic.application.common.persistence.product import (
-    ProductView,
     WebinarDetailsView,
 )
 from learnic.application.common.persistence.cohort import CohortView
@@ -114,6 +113,7 @@ from learnic.application.queries.product.check_name_availability import (
 from learnic.application.queries.product.get import (
     GetProductQuery,
     GetProductQueryHandler,
+    ProductOutput,
 )
 from learnic.application.queries.product.get_my import (
     GetMyProductsQuery,
@@ -318,7 +318,10 @@ class ProductSchema(BaseModel):
                         "email": "a*****a@example.com",
                     },
                     "webinar_details": None,
-                    "cover_file_id": ("9f1e2d3c-4b5a-4d2c-9d11-9d4f0a44b6c8"),
+                    "cover_url": (
+                        "https://s3.example.com/products/cover.png"
+                        "?X-Amz-Signature=..."
+                    ),
                     "published_at": "2026-04-01T10:00:00+00:00",
                     "created_at": "2026-03-25T09:00:00+00:00",
                     "updated_at": "2026-04-01T10:00:00+00:00",
@@ -335,13 +338,24 @@ class ProductSchema(BaseModel):
     total_duration_in_hours: int | None
     author: UserRefSchema
     webinar_details: WebinarDetailsSchema | None
-    cover_file_id: UUID | None
+    cover_url: str | None = Field(
+        default=None,
+        description=(
+            "Short-lived presigned URL for the product's cover image, "
+            "or `null` when no cover is attached. The URL expires; "
+            "re-fetch the product resource to get a fresh one."
+        ),
+        examples=[
+            None,
+            "https://s3.example.com/products/cover.png?X-Amz-Signature=...",
+        ],
+    )
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def from_view(cls, view: ProductView) -> Self:
+    def from_output(cls, view: ProductOutput) -> Self:
         return cls(
             oid=view.oid,
             type=view.type,
@@ -355,7 +369,7 @@ class ProductSchema(BaseModel):
                 if view.webinar_details is not None
                 else None
             ),
-            cover_file_id=view.cover_file_id,
+            cover_url=view.cover_url,
             published_at=view.published_at,
             created_at=view.created_at,
             updated_at=view.updated_at,
@@ -1154,7 +1168,7 @@ async def get_mine(
             pagination=Pagination(limit=limit, offset=offset),
         ),
     )
-    return [ProductSchema.from_view(view) for view in views]
+    return [ProductSchema.from_output(view) for view in views]
 
 
 @router.get(
@@ -1251,7 +1265,7 @@ async def get_published(
             pagination=Pagination(limit=limit, offset=offset),
         ),
     )
-    return [ProductSchema.from_view(view) for view in views]
+    return [ProductSchema.from_output(view) for view in views]
 
 
 @router.get(
@@ -1280,7 +1294,7 @@ async def get_one(
         EntityNotFoundError: No product with the given id; HTTP 404.
     """
     view = await interactor.run(GetProductQuery(oid=ProductID(product_id)))
-    return ProductSchema.from_view(view)
+    return ProductSchema.from_output(view)
 
 
 # ============================== Q&A schemas ============================ #

@@ -15,6 +15,10 @@ from learnic.application.common.errors import (
     InsufficientPermissionsError,
     ProductNameAlreadyTakenError,
 )
+from learnic.application.common.product_events import (
+    DescriptionChangedPayload,
+    NameChangedPayload,
+)
 from learnic.entities.product.errors import (
     EmptyProductFieldError,
     ProductFieldTooLongError,
@@ -58,10 +62,10 @@ async def test_change_name_updates_and_commits(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "name_changed"
+    assert type(event.payload).KIND == "name_changed"
     assert event.product_id == course_product.oid
     assert event.actor_id == author_id
-    assert event.payload == {"name": "Renamed"}
+    assert event.payload == NameChangedPayload(name="Renamed")
 
 
 async def test_change_name_to_same_value_skips_uniqueness_check(
@@ -249,8 +253,8 @@ async def test_change_description_sanitizes_before_storing(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "description_changed"
-    assert event.payload == {"description": "<p>safe</p>"}
+    assert type(event.payload).KIND == "description_changed"
+    assert event.payload == DescriptionChangedPayload(description="<p>safe</p>")
 
 
 async def test_change_description_too_long_raises(

@@ -15,8 +15,7 @@ from learnic.application.common.persistence.role import (
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
-    make_role_payload,
+    RoleCreatedPayload,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID
@@ -122,9 +121,8 @@ class CreateCustomRoleCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.ROLE_CREATED,
+            payload=RoleCreatedPayload.from_entity(role),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload=make_role_payload(role),
         )
         return role.oid

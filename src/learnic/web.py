@@ -107,35 +107,44 @@ WS layer:
 - `4401` — missing or denied access cookie.
 - `4403` — authenticated, but not authorised (e.g. not the product
   author).
-- `4404` — target resource does not exist or is the wrong type
-  (e.g. opening the course-content channel on a webinar product).
+- `4404` — target resource does not exist.
 
 There is no server-side event buffering or replay. On reconnect the
 client refetches initial state via REST and re-subscribes — events
 emitted while disconnected are lost by design.
 
-### `WS /products/{product_id}/events` — product-level deltas
+### `WS /products/{product_id}/events` — unified product deltas
 
-Read-only push of product-metadata, webinar-defaults, Q&A and
-collaboration-lifecycle deltas to subscribers that hold
-`read_product` on the target product — the product owner
-(short-circuited as having every permission) and any active
-collaborator whose grants transitively include `read_product`
-(every editor / manager permission does). Non-authorised callers
-get `4403`. Course-content events flow through a separate channel
-(see below); cohorts (and their schedules / sessions) are
-intentionally not covered yet.
+Read-only push of every per-product delta — product metadata,
+cover, status, webinar defaults, Q&A, collaboration lifecycle,
+role catalogue, **and** course-content edits (modules, lessons,
+blocks, releases, draft reset) when the product is a course.
+Subscribers must hold `read_product` on the target product —
+the product owner (short-circuited as having every permission)
+and any active collaborator whose grants transitively include
+`read_product` (every editor / manager permission does).
+Non-authorised callers get `4403`. Webinar products see product
+events only; course-content `kind` values are emitted exclusively
+for products that carry the `has_course_content` capability.
+Cohorts (and their schedules / sessions) are intentionally not
+covered yet.
 
-Bootstrap by fetching `GET /products/{product_id}` (plus
-`GET /products/{product_id}/qa` if Q&A is shown and
-`GET /products/{product_id}/collaborations` if the team list is
-shown) before opening the socket.
+Bootstrap by fetching every REST resource the SPA renders from
+the channel before opening the socket: `GET /products/{id}`,
+`GET /products/{id}/qa` (if Q&A is shown),
+`GET /products/{id}/collaborations` (if the team tab is shown),
+and — for courses only —
+`GET /products/{id}/content/draft` and
+`GET /products/{id}/content/releases`.
 
-**Server → client envelope.**
+**Server → client envelope.** Both event families share one shape;
+`kind` is the discriminator declared on each member of either
+the `ProductPayload` or `ContentPayload` union (one dataclass
+per kind).
 
 ```json
 {
-  "kind": "<ProductEventKind value>",
+  "kind": "<Payload.KIND>",
   "product_id": "<UUID>",
   "actor_id": "<UUID>",
   "payload": { ... },
@@ -143,7 +152,7 @@ shown) before opening the socket.
 }
 ```
 
-**`kind` values** (drawn from `ProductEventKind`):
+**Product `kind` values** (`ProductPayload` union):
 
 - Metadata: `name_changed`, `description_changed`,
   `duration_changed`.
@@ -207,24 +216,8 @@ id. Crucially, `role_updated` doubles as a permission-change
 signal for every collaborator that holds this role: the SPA must
 recompute their effective permissions (drop the role from the
 local cache, re-derive any UI gating) when the event arrives.
-Client → server messages are not interpreted yet.
 
-### `WS /courses/{course_id}/events` — course-content deltas
-
-Read-only push of course-content edits (modules, lessons, blocks,
-releases, draft reset) to subscribers that hold `read_product` on
-the target course — the course owner and any active collaborator
-whose grants transitively include `read_product`. Non-authorised
-callers get `4403`. Course products only — opening this socket on
-a webinar product yields a `4404` close.
-
-Bootstrap by fetching
-`GET /products/{product_id}/content/draft` before opening the socket.
-
-**Server → client envelope.** Same shape as the product-level
-channel, with `kind` drawn from `ContentEventKind`.
-
-**`kind` values:**
+**Content `kind` values** (`ContentPayload` union — courses only):
 
 - Module: `module_added`, `module_renamed`,
   `module_description_updated`, `modules_reordered`, `module_deleted`.
@@ -234,8 +227,8 @@ channel, with `kind` drawn from `ContentEventKind`.
   `blocks_reordered`.
 - Release: `release_created`, `draft_reset`.
 
-`payload` is rich enough for the SPA to apply every `kind` in
-place via `setQueryData` without a follow-up REST round-trip.
+`payload` is rich enough for the SPA to apply every content `kind`
+in place via `setQueryData` without a follow-up REST round-trip.
 Container events (`module_added`, `lesson_added`, `block_added`,
 `block_updated`) carry a full snapshot of the affected entity in
 the same shape as the corresponding `GET /products/{id}/content/draft`
@@ -271,7 +264,13 @@ Concretely:
   "version", "kind"}` — refetch `GET /products/{id}/content/releases`
   for the full release record (notes, released_by, released_at).
 
-Client → server messages are not interpreted yet.
+Server-side, the two `kind` families originate from independent
+publish/subscribe buses (`ProductEventBus`, `ContentEventBus`)
+that the WS endpoint fans into a single stream. Cross-family
+ordering is not guaranteed — each `kind` drives an independent
+slice of the SPA cache, so the SPA must not rely on one family's
+event arriving before another's. Client → server messages are not
+interpreted yet.
 
 ### `WS /users/me/notifications` — per-user notification deltas
 
@@ -342,8 +341,8 @@ inside the `created` / `updated` envelopes):
 
 - `invite_sent` — a collaborator was invited; the panel renders
   the card with Accept / Decline buttons that call the in-app
-  endpoints (`POST /collaborations/{id}/accept-in-app` /
-  `POST /collaborations/{id}/decline-in-app`). The card's
+  endpoints (`POST /collaborations/{id}/accept` /
+  `POST /collaborations/{id}/decline`). The card's
   `details.collaboration` snapshot is the single source of
   truth for the resolved / unresolved UI state — the SPA does
   not need to remember the local "I just clicked Accept"
@@ -491,6 +490,18 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
+        "name": "UserSocialLinks",
+        "description": (
+            "Public list of social-network links per user — `(kind, "
+            "url)` pairs displayed on the public profile alongside "
+            "website / portfolio / public email. "
+            "`GET /users/{user_id}/social-links` is public; "
+            "`PUT /users/me/social-links` atomically replaces the "
+            "caller's list (order of `items` becomes the persisted "
+            "`position`, capped at `SOCIAL_LINKS_MAX_COUNT`)."
+        ),
+    },
+    {
         "name": "UserExperiences",
         "description": (
             "Per-user work / study timeline entries — icon, dates, "
@@ -616,7 +627,8 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "lives in the product's draft workspace; releases are "
             "introduced in a later phase and snapshot the draft. "
             "Real-time deltas of course-content edits flow over "
-            "`WS /courses/{course_id}/events` — see the "
+            "the unified product channel "
+            "`WS /products/{product_id}/events` — see the "
             "**WebSocket channels** section in the API description."
         ),
     },
@@ -656,7 +668,7 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "`/products/{product_id}/collaboration-invitation/"
             "{collaboration_id}/accept?token=...`. The SPA bounces "
             "unauthenticated users through `/login?next=...` and "
-            "POSTs the token to `POST /collaborations/{id}/accept`. "
+            "POSTs the token to `POST /collaborations/{id}/accept-by-token`. "
             "All collaborator-side notifications (invite, accept, "
             "revoke, grant change, self-leave) are delivered by "
             "email. Real-time deltas of the collaborator list flow "

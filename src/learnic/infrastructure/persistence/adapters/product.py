@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.pagination import Pagination
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.product import (
     ProductGateway,
     ProductReader,
@@ -21,6 +22,7 @@ from learnic.entities.product_collaboration.enums import (
     CollaborationStatus,
 )
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product import (
     product_webinar_details_table,
     products_table,
@@ -82,8 +84,15 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
             patronymic=row.author_patronymic,
         ),
         webinar_details=webinar_details,
-        cover_file_id=(
-            FileID(row.cover_file_id) if row.cover_file_id is not None else None
+        cover=(
+            FileView(
+                oid=FileID(row.cover_oid),
+                storage_name=row.cover_storage_name,
+                bucket=row.cover_bucket,
+                content_type=row.cover_content_type,
+            )
+            if row.cover_oid is not None
+            else None
         ),
         published_at=row.published_at,
         created_at=row.created_at,
@@ -93,6 +102,7 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
 
 def _select_with_joins() -> sa.Select[Any]:
     wd = product_webinar_details_table
+    cover = files_table.alias("cover")
     return sa.select(
         products_table.c.oid,
         products_table.c.type,
@@ -103,7 +113,10 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.c.published_at,
         products_table.c.created_at,
         products_table.c.updated_at,
-        products_table.c.cover_file_id,
+        cover.c.oid.label("cover_oid"),
+        cover.c.storage_name.label("cover_storage_name"),
+        cover.c.bucket.label("cover_bucket"),
+        cover.c.content_type.label("cover_content_type"),
         users_table.c.oid.label("author_oid"),
         users_table.c.email.label("author_email"),
         users_table.c.first_name.label("author_first_name"),
@@ -119,9 +132,17 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.join(
             users_table,
             products_table.c.author_id == users_table.c.oid,
-        ).outerjoin(
+        )
+        .outerjoin(
             wd,
             products_table.c.oid == wd.c.product_id,
+        )
+        .outerjoin(
+            cover,
+            sa.and_(
+                products_table.c.cover_file_id == cover.c.oid,
+                cover.c.deleted_at.is_(None),
+            ),
         ),
     )
 
@@ -148,8 +169,7 @@ class ProductReaderAlchemy(ProductReader):
             product_collaborations_table.c.product_id,
         ).where(
             product_collaborations_table.c.collaborator_id == user_id,
-            product_collaborations_table.c.status
-            == CollaborationStatus.ACTIVE.value,
+            product_collaborations_table.c.status == CollaborationStatus.ACTIVE.value,
         )
         stmt = (
             _select_with_joins()
@@ -174,6 +194,25 @@ class ProductReaderAlchemy(ProductReader):
         stmt = (
             _select_with_joins()
             .where(products_table.c.status == ProductStatus.PUBLISHED.value)
+            .order_by(products_table.c.created_at.desc())
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [_row_to_view(row) for row in rows]
+
+    @override
+    async def published_by_author(
+        self,
+        author_id: UserID,
+        pagination: Pagination,
+    ) -> list[ProductView]:
+        stmt = (
+            _select_with_joins()
+            .where(
+                products_table.c.author_id == author_id,
+                products_table.c.status == ProductStatus.PUBLISHED.value,
+            )
             .order_by(products_table.c.created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)

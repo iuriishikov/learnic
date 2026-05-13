@@ -43,7 +43,8 @@ class VerifyEmailCommandHandler:
 
     async def run(self, data: VerifyEmailCommand) -> None:
         user_id = await self._email_tokens.consume(
-            data.token, EmailTokenPurpose.VERIFY,
+            data.token,
+            EmailTokenPurpose.VERIFY,
         )
         user = await self._user_gateway.with_id(user_id)
         if user is None:

@@ -6,8 +6,8 @@ from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    DurationChangedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID
@@ -51,8 +51,9 @@ class ChangeProductDurationCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.DURATION_CHANGED,
+            payload=DurationChangedPayload(
+                total_duration_in_hours=new_duration.value,
+            ),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={"total_duration_in_hours": new_duration.value},
         )

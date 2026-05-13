@@ -93,9 +93,8 @@ class Authenticator:
         if not token:
             raise InvalidTokenError
         payload = self._access_tokens.decode(token)
-        if (
-            payload.family_id is not None
-            and await self._denylist.is_family_denied(payload.family_id)
+        if payload.family_id is not None and await self._denylist.is_family_denied(
+            payload.family_id
         ):
             raise InvalidTokenError
         return AccessContext(
@@ -125,9 +124,8 @@ class Authenticator:
         if not token:
             raise InvalidTokenError
         payload = self._access_tokens.decode(token)
-        if (
-            payload.family_id is not None
-            and await self._denylist.is_family_denied(payload.family_id)
+        if payload.family_id is not None and await self._denylist.is_family_denied(
+            payload.family_id
         ):
             raise InvalidTokenError
         return AccessContext(

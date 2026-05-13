@@ -31,6 +31,18 @@ from learnic.application.commands.user.change_patronymic import (
     ChangeUserPatronymicCommand,
     ChangeUserPatronymicCommandHandler,
 )
+from learnic.application.commands.user.change_portfolio_url import (
+    ChangeUserPortfolioUrlCommand,
+    ChangeUserPortfolioUrlCommandHandler,
+)
+from learnic.application.commands.user.change_public_email import (
+    ChangeUserPublicEmailCommand,
+    ChangeUserPublicEmailCommandHandler,
+)
+from learnic.application.commands.user.change_website_url import (
+    ChangeUserWebsiteUrlCommand,
+    ChangeUserWebsiteUrlCommandHandler,
+)
 from learnic.application.commands.user.cover.remove import (
     RemoveUserCoverCommand,
     RemoveUserCoverCommandHandler,
@@ -48,6 +60,10 @@ from learnic.application.common.pagination import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     Pagination,
+)
+from learnic.application.queries.product.get_by_user import (
+    GetUserProductsQuery,
+    GetUserProductsQueryHandler,
 )
 from learnic.application.queries.user.get import (
     GetUserQuery,
@@ -70,6 +86,9 @@ from learnic.entities.user.constants import (
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
     PATRONYMIC_MAX_LEN,
+    PORTFOLIO_URL_MAX_LEN,
+    PUBLIC_EMAIL_MAX_LEN,
+    WEBSITE_URL_MAX_LEN,
 )
 from learnic.entities.user.models import UserID
 from learnic.presentation.http.common.auth_deps import (
@@ -89,6 +108,11 @@ from learnic.presentation.http.common.schemas import (
     UserSchema,
     UserSummarySchema,
 )
+# Importing a sibling-router's response model is the deliberate trade-off:
+# the `Products` aggregate owns `ProductSchema`, but the public-profile
+# rail returns it from a user-prefixed URL (per the URL-hierarchy rule).
+# Cross-importing the schema is cheaper than duplicating it.
+from learnic.presentation.http.routes.product import ProductSchema
 from learnic.presentation.http.common.uploads import read_image_upload
 
 router = ErrorAwareRouter(
@@ -158,6 +182,76 @@ class ChangePatronymicSchema(BaseModel):
         ),
         max_length=PATRONYMIC_MAX_LEN,
         examples=["Augusta", None],
+    )
+
+
+class ChangeWebsiteUrlSchema(BaseModel):
+    """Body for `PUT /users/me/website-url`. `null` clears the field."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"value": "https://example.com"},
+                {"value": None},
+            ],
+        },
+    )
+
+    value: str | None = Field(
+        description=(
+            "New personal-website URL, or `null` to clear it. Must "
+            "start with `http://` or `https://`. Max length is "
+            f"{WEBSITE_URL_MAX_LEN} characters (`WEBSITE_URL_MAX_LEN`)."
+        ),
+        max_length=WEBSITE_URL_MAX_LEN,
+        examples=["https://example.com", None],
+    )
+
+
+class ChangePortfolioUrlSchema(BaseModel):
+    """Body for `PUT /users/me/portfolio-url`. `null` clears the field."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"value": "https://dribbble.com/example"},
+                {"value": None},
+            ],
+        },
+    )
+
+    value: str | None = Field(
+        description=(
+            "New portfolio URL, or `null` to clear it. Must start with "
+            "`http://` or `https://`. Max length is "
+            f"{PORTFOLIO_URL_MAX_LEN} characters (`PORTFOLIO_URL_MAX_LEN`)."
+        ),
+        max_length=PORTFOLIO_URL_MAX_LEN,
+        examples=["https://dribbble.com/example", None],
+    )
+
+
+class ChangePublicEmailSchema(BaseModel):
+    """Body for `PUT /users/me/public-email`. `null` clears the field."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"value": "hello@example.com"},
+                {"value": None},
+            ],
+        },
+    )
+
+    value: str | None = Field(
+        description=(
+            "Public contact email shown on the profile, or `null` to "
+            "clear it. Distinct from the login email — there is no "
+            "verification flow. Must contain `@`. Max length is "
+            f"{PUBLIC_EMAIL_MAX_LEN} characters (`PUBLIC_EMAIL_MAX_LEN`)."
+        ),
+        max_length=PUBLIC_EMAIL_MAX_LEN,
+        examples=["hello@example.com", None],
     )
 
 
@@ -232,9 +326,7 @@ async def search(
         DEFAULT_LIMIT,
         ge=1,
         le=MAX_LIMIT,
-        description=(
-            f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."
-        ),
+        description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
         examples=[20],
     ),
 ) -> list[UserSummarySchema]:
@@ -721,3 +813,169 @@ async def delete_cover(
     """
     ctx = await auth.authenticate(request)
     await interactor.run(RemoveUserCoverCommand(user_id=ctx.user_id))
+
+
+@router.put(
+    "/me/website-url",
+    summary="Change or clear the current user's personal website URL",
+    operation_id="changeMyWebsiteUrl",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_website_url(
+    request: Request,
+    payload: ChangeWebsiteUrlSchema,
+    interactor: FromDishka[ChangeUserWebsiteUrlCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace (or clear) the current user's personal website URL.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "https://..." | null}``; constrained to
+            ``WEBSITE_URL_MAX_LEN`` chars by the request schema and
+            re-validated by the ``WebsiteUrl`` value object.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``WebsiteUrl`` VO invariants violated (empty,
+            too long, or non-`http(s)` scheme); HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserWebsiteUrlCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.put(
+    "/me/portfolio-url",
+    summary="Change or clear the current user's portfolio URL",
+    operation_id="changeMyPortfolioUrl",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_portfolio_url(
+    request: Request,
+    payload: ChangePortfolioUrlSchema,
+    interactor: FromDishka[ChangeUserPortfolioUrlCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace (or clear) the current user's portfolio URL.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "https://..." | null}``.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``PortfolioUrl`` VO invariants violated; HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserPortfolioUrlCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.put(
+    "/me/public-email",
+    summary="Change or clear the current user's public contact email",
+    operation_id="changeMyPublicEmail",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def change_public_email(
+    request: Request,
+    payload: ChangePublicEmailSchema,
+    interactor: FromDishka[ChangeUserPublicEmailCommandHandler],
+    auth: FromDishka[Authenticator],
+) -> None:
+    """Replace (or clear) the public contact email shown on the profile.
+
+    Distinct from the login email — there is no verification step;
+    the user is solely responsible for the address they publish.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"value": "contact@example.com" | null}``.
+        interactor: Injected command handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+        FieldError: ``PublicEmail`` VO invariants violated (no `@`
+            or value too long); HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeUserPublicEmailCommand(user_id=ctx.user_id, value=payload.value)
+    )
+
+
+@router.get(
+    "/{user_id}/products",
+    summary="List the user's published products",
+    operation_id="getUserProducts",
+    response_model=list[ProductSchema],
+)
+async def get_products(
+    interactor: FromDishka[GetUserProductsQueryHandler],
+    user_id: UUID = _USER_ID_PATH,
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
+        examples=[20],
+    ),
+) -> list[ProductSchema]:
+    """Return ``user_id``'s published products, newest first.
+
+    Powers the public profile page's "products" rail. Drafts,
+    archived, and banned products are excluded — only ``PUBLISHED``
+    rows are visible. An unknown ``user_id`` simply returns an empty
+    list rather than 404 so the rail renders an empty state without
+    breaking the rest of the profile page.
+
+    Args:
+        interactor: Injected list-user-products query handler.
+        user_id: Target user's UUID, parsed from the URL path.
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        List of :class:`ProductSchema`, ordered by ``created_at``
+        descending. Empty when the user has no published products
+        (or does not exist).
+    """
+    views = await interactor.run(
+        GetUserProductsQuery(
+            user_id=UserID(user_id),
+            pagination=Pagination(limit=limit, offset=offset),
+        ),
+    )
+    return [ProductSchema.from_output(view) for view in views]

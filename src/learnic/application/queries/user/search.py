@@ -38,6 +38,7 @@ class UserSummaryOutput:
 
     oid: UserID
     full_name: str
+    is_verified: bool
     avatar_url: str | None
 
 
@@ -75,6 +76,7 @@ class SearchUsersQueryHandler:
                     full_name=build_full_name(
                         view.first_name, view.last_name, view.patronymic
                     ),
+                    is_verified=view.is_verified,
                     avatar_url=avatar_url,
                 )
             )

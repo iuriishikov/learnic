@@ -1,56 +1,71 @@
-from datetime import datetime, timezone
-from typing import Any
-
 from learnic.application.common.collaboration.event_bus import (
     ContentEventBus,
 )
-from learnic.application.common.collaboration.events import (
-    ContentEvent,
-    ContentEventKind,
-    block_added_payload,
-    block_updated_payload,
-    lesson_added_payload,
-    lesson_moved_payload,
-    module_added_payload,
+from learnic.application.common.collaboration.events import ContentEvent
+from learnic.application.common.collaboration.payloads import (
+    BlockAddedPayload,
+    BlockDeletedPayload,
+    BlocksReorderedPayload,
+    BlockSnapshot,
+    BlockUpdatedPayload,
+    CodeBlockSnapshot,
+    CodeBlockTabSnapshot,
+    ContentPayload,
+    DraftResetPayload,
+    HtmlBlockSnapshot,
+    KatexBlockSnapshot,
+    LessonAddedPayload,
+    LessonDeletedPayload,
+    LessonMovedPayload,
+    LessonRenamedPayload,
+    LessonSnapshot,
+    LessonsReorderedPayload,
+    ModuleAddedPayload,
+    ModuleDeletedPayload,
+    ModuleDescriptionUpdatedPayload,
+    ModuleRenamedPayload,
+    ModuleSnapshot,
+    ModulesReorderedPayload,
+    ReleaseCreatedPayload,
+    RutubeVideoBlockSnapshot,
+    payload_from_wire,
 )
-from learnic.entities.product.ids import ProductID
-from learnic.entities.user.models import UserID
+from learnic.application.common.events import publish_event
 
-
-async def publish_content_event(
-    bus: ContentEventBus,
-    *,
-    kind: ContentEventKind,
-    product_id: ProductID,
-    actor_id: UserID,
-    payload: dict[str, Any],
-) -> None:
-    """Build a :class:`ContentEvent` with ``occurred_at`` and publish.
-
-    Thin helper so handlers don't repeat the timestamp + dataclass
-    construction in every mutation. Always called **after**
-    ``transaction.commit()`` so a rolled-back command never
-    publishes.
-    """
-    await bus.publish(
-        ContentEvent(
-            kind=kind,
-            product_id=product_id,
-            actor_id=actor_id,
-            payload=payload,
-            occurred_at=datetime.now(timezone.utc),
-        ),
-    )
+# Alias for migration ergonomics — handlers depend on
+# ``publish_content_event`` for documentation value, but it is
+# the generic helper under the hood.
+publish_content_event = publish_event
 
 
 __all__ = [
+    "BlockAddedPayload",
+    "BlockDeletedPayload",
+    "BlockSnapshot",
+    "BlockUpdatedPayload",
+    "BlocksReorderedPayload",
+    "CodeBlockSnapshot",
+    "CodeBlockTabSnapshot",
     "ContentEvent",
     "ContentEventBus",
-    "ContentEventKind",
-    "block_added_payload",
-    "block_updated_payload",
-    "lesson_added_payload",
-    "lesson_moved_payload",
-    "module_added_payload",
+    "ContentPayload",
+    "DraftResetPayload",
+    "HtmlBlockSnapshot",
+    "KatexBlockSnapshot",
+    "LessonAddedPayload",
+    "LessonDeletedPayload",
+    "LessonMovedPayload",
+    "LessonRenamedPayload",
+    "LessonSnapshot",
+    "LessonsReorderedPayload",
+    "ModuleAddedPayload",
+    "ModuleDeletedPayload",
+    "ModuleDescriptionUpdatedPayload",
+    "ModuleRenamedPayload",
+    "ModuleSnapshot",
+    "ModulesReorderedPayload",
+    "ReleaseCreatedPayload",
+    "RutubeVideoBlockSnapshot",
+    "payload_from_wire",
     "publish_content_event",
 ]

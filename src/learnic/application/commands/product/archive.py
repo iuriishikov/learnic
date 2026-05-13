@@ -6,8 +6,8 @@ from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    ArchivedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID
@@ -48,8 +48,7 @@ class ArchiveProductCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.ARCHIVED,
+            payload=ArchivedPayload(status=product.status.value),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={"status": product.status.value},
         )

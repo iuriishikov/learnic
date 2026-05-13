@@ -15,9 +15,13 @@ class UserView:
     first_name: str
     last_name: str
     patronymic: str | None
+    is_verified: bool
     description: str | None
     avatar: FileView | None
     cover: FileView | None
+    website_url: str | None
+    portfolio_url: str | None
+    public_email: str | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,6 +38,7 @@ class UserSummaryView:
     first_name: str
     last_name: str
     patronymic: str | None
+    is_verified: bool
     avatar: FileView | None
 
 

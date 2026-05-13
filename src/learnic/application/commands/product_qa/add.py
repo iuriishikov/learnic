@@ -10,7 +10,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    QaAddedPayload,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID, ProductQAID
@@ -66,14 +66,13 @@ class AddProductQACommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.QA_ADDED,
+            payload=QaAddedPayload(
+                qa_id=str(qa.oid),
+                question=qa.question.value,
+                answer=qa.answer.value,
+                position=qa.position,
+            ),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload={
-                "qa_id": str(qa.oid),
-                "question": qa.question.value,
-                "answer": qa.answer.value,
-                "position": qa.position,
-            },
         )
         return qa.oid

@@ -10,7 +10,10 @@ from learnic.entities.user.value_objects import (
     LastName,
     PasswordHash,
     Patronymic,
+    PortfolioUrl,
+    PublicEmail,
     UserDescription,
+    WebsiteUrl,
 )
 
 UserID = NewType("UserID", uuid.UUID)
@@ -24,9 +27,13 @@ class User(BaseEntity[UserID]):
     patronymic: Patronymic | None
     password_hash: PasswordHash
     email_verified: bool
+    is_verified: bool = False
     description: UserDescription | None = None
     avatar_file_id: FileID | None = None
     cover_file_id: FileID | None = None
+    website_url: WebsiteUrl | None = None
+    portfolio_url: PortfolioUrl | None = None
+    public_email: PublicEmail | None = None
 
     def change_email(self, new_email: Email) -> None:
         self.email = new_email
@@ -71,6 +78,15 @@ class User(BaseEntity[UserID]):
         self.cover_file_id = None
         return previous
 
+    def change_website_url(self, new_value: WebsiteUrl | None) -> None:
+        self.website_url = new_value
+
+    def change_portfolio_url(self, new_value: PortfolioUrl | None) -> None:
+        self.portfolio_url = new_value
+
+    def change_public_email(self, new_value: PublicEmail | None) -> None:
+        self.public_email = new_value
+
     @classmethod
     def create_user(
         cls,
@@ -88,6 +104,7 @@ class User(BaseEntity[UserID]):
             patronymic=patronymic,
             password_hash=password_hash,
             email_verified=False,
+            is_verified=False,
             description=None,
             avatar_file_id=None,
             cover_file_id=None,

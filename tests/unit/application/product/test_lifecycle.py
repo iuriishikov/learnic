@@ -25,6 +25,10 @@ from learnic.application.common.errors import (
     ProductNotArchivedError,
     ProductNotInDraftError,
 )
+from learnic.application.common.product_events import (
+    ArchivedPayload,
+    UnarchivedPayload,
+)
 from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.models import Product
 from learnic.entities.user.models import UserID
@@ -58,10 +62,10 @@ async def test_publish_webinar_sets_status_and_published_at(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "published"
+    assert type(event.payload).KIND == "published"
     assert event.product_id == webinar_product.oid
-    assert event.payload["status"] == "published"
-    assert event.payload["published_at"] is not None
+    assert event.payload.status == "published"
+    assert event.payload.published_at is not None
 
 
 async def test_publish_webinar_idempotent_on_already_published(
@@ -148,8 +152,8 @@ async def test_archive_sets_status_archived(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "archived"
-    assert event.payload == {"status": "archived"}
+    assert type(event.payload).KIND == "archived"
+    assert event.payload == ArchivedPayload(status="archived")
 
 
 async def test_unarchive_draft_returns_to_draft(
@@ -180,8 +184,8 @@ async def test_unarchive_draft_returns_to_draft(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "unarchived"
-    assert event.payload == {"status": "draft"}
+    assert type(event.payload).KIND == "unarchived"
+    assert event.payload == UnarchivedPayload(status="draft")
 
 
 async def test_unarchive_previously_published_returns_to_published(
@@ -212,7 +216,7 @@ async def test_unarchive_previously_published_returns_to_published(
     assert webinar_product.status is ProductStatus.PUBLISHED
     fake_transaction.commit.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.payload == {"status": "published"}
+    assert event.payload == UnarchivedPayload(status="published")
 
 
 async def test_unarchive_non_archived_raises(
@@ -300,7 +304,7 @@ async def test_delete_draft_product_succeeds(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "deleted"
+    assert type(event.payload).KIND == "deleted"
     assert event.product_id == course_product.oid
 
 

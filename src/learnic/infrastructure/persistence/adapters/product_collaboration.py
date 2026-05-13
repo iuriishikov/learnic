@@ -64,8 +64,10 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
             product_collaborations_table.c.product_id == product_id,
             product_collaborations_table.c.collaborator_id == collaborator_id,
             sa.or_(
-                product_collaborations_table.c.status == CollaborationStatus.ACTIVE.value,
-                product_collaborations_table.c.status == CollaborationStatus.PENDING_INVITE.value
+                product_collaborations_table.c.status
+                == CollaborationStatus.ACTIVE.value,
+                product_collaborations_table.c.status
+                == CollaborationStatus.PENDING_INVITE.value,
             ),
         )
         collab = (await self._session.execute(stmt)).scalar_one_or_none()
@@ -98,12 +100,16 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
         actor_id: UserID,
         since: datetime,
     ) -> int:
-        stmt = sa.select(sa.func.count()).select_from(
-            product_collaborations_table,
-        ).where(
-            product_collaborations_table.c.invited_by == actor_id,
-            product_collaborations_table.c.invited_email.is_not(None),
-            product_collaborations_table.c.created_at >= since,
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(
+                product_collaborations_table,
+            )
+            .where(
+                product_collaborations_table.c.invited_by == actor_id,
+                product_collaborations_table.c.invited_email.is_not(None),
+                product_collaborations_table.c.created_at >= since,
+            )
         )
         result = await self._session.execute(stmt)
         return int(result.scalar_one())

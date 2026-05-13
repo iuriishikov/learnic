@@ -20,9 +20,8 @@ from learnic.application.common.persistence.product_collaboration import (
 )
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    CollaborationRevokedPayload,
     ProductEventBus,
-    ProductEventKind,
-    make_collaboration_payload,
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
@@ -104,13 +103,12 @@ class LeaveProductCommandHandler:
         )
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COLLABORATION_REVOKED,
-            product_id=data.product_id,
-            actor_id=data.actor_id,
-            payload=make_collaboration_payload(
+            payload=CollaborationRevokedPayload.of(
                 collaboration_id=collab.oid,
                 collaborator_id=data.actor_id,
             ),
+            product_id=data.product_id,
+            actor_id=data.actor_id,
         )
         # The leaver's own ``invite_sent`` card (now in ACTIVE state
         # since they accepted earlier) needs to flip to REVOKED in

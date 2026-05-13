@@ -8,7 +8,7 @@ from learnic.application.commands.course_draft.reset import (
     ResetCourseDraftCommand,
     ResetCourseDraftCommandHandler,
 )
-from learnic.application.common.collaboration.events import ContentEventKind
+from learnic.application.common.collaboration import DraftResetPayload
 from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
@@ -123,14 +123,13 @@ async def test_reset_rehydrates_draft_and_publishes_event() -> None:
     tx.commit.assert_awaited_once()
     event_bus.publish.assert_awaited_once()
     published = event_bus.publish.await_args.args[0]
-    assert published.kind is ContentEventKind.DRAFT_RESET
     assert published.product_id == course.oid
     assert published.actor_id == author
-    assert published.payload == {
-        "release_id": str(release.oid),
-        "ordinal": 2,
-        "version": [1, 1, 0],
-    }
+    assert published.payload == DraftResetPayload(
+        release_id=str(release.oid),
+        ordinal=2,
+        version=[1, 1, 0],
+    )
 
 
 async def test_reset_missing_product_raises() -> None:

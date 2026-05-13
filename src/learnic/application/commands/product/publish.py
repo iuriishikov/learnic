@@ -10,7 +10,7 @@ from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    PublishedPayload,
     publish_product_event,
 )
 from learnic.entities.product.enums import ProductStatus, ProductType
@@ -66,11 +66,10 @@ class PublishProductCommandHandler:
         assert product.published_at is not None
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.PUBLISHED,
+            payload=PublishedPayload(
+                status=product.status.value,
+                published_at=product.published_at.isoformat(),
+            ),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={
-                "status": product.status.value,
-                "published_at": product.published_at.isoformat(),
-            },
         )

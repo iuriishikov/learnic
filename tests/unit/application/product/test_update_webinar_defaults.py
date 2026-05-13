@@ -7,6 +7,9 @@ from learnic.application.commands.product.update_webinar_defaults import (
     UpdateWebinarDefaultsCommandHandler,
 )
 from learnic.application.common.errors import InsufficientPermissionsError
+from learnic.application.common.product_events import (
+    WebinarDefaultsUpdatedPayload,
+)
 from learnic.entities.product.errors import (
     InvalidWebinarLessonsError,
     ProductDoesNotSupportError,
@@ -61,17 +64,17 @@ async def test_update_replaces_all_fields(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "webinar_defaults_updated"
+    assert type(event.payload).KIND == "webinar_defaults_updated"
     assert event.product_id == webinar_product.oid
     assert event.actor_id == author_id
-    assert event.payload == {
-        "total_lessons": 12,
-        "default_duration_minutes": 120,
-        "allow_recording": False,
-        "default_max_participants": 25,
-        "default_stream_url": "https://meet.example.com/new",
-        "access_window_minutes": 20,
-    }
+    assert event.payload == WebinarDefaultsUpdatedPayload(
+        total_lessons=12,
+        default_duration_minutes=120,
+        allow_recording=False,
+        default_max_participants=25,
+        default_stream_url="https://meet.example.com/new",
+        access_window_minutes=20,
+    )
 
 
 async def test_update_clears_optional_fields_with_none(
@@ -111,9 +114,9 @@ async def test_update_clears_optional_fields_with_none(
     assert details.access_window_minutes is None
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.payload["default_max_participants"] is None
-    assert event.payload["default_stream_url"] is None
-    assert event.payload["access_window_minutes"] is None
+    assert event.payload.default_max_participants is None
+    assert event.payload.default_stream_url is None
+    assert event.payload.access_window_minutes is None
 
 
 async def test_update_on_course_raises(
@@ -234,8 +237,8 @@ async def test_update_creates_details_when_missing(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "webinar_defaults_updated"
-    assert event.payload["total_lessons"] == 6
+    assert type(event.payload).KIND == "webinar_defaults_updated"
+    assert event.payload.total_lessons == 6
 
 
 async def test_update_invalid_lessons_raises_field_error(

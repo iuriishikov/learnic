@@ -20,9 +20,8 @@ from learnic.application.common.persistence.product_collaboration import (
 from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    CollaborationGrantsUpdatedPayload,
     ProductEventBus,
-    ProductEventKind,
-    make_collaboration_payload,
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
@@ -134,11 +133,10 @@ class UpdateCollaborationGrantsCommandHandler:
             )
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COLLABORATION_GRANTS_UPDATED,
-            product_id=collab.product_id,
-            actor_id=data.actor_id,
-            payload=make_collaboration_payload(
+            payload=CollaborationGrantsUpdatedPayload.of(
                 collaboration_id=collab.oid,
                 collaborator_id=collab.collaborator_id,
             ),
+            product_id=collab.product_id,
+            actor_id=data.actor_id,
         )

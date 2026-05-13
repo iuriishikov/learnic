@@ -23,15 +23,22 @@ class UserOutput:
     ``full_name`` collapses ``last_name`` / ``first_name`` /
     ``patronymic`` into the canonical Russian-style display name.
     ``email`` is masked via :func:`mask_email` so the public profile
-    projection never leaks a plain address.
+    projection never leaks a plain address. ``public_email`` is the
+    optional, user-supplied contact email distinct from the login
+    address — surfaced un-masked because the user explicitly
+    chose to publish it.
     """
 
     oid: UserID
     full_name: str
     email: str
+    is_verified: bool
     description: str | None
     avatar_url: str | None
     cover_url: str | None
+    website_url: str | None
+    portfolio_url: str | None
+    public_email: str | None
 
 
 @final
@@ -61,11 +68,13 @@ class GetUserQueryHandler:
 
         return UserOutput(
             oid=view.oid,
-            full_name=build_full_name(
-                view.first_name, view.last_name, view.patronymic
-            ),
+            full_name=build_full_name(view.first_name, view.last_name, view.patronymic),
             email=mask_email(view.email),
+            is_verified=view.is_verified,
             description=view.description,
             avatar_url=avatar_url,
             cover_url=cover_url,
+            website_url=view.website_url,
+            portfolio_url=view.portfolio_url,
+            public_email=view.public_email,
         )

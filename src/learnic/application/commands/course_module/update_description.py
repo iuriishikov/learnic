@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    ModuleDescriptionUpdatedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -66,13 +66,12 @@ class UpdateCourseModuleDescriptionCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.MODULE_DESCRIPTION_UPDATED,
-            product_id=module.product_id,
-            actor_id=data.actor_id,
-            payload={
-                "module_id": str(module.oid),
-                "description": (
+            payload=ModuleDescriptionUpdatedPayload(
+                module_id=str(module.oid),
+                description=(
                     new_description.value if new_description is not None else None
                 ),
-            },
+            ),
+            product_id=module.product_id,
+            actor_id=data.actor_id,
         )

@@ -322,8 +322,7 @@ class TokenStatusResponse(BaseModel):
 
     purpose: str = Field(
         description=(
-            "Purpose the token was issued for. Mirrors "
-            "`EmailTokenPurpose` values."
+            "Purpose the token was issued for. Mirrors `EmailTokenPurpose` values."
         ),
         examples=["verify", "reset"],
     )
@@ -990,7 +989,7 @@ class SessionSchema(BaseModel):
         default=None,
         description=(
             "Short human-readable label parsed from `user_agent` "
-            "(e.g. `\"Chrome on Windows\"`). Best-effort; may be "
+            '(e.g. `"Chrome on Windows"`). Best-effort; may be '
             "`null` when no heuristic matched."
         ),
     )

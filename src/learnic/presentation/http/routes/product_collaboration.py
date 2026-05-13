@@ -262,7 +262,7 @@ class InviteByEmailSchema(BaseModel):
 
 
 class AcceptInviteSchema(BaseModel):
-    """Body for ``POST /collaborations/{collaboration_id}/accept``."""
+    """Body for ``POST /collaborations/{collaboration_id}/accept-by-token``."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -685,9 +685,9 @@ async def leave_product(
 
 
 @collab_router.post(
-    "/{collaboration_id}/accept",
-    summary="Accept a pending collaboration invite",
-    operation_id="acceptCollaborationInvite",
+    "/{collaboration_id}/accept-by-token",
+    summary="Accept a pending collaboration invite via email token",
+    operation_id="acceptCollaborationInviteByToken",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=COLLABORATION_ACCEPT_MAP,
@@ -738,9 +738,9 @@ async def accept_invite(
 
 
 @collab_router.post(
-    "/{collaboration_id}/accept-in-app",
-    summary="Accept a pending collaboration invite from in-app",
-    operation_id="acceptCollaborationInviteInApp",
+    "/{collaboration_id}/accept",
+    summary="Accept a pending collaboration invite",
+    operation_id="acceptCollaborationInvite",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=COLLABORATION_ACCEPT_MAP,
@@ -753,8 +753,8 @@ async def accept_invite_in_app(
 ) -> None:
     """Accept a collaboration invite from an in-app notification.
 
-    Same as ``POST /collaborations/{id}/accept`` but without the
-    email-link token. The in-app channel is itself authenticated as
+    Same as ``POST /collaborations/{id}/accept-by-token`` but
+    without the email-link token. The in-app channel is itself authenticated as
     the recipient, so identity-based authorisation is sufficient.
 
     For by-user invites the caller's id must equal
@@ -763,7 +763,7 @@ async def accept_invite_in_app(
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected accept-in-app command handler.
+        interactor: Injected in-app accept command handler.
         auth: Injected authenticator.
         collaboration_id: Target collaboration, parsed from the URL
             path.
@@ -791,9 +791,9 @@ async def accept_invite_in_app(
 
 
 @collab_router.post(
-    "/{collaboration_id}/decline-in-app",
-    summary="Decline a pending collaboration invite from in-app",
-    operation_id="declineCollaborationInviteInApp",
+    "/{collaboration_id}/decline",
+    summary="Decline a pending collaboration invite",
+    operation_id="declineCollaborationInvite",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=COLLABORATION_ACCEPT_MAP,
@@ -806,7 +806,7 @@ async def decline_invite_in_app(
 ) -> None:
     """Decline a collaboration invite from an in-app notification.
 
-    Mirror of ``POST /collaborations/{id}/accept-in-app`` — same
+    Mirror of ``POST /collaborations/{id}/accept`` — same
     identity-based authorisation, but flips the collaboration to
     :class:`CollaborationStatus.DECLINED` and broadcasts a
     ``COLLABORATION_DECLINED`` product event so the inviter's
@@ -817,7 +817,7 @@ async def decline_invite_in_app(
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected decline-in-app command handler.
+        interactor: Injected in-app decline command handler.
         auth: Injected authenticator.
         collaboration_id: Target collaboration, parsed from the URL
             path.

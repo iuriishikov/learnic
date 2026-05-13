@@ -3,9 +3,8 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
+    BlockUpdatedPayload,
     ContentEventBus,
-    ContentEventKind,
-    block_updated_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -72,8 +71,7 @@ class UpdateKatexBlockCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.BLOCK_UPDATED,
+            payload=BlockUpdatedPayload.from_entity(block),
             product_id=block.product_id,
             actor_id=data.actor_id,
-            payload=block_updated_payload(block),
         )

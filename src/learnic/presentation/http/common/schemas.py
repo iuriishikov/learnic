@@ -21,6 +21,9 @@ from learnic.entities.user.constants import (
     FIRST_NAME_MAX_LEN,
     LAST_NAME_MAX_LEN,
     PATRONYMIC_MAX_LEN,
+    PORTFOLIO_URL_MAX_LEN,
+    PUBLIC_EMAIL_MAX_LEN,
+    WEBSITE_URL_MAX_LEN,
 )
 
 _FULL_NAME_MAX_LEN: int = (
@@ -84,6 +87,7 @@ class UserSchema(BaseModel):
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
                     "full_name": "Lovelace Ada",
                     "email": "a*****a@example.com",
+                    "is_verified": True,
                     "description": "<p>Mathematician.</p>",
                     "avatar_url": "https://s3.example.com/avatars/...",
                     "cover_url": None,
@@ -111,6 +115,16 @@ class UserSchema(BaseModel):
         min_length=1,
         max_length=EMAIL_MAX_LEN,
         examples=["a*****a@example.com"],
+    )
+    is_verified: bool = Field(
+        description=(
+            "Whether the platform has granted the user the public "
+            "\"verified\" badge — surfaced as a brand-coloured "
+            "checkmark on the avatar across the SPA. Distinct from "
+            "`email_verified`, which only tracks login-email "
+            "confirmation and is not surfaced through this API."
+        ),
+        examples=[True, False],
     )
     description: str | None = Field(
         description=(
@@ -144,6 +158,35 @@ class UserSchema(BaseModel):
             "https://s3.example.com/covers/user.png?X-Amz-Signature=...",
         ],
     )
+    website_url: str | None = Field(
+        description=(
+            "User-supplied personal website URL, or `null` when not "
+            "set. Always an absolute `http(s)` URL within "
+            f"{WEBSITE_URL_MAX_LEN} characters (`WEBSITE_URL_MAX_LEN`)."
+        ),
+        max_length=WEBSITE_URL_MAX_LEN,
+        examples=[None, "https://example.com"],
+    )
+    portfolio_url: str | None = Field(
+        description=(
+            "User-supplied portfolio URL, or `null` when not set. "
+            "Always an absolute `http(s)` URL within "
+            f"{PORTFOLIO_URL_MAX_LEN} characters (`PORTFOLIO_URL_MAX_LEN`)."
+        ),
+        max_length=PORTFOLIO_URL_MAX_LEN,
+        examples=[None, "https://dribbble.com/example"],
+    )
+    public_email: str | None = Field(
+        description=(
+            "User-supplied public contact email, or `null` when not "
+            "set. Distinct from the login email — surfaced un-masked "
+            "because the user explicitly opted in to publishing it. "
+            f"Max length is {PUBLIC_EMAIL_MAX_LEN} characters "
+            "(`PUBLIC_EMAIL_MAX_LEN`)."
+        ),
+        max_length=PUBLIC_EMAIL_MAX_LEN,
+        examples=[None, "hello@example.com"],
+    )
 
     @classmethod
     def from_view(cls, view: UserOutput) -> Self:
@@ -152,9 +195,13 @@ class UserSchema(BaseModel):
             oid=view.oid,
             full_name=view.full_name,
             email=view.email,
+            is_verified=view.is_verified,
             description=view.description,
             avatar_url=view.avatar_url,
             cover_url=view.cover_url,
+            website_url=view.website_url,
+            portfolio_url=view.portfolio_url,
+            public_email=view.public_email,
         )
 
 
@@ -175,6 +222,7 @@ class UserSummarySchema(BaseModel):
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
                     "full_name": "Lovelace Ada",
+                    "is_verified": True,
                     "avatar_url": "https://s3.example.com/avatars/...",
                 },
             ],
@@ -195,6 +243,14 @@ class UserSummarySchema(BaseModel):
         max_length=_FULL_NAME_MAX_LEN,
         examples=["Lovelace Ada"],
     )
+    is_verified: bool = Field(
+        description=(
+            "Whether the platform has granted the user the public "
+            "\"verified\" badge — surfaced as a brand-coloured "
+            "checkmark on the avatar across the SPA."
+        ),
+        examples=[True, False],
+    )
     avatar_url: str | None = Field(
         description=(
             "Short-lived presigned URL for the user's avatar, or "
@@ -213,6 +269,7 @@ class UserSummarySchema(BaseModel):
         return cls(
             oid=view.oid,
             full_name=view.full_name,
+            is_verified=view.is_verified,
             avatar_url=view.avatar_url,
         )
 
@@ -283,9 +340,7 @@ class UserRefSchema(BaseModel):
         """
         return cls(
             oid=view.oid,
-            full_name=build_full_name(
-                view.first_name, view.last_name, view.patronymic
-            ),
+            full_name=build_full_name(view.first_name, view.last_name, view.patronymic),
             email=mask_email(view.email) if view.email else "",
         )
 

@@ -82,15 +82,15 @@ async def test_add_module_appends_at_next_position(
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "module_added"
+    assert type(event.payload).KIND == "module_added"
     assert event.product_id == course_product.oid
     assert event.actor_id == author_id
-    module_payload = event.payload["module"]
-    assert module_payload["oid"] == str(saved.oid)
-    assert module_payload["title"] == "New"
-    assert module_payload["position"] == 3
-    assert module_payload["description"] is None
-    assert module_payload["lessons"] == []
+    module_snapshot = event.payload.module
+    assert module_snapshot.oid == str(saved.oid)
+    assert module_snapshot.title == "New"
+    assert module_snapshot.position == 3
+    assert module_snapshot.description is None
+    assert module_snapshot.lessons == []
 
 
 async def test_add_module_does_not_publish_on_validation_error(

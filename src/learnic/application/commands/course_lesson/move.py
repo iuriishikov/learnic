@@ -4,8 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
-    lesson_moved_payload,
+    LessonMovedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -94,13 +93,12 @@ class MoveCourseLessonCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.LESSON_MOVED,
-            product_id=lesson.product_id,
-            actor_id=data.actor_id,
-            payload=lesson_moved_payload(
+            payload=LessonMovedPayload.of(
                 lesson_id=lesson.oid,
                 from_module_id=from_module_id,
                 to_module_id=target_module.oid,
                 position=lesson.position,
             ),
+            product_id=lesson.product_id,
+            actor_id=data.actor_id,
         )

@@ -10,7 +10,7 @@ from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    UnarchivedPayload,
     publish_product_event,
 )
 from learnic.entities.product.enums import ProductStatus
@@ -65,8 +65,7 @@ class UnarchiveProductCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.UNARCHIVED,
+            payload=UnarchivedPayload(status=product.status.value),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={"status": product.status.value},
         )

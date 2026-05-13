@@ -50,8 +50,7 @@ def upgrade() -> None:
         ["product_id", "collaborator_id"],
         unique=True,
         postgresql_where=sa.text(
-            "collaborator_id IS NOT NULL "
-            "AND status NOT IN ('revoked', 'declined')",
+            "collaborator_id IS NOT NULL AND status NOT IN ('revoked', 'declined')",
         ),
     )
 

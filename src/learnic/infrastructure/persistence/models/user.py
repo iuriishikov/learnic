@@ -7,6 +7,9 @@ from learnic.entities.user.constants import (
     LAST_NAME_MAX_LEN,
     PASSWORD_HASH_MAX_LEN,
     PATRONYMIC_MAX_LEN,
+    PORTFOLIO_URL_MAX_LEN,
+    PUBLIC_EMAIL_MAX_LEN,
+    WEBSITE_URL_MAX_LEN,
 )
 from learnic.entities.user.models import User
 from learnic.entities.user.value_objects import (
@@ -15,7 +18,10 @@ from learnic.entities.user.value_objects import (
     LastName,
     PasswordHash,
     Patronymic,
+    PortfolioUrl,
+    PublicEmail,
     UserDescription,
+    WebsiteUrl,
 )
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
@@ -56,6 +62,12 @@ users_table = sa.Table(
         server_default=sa.false(),
     ),
     sa.Column(
+        "is_verified",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
         "description",
         sa.Text(),
         nullable=True,
@@ -80,6 +92,21 @@ users_table = sa.Table(
             use_alter=True,
             name="fk_users_cover_file_id",
         ),
+        nullable=True,
+    ),
+    sa.Column(
+        "website_url",
+        sa.String(WEBSITE_URL_MAX_LEN),
+        nullable=True,
+    ),
+    sa.Column(
+        "portfolio_url",
+        sa.String(PORTFOLIO_URL_MAX_LEN),
+        nullable=True,
+    ),
+    sa.Column(
+        "public_email",
+        sa.String(PUBLIC_EMAIL_MAX_LEN),
         nullable=True,
     ),
 )
@@ -115,12 +142,25 @@ def map_user_table() -> None:
                 users_table.c.password_hash,
             ),
             "email_verified": users_table.c.email_verified,
+            "is_verified": users_table.c.is_verified,
             "description": composite(
                 UserDescription.of_optional,
                 users_table.c.description,
             ),
             "avatar_file_id": users_table.c.avatar_file_id,
             "cover_file_id": users_table.c.cover_file_id,
+            "website_url": composite(
+                WebsiteUrl.of_optional,
+                users_table.c.website_url,
+            ),
+            "portfolio_url": composite(
+                PortfolioUrl.of_optional,
+                users_table.c.portfolio_url,
+            ),
+            "public_email": composite(
+                PublicEmail.of_optional,
+                users_table.c.public_email,
+            ),
         },
         column_prefix="_col_",
     )

@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user_ref import UserRefView
-from learnic.entities.file.ids import FileID
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
@@ -38,7 +38,7 @@ class ProductView:
     total_duration_in_hours: int | None
     author: UserRefView
     webinar_details: WebinarDetailsView | None
-    cover_file_id: FileID | None
+    cover: FileView | None
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -79,6 +79,19 @@ class ProductReader(Protocol):
         self,
         pagination: Pagination,
     ) -> list[ProductView]: ...
+
+    async def published_by_author(
+        self,
+        author_id: UserID,
+        pagination: Pagination,
+    ) -> list[ProductView]:
+        """Published products authored by ``author_id``, newest first.
+
+        Powers the public profile page's "products" section. Excludes
+        drafts, archived, and banned products — only ``PUBLISHED`` rows
+        are visible to non-author viewers.
+        """
+        ...
 
     async def name_exists(
         self,

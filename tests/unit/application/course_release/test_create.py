@@ -142,11 +142,11 @@ async def test_first_release_publishes_course_and_returns_release() -> None:
     tx.commit.assert_awaited_once()
     product_event_bus.publish.assert_awaited_once()
     event = product_event_bus.publish.call_args.args[0]
-    assert event.kind.value == "published"
+    assert type(event.payload).KIND == "published"
     assert event.product_id == course.oid
     assert event.actor_id == author
-    assert event.payload["status"] == "published"
-    assert "published_at" in event.payload
+    assert event.payload.status == "published"
+    assert event.payload.published_at is not None
 
 
 async def test_subsequent_release_does_not_change_status() -> None:

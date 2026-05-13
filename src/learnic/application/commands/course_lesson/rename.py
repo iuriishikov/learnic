@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    LessonRenamedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -60,11 +60,10 @@ class RenameCourseLessonCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.LESSON_RENAMED,
+            payload=LessonRenamedPayload(
+                lesson_id=str(lesson.oid),
+                title=lesson.title.value,
+            ),
             product_id=lesson.product_id,
             actor_id=data.actor_id,
-            payload={
-                "lesson_id": str(lesson.oid),
-                "title": lesson.title.value,
-            },
         )

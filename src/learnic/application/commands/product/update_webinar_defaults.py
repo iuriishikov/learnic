@@ -10,7 +10,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    WebinarDefaultsUpdatedPayload,
     publish_product_event,
 )
 from learnic.entities.product.capabilities import ProductCapability
@@ -118,25 +118,20 @@ class UpdateWebinarDefaultsCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.WEBINAR_DEFAULTS_UPDATED,
-            product_id=product.oid,
-            actor_id=data.actor_id,
-            payload={
-                "total_lessons": total_lessons.value,
-                "default_duration_minutes": default_duration.value,
-                "allow_recording": data.allow_recording,
-                "default_max_participants": (
-                    max_participants.value
-                    if max_participants is not None
-                    else None
+            payload=WebinarDefaultsUpdatedPayload(
+                total_lessons=total_lessons.value,
+                default_duration_minutes=default_duration.value,
+                allow_recording=data.allow_recording,
+                default_max_participants=(
+                    max_participants.value if max_participants is not None else None
                 ),
-                "default_stream_url": (
+                default_stream_url=(
                     stream_url.value if stream_url is not None else None
                 ),
-                "access_window_minutes": (
-                    access_window.value
-                    if access_window is not None
-                    else None
+                access_window_minutes=(
+                    access_window.value if access_window is not None else None
                 ),
-            },
+            ),
+            product_id=product.oid,
+            actor_id=data.actor_id,
         )

@@ -62,9 +62,7 @@ class CodeBlockView:
     tabs: list[CodeTabView]
 
 
-LessonBlockView = (
-    HtmlBlockView | KatexBlockView | RutubeVideoBlockView | CodeBlockView
-)
+LessonBlockView = HtmlBlockView | KatexBlockView | RutubeVideoBlockView | CodeBlockView
 
 
 @dataclass(slots=True, frozen=True)

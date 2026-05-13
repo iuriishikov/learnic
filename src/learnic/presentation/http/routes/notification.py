@@ -237,7 +237,7 @@ class NewLoginDetailsSchema(BaseModel):
             "the refresh-token family has been revoked, has expired, "
             "or no longer exists; ``False`` when an active row is "
             "still present. The SPA derives the initial state of "
-            "the \"Logout from this device\" CTA from this flag so "
+            'the "Logout from this device" CTA from this flag so '
             "the button reflects reality across reloads."
         ),
     )
@@ -245,7 +245,7 @@ class NewLoginDetailsSchema(BaseModel):
         default=None,
         description=(
             "Short human-readable label for the device that "
-            "performed the login (e.g. ``\"Chrome on macOS\"``). "
+            'performed the login (e.g. ``"Chrome on macOS"``). '
             "Derived heuristically from the User-Agent at the "
             "HTTP boundary."
         ),
@@ -254,7 +254,7 @@ class NewLoginDetailsSchema(BaseModel):
         default=None,
         description=(
             "Raw User-Agent header, truncated server-side. Use "
-            "for a \"see details\" expander when the short label "
+            'for a "see details" expander when the short label '
             "is not enough."
         ),
     )

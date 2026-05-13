@@ -4,7 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
+    LessonDeletedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -61,8 +61,7 @@ class DeleteCourseLessonCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.LESSON_DELETED,
+            payload=LessonDeletedPayload(lesson_id=str(data.lesson_id)),
             product_id=product_id,
             actor_id=data.actor_id,
-            payload={"lesson_id": str(data.lesson_id)},
         )

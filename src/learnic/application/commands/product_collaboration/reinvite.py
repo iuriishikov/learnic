@@ -22,9 +22,8 @@ from learnic.application.common.persistence.product_collaboration import (
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
+    CollaborationInvitedPayload,
     ProductEventBus,
-    ProductEventKind,
-    make_collaboration_payload,
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
@@ -172,10 +171,7 @@ class ReinviteCollaboratorCommandHandler:
             )
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COLLABORATION_INVITED,
-            product_id=collab.product_id,
-            actor_id=data.actor_id,
-            payload=make_collaboration_payload(
+            payload=CollaborationInvitedPayload.of(
                 collaboration_id=collab.oid,
                 collaborator_id=collab.collaborator_id,
                 invited_email=(
@@ -184,6 +180,8 @@ class ReinviteCollaboratorCommandHandler:
                     else None
                 ),
             ),
+            product_id=collab.product_id,
+            actor_id=data.actor_id,
         )
         recipient_id = await self._notification_recipient(collab)
         if recipient_id is not None:

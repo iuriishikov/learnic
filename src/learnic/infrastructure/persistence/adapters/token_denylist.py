@@ -25,8 +25,7 @@ class TokenDenylistAlchemy(TokenDenylist):
             await self._session.execute(
                 sa.select(sa.literal(1)).where(
                     family_denylist_table.c.family_id == family_id,
-                    family_denylist_table.c.expires_at
-                    > datetime.now(timezone.utc),
+                    family_denylist_table.c.expires_at > datetime.now(timezone.utc),
                 )
             )
         ).first()
@@ -53,8 +52,7 @@ class TokenDenylistAlchemy(TokenDenylist):
     async def cleanup_expired(self) -> int:
         result = await self._session.execute(
             sa.delete(family_denylist_table).where(
-                family_denylist_table.c.expires_at
-                <= datetime.now(timezone.utc),
+                family_denylist_table.c.expires_at <= datetime.now(timezone.utc),
             )
         )
         rowcount: int | None = getattr(result, "rowcount", None)

@@ -4,8 +4,7 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
     ContentEventBus,
-    ContentEventKind,
-    module_added_payload,
+    ModuleAddedPayload,
     publish_content_event,
 )
 from learnic.application.common.errors import EntityNotFoundError
@@ -86,9 +85,8 @@ class AddCourseModuleCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.MODULE_ADDED,
+            payload=ModuleAddedPayload.from_entity(module),
             product_id=data.product_id,
             actor_id=data.actor_id,
-            payload=module_added_payload(module),
         )
         return module.oid

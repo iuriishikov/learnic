@@ -336,6 +336,25 @@ from learnic.application.commands.user.change_last_name import (
 from learnic.application.commands.user.change_patronymic import (
     ChangeUserPatronymicCommandHandler,
 )
+from learnic.application.commands.user.change_portfolio_url import (
+    ChangeUserPortfolioUrlCommandHandler,
+)
+from learnic.application.commands.user.change_public_email import (
+    ChangeUserPublicEmailCommandHandler,
+)
+from learnic.application.commands.user.change_website_url import (
+    ChangeUserWebsiteUrlCommandHandler,
+)
+from learnic.application.commands.user_social_link.set_all import (
+    SetUserSocialLinksCommandHandler,
+)
+from learnic.application.common.persistence.user_social_link import (
+    UserSocialLinkGateway,
+    UserSocialLinkReader,
+)
+from learnic.application.queries.user_social_link.list_for_user import (
+    ListUserSocialLinksQueryHandler,
+)
 from learnic.application.commands.user.cover.remove import (
     RemoveUserCoverCommandHandler,
 )
@@ -538,6 +557,9 @@ from learnic.application.queries.product.get_my import (
 from learnic.application.queries.product.get_published import (
     GetPublishedProductsQueryHandler,
 )
+from learnic.application.queries.product.get_by_user import (
+    GetUserProductsQueryHandler,
+)
 from learnic.application.queries.cohort.get import (
     GetCohortQueryHandler,
 )
@@ -585,9 +607,6 @@ from learnic.application.queries.webinar_session.list_for_cohort import (
 )
 from learnic.application.commands.notification_preferences.update import (
     UpdateNotificationPreferencesCommandHandler,
-)
-from learnic.application.commands.push.send_to_user import (
-    SendPushToUserCommandHandler,
 )
 from learnic.application.commands.push.subscribe import (
     SubscribePushCommandHandler,
@@ -735,6 +754,10 @@ from learnic.infrastructure.persistence.adapters.user import (
     UserMapperAlchemy,
     UserReaderAlchemy,
 )
+from learnic.infrastructure.persistence.adapters.user_social_link import (
+    UserSocialLinkMapperAlchemy,
+    UserSocialLinkReaderAlchemy,
+)
 from learnic.infrastructure.persistence.adapters.user_experience import (
     UserExperienceMapperAlchemy,
     UserExperienceReaderAlchemy,
@@ -877,6 +900,14 @@ class GatewaysProvider(Provider):
     user_experience_reader = provide(
         UserExperienceReaderAlchemy,
         provides=UserExperienceReader,
+    )
+    user_social_link_gateway = provide(
+        UserSocialLinkMapperAlchemy,
+        provides=UserSocialLinkGateway,
+    )
+    user_social_link_reader = provide(
+        UserSocialLinkReaderAlchemy,
+        provides=UserSocialLinkReader,
     )
     cohort_gateway = provide(
         CohortMapperAlchemy,
@@ -1229,6 +1260,12 @@ class InteractorsProvider(Provider):
     change_user_last_name = provide(ChangeUserLastNameCommandHandler)
     change_user_patronymic = provide(ChangeUserPatronymicCommandHandler)
     change_user_description = provide(ChangeUserDescriptionCommandHandler)
+    change_user_website_url = provide(ChangeUserWebsiteUrlCommandHandler)
+    change_user_portfolio_url = provide(ChangeUserPortfolioUrlCommandHandler)
+    change_user_public_email = provide(ChangeUserPublicEmailCommandHandler)
+
+    set_user_social_links = provide(SetUserSocialLinksCommandHandler)
+    list_user_social_links = provide(ListUserSocialLinksQueryHandler)
 
     add_user_experience = provide(AddUserExperienceCommandHandler)
     update_user_experience = provide(UpdateUserExperienceCommandHandler)
@@ -1256,6 +1293,7 @@ class InteractorsProvider(Provider):
     get_product = provide(GetProductQueryHandler)
     get_my_products = provide(GetMyProductsQueryHandler)
     get_published_products = provide(GetPublishedProductsQueryHandler)
+    get_user_products = provide(GetUserProductsQueryHandler)
     check_product_name_availability = provide(
         CheckProductNameAvailabilityQueryHandler,
     )
@@ -1434,7 +1472,6 @@ class InteractorsProvider(Provider):
     subscribe_push = provide(SubscribePushCommandHandler)
     unsubscribe_push = provide(UnsubscribePushCommandHandler)
     list_my_push_subscriptions = provide(ListMyPushSubscriptionsQueryHandler)
-    send_push_to_user = provide(SendPushToUserCommandHandler)
     get_my_notification_preferences = provide(
         GetMyNotificationPreferencesQueryHandler,
     )

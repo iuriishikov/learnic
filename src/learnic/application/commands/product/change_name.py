@@ -12,8 +12,8 @@ from learnic.application.common.persistence.product import (
 )
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    NameChangedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductID
@@ -68,8 +68,7 @@ class ChangeProductNameCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.NAME_CHANGED,
+            payload=NameChangedPayload(name=new_name.value),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={"name": new_name.value},
         )

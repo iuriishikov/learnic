@@ -10,8 +10,7 @@ from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
-    make_role_deleted_payload,
+    RoleDeletedPayload,
     publish_product_event,
 )
 from learnic.entities.role.ids import RoleID
@@ -63,8 +62,7 @@ class DeleteCustomRoleCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.ROLE_DELETED,
+            payload=RoleDeletedPayload.of(role.oid),
             product_id=role.product_id,
             actor_id=data.actor_id,
-            payload=make_role_deleted_payload(role.oid),
         )

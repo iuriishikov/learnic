@@ -3,9 +3,8 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.collaboration import (
+    BlockAddedPayload,
     ContentEventBus,
-    ContentEventKind,
-    block_added_payload,
     publish_content_event,
 )
 from learnic.application.common.errors import (
@@ -110,12 +109,11 @@ class AddCodeBlockCommandHandler:
         await self._transaction.commit()
         await publish_content_event(
             self._event_bus,
-            kind=ContentEventKind.BLOCK_ADDED,
-            product_id=lesson.product_id,
-            actor_id=data.actor_id,
-            payload=block_added_payload(
+            payload=BlockAddedPayload.from_entity(
                 lesson_id=data.lesson_id,
                 block=block,
             ),
+            product_id=lesson.product_id,
+            actor_id=data.actor_id,
         )
         return block.oid

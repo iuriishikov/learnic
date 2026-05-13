@@ -29,3 +29,34 @@ class InvalidDescriptionError(FieldError):
     """Raised when a user description is empty or exceeds the length limit."""
 
     limit: int
+
+
+class InvalidContactUrlError(FieldError):
+    """Raised when ``WebsiteUrl`` / ``PortfolioUrl`` invariants are violated.
+
+    ``field`` distinguishes which contact URL was rejected (``website``
+    or ``portfolio``); ``reason`` is one of ``"empty"``, ``"too_long"``
+    or ``"invalid_scheme"``.
+    """
+
+    field: str
+    reason: str
+
+
+class InvalidPublicEmailError(FieldError):
+    """Raised when the publicly-visible contact email VO is malformed."""
+
+
+class TooManySocialLinksError(FieldError):
+    """Raised when more social links are supplied than the configured cap."""
+
+    limit: int
+
+
+class InvalidSocialLinkUrlError(FieldError):
+    """Raised when a social-link URL fails the URL invariants.
+
+    ``reason`` is one of ``"empty"``, ``"too_long"`` or ``"invalid_scheme"``.
+    """
+
+    reason: str

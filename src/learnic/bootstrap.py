@@ -42,6 +42,9 @@ from learnic.infrastructure.persistence.models.user import map_user_table
 from learnic.infrastructure.persistence.models.user_experience import (
     map_user_experience_table,
 )
+from learnic.infrastructure.persistence.models.user_social_link import (
+    map_user_social_link_table,
+)
 from learnic.infrastructure.persistence.models.webinar_enrollment import (
     map_webinar_enrollment_table,
 )
@@ -51,9 +54,6 @@ from learnic.presentation.http.routes.cohort import (
 )
 from learnic.presentation.http.routes.course_content import (
     router as course_content_router,
-)
-from learnic.presentation.http.routes.course_content_ws import (
-    router as course_content_ws_router,
 )
 from learnic.presentation.http.routes.course_enrollment import (
     me_router as my_course_enrollments_router,
@@ -117,6 +117,10 @@ from learnic.presentation.http.routes.user_experience import (
     me_router as my_user_experiences_router,
     router as user_experiences_router,
 )
+from learnic.presentation.http.routes.user_social_link import (
+    me_router as my_user_social_links_router,
+    router as user_social_links_router,
+)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -131,6 +135,8 @@ def setup_routes(app: FastAPI) -> None:
     app.include_router(user_router)
     app.include_router(user_experiences_router)
     app.include_router(my_user_experiences_router)
+    app.include_router(user_social_links_router)
+    app.include_router(my_user_social_links_router)
     app.include_router(product_router)
     app.include_router(product_course_router)
     app.include_router(product_qa_router)
@@ -143,7 +149,6 @@ def setup_routes(app: FastAPI) -> None:
     app.include_router(course_enrollment_router)
     app.include_router(my_course_enrollments_router)
     app.include_router(course_content_router)
-    app.include_router(course_content_ws_router)
     app.include_router(course_release_router)
     app.include_router(course_student_content_router)
     app.include_router(presence_router)
@@ -168,6 +173,7 @@ def setup_routes(app: FastAPI) -> None:
 def setup_map_tables() -> None:
     map_user_table()
     map_user_experience_table()
+    map_user_social_link_table()
     map_file_table()
     map_product_table()
     map_webinar_details_table()

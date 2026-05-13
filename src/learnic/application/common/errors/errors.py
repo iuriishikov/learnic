@@ -317,8 +317,7 @@ class EmailInviteRateLimitExceededError(ApplicationError):
         retry_after_seconds: int,
     ) -> None:
         super().__init__(
-            f"User {actor_id!r} exceeded the email-invite limit "
-            f"of {limit} per day",
+            f"User {actor_id!r} exceeded the email-invite limit of {limit} per day",
         )
         self.actor_id = actor_id
         self.limit = limit

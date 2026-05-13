@@ -15,9 +15,8 @@ from learnic.application.common.persistence.product_collaboration import (
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
+    CollaborationAcceptedPayload,
     ProductEventBus,
-    ProductEventKind,
-    make_collaboration_payload,
     publish_product_event,
 )
 from learnic.entities.notification.models import Notification
@@ -86,13 +85,12 @@ class AcceptCollaborationInAppCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.COLLABORATION_ACCEPTED,
-            product_id=collab.product_id,
-            actor_id=data.actor_id,
-            payload=make_collaboration_payload(
+            payload=CollaborationAcceptedPayload.of(
                 collaboration_id=collab.oid,
                 collaborator_id=data.actor_id,
             ),
+            product_id=collab.product_id,
+            actor_id=data.actor_id,
         )
         await self._notifications.publish(
             Notification.for_invite_accepted(

@@ -51,7 +51,11 @@ class UserReaderAlchemy(UserReader):
                 users_table.c.first_name,
                 users_table.c.last_name,
                 users_table.c.patronymic,
+                users_table.c.is_verified,
                 users_table.c.description,
+                users_table.c.website_url,
+                users_table.c.portfolio_url,
+                users_table.c.public_email,
                 avatar.c.oid.label("avatar_oid"),
                 avatar.c.storage_name.label("avatar_storage_name"),
                 avatar.c.bucket.label("avatar_bucket"),
@@ -88,7 +92,11 @@ class UserReaderAlchemy(UserReader):
             first_name=row.first_name,
             last_name=row.last_name,
             patronymic=row.patronymic,
+            is_verified=row.is_verified,
             description=row.description,
+            website_url=row.website_url,
+            portfolio_url=row.portfolio_url,
+            public_email=row.public_email,
             avatar=(
                 FileView(
                     oid=FileID(row.avatar_oid),
@@ -122,25 +130,23 @@ class UserReaderAlchemy(UserReader):
 
         avatar = files_table.alias("avatar")
 
-        stmt = (
-            sa.select(
-                users_table.c.oid,
-                users_table.c.first_name,
-                users_table.c.last_name,
-                users_table.c.patronymic,
-                avatar.c.oid.label("avatar_oid"),
-                avatar.c.storage_name.label("avatar_storage_name"),
-                avatar.c.bucket.label("avatar_bucket"),
-                avatar.c.content_type.label("avatar_content_type"),
-            )
-            .select_from(
-                users_table.outerjoin(
-                    avatar,
-                    sa.and_(
-                        users_table.c.avatar_file_id == avatar.c.oid,
-                        avatar.c.deleted_at.is_(None),
-                    ),
-                )
+        stmt = sa.select(
+            users_table.c.oid,
+            users_table.c.first_name,
+            users_table.c.last_name,
+            users_table.c.patronymic,
+            users_table.c.is_verified,
+            avatar.c.oid.label("avatar_oid"),
+            avatar.c.storage_name.label("avatar_storage_name"),
+            avatar.c.bucket.label("avatar_bucket"),
+            avatar.c.content_type.label("avatar_content_type"),
+        ).select_from(
+            users_table.outerjoin(
+                avatar,
+                sa.and_(
+                    users_table.c.avatar_file_id == avatar.c.oid,
+                    avatar.c.deleted_at.is_(None),
+                ),
             )
         )
 
@@ -177,6 +183,7 @@ class UserReaderAlchemy(UserReader):
                 first_name=row.first_name,
                 last_name=row.last_name,
                 patronymic=row.patronymic,
+                is_verified=row.is_verified,
                 avatar=(
                     FileView(
                         oid=FileID(row.avatar_oid),

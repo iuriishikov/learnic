@@ -10,7 +10,7 @@ from learnic.application.common.persistence.product_qa import (
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
-    ProductEventKind,
+    QaDeletedPayload,
     publish_product_event,
 )
 from learnic.entities.product.ids import ProductQAID
@@ -58,8 +58,7 @@ class DeleteProductQACommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.QA_DELETED,
+            payload=QaDeletedPayload(qa_id=str(qa_id)),
             product_id=product_id,
             actor_id=data.actor_id,
-            payload={"qa_id": str(qa_id)},
         )

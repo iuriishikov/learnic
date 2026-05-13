@@ -131,9 +131,7 @@ class PywebpushSender(PushSender):
             response.status_code,
             subscription.endpoint[:80],
         )
-        return _PushDeliveryResult(
-            is_gone=False, status_code=response.status_code
-        )
+        return _PushDeliveryResult(is_gone=False, status_code=response.status_code)
 
 
 def _send_blocking(

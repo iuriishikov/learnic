@@ -6,8 +6,8 @@ from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
+    DescriptionChangedPayload,
     ProductEventBus,
-    ProductEventKind,
     publish_product_event,
 )
 from learnic.application.common.security.html import HtmlSanitizer
@@ -57,8 +57,7 @@ class ChangeProductDescriptionCommandHandler:
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,
-            kind=ProductEventKind.DESCRIPTION_CHANGED,
+            payload=DescriptionChangedPayload(description=new_description.value),
             product_id=product.oid,
             actor_id=data.actor_id,
-            payload={"description": new_description.value},
         )

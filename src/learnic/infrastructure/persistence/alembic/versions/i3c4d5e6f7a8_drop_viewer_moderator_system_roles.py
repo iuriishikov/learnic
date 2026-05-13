@@ -47,7 +47,9 @@ _REASSIGNMENTS: tuple[tuple[uuid.UUID, uuid.UUID], ...] = (
 )
 
 
-def _reassign_grants(bind: sa.engine.Connection, src: uuid.UUID, dst: uuid.UUID) -> None:
+def _reassign_grants(
+    bind: sa.engine.Connection, src: uuid.UUID, dst: uuid.UUID
+) -> None:
     # Drop grants on ``src`` that would collide with an existing
     # grant on ``dst`` for the same (collaboration, scope, scope_id) —
     # otherwise the UPDATE below would violate uq_grant_unique_scope.
@@ -70,8 +72,7 @@ def _reassign_grants(bind: sa.engine.Connection, src: uuid.UUID, dst: uuid.UUID)
     )
     bind.execute(
         sa.text(
-            "UPDATE collaboration_grants SET role_id = :dst "
-            "WHERE role_id = :src",
+            "UPDATE collaboration_grants SET role_id = :dst WHERE role_id = :src",
         ),
         {"src": src, "dst": dst},
     )

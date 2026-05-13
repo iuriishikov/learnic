@@ -1288,9 +1288,7 @@ class CodeTabPayload(BaseModel):
         examples=["npm"],
     )
     source: str = Field(
-        description=(
-            f"Verbatim source. Max length {CODE_BLOCK_MAX_LEN} chars."
-        ),
+        description=(f"Verbatim source. Max length {CODE_BLOCK_MAX_LEN} chars."),
         max_length=CODE_BLOCK_MAX_LEN,
         examples=["npm install react"],
     )
