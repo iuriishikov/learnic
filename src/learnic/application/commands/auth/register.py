@@ -34,8 +34,6 @@ from learnic.entities.user.value_objects import (
     Patronymic,
     RawPassword,
 )
-from learnic.entities.wallet.enums import Currency
-from learnic.entities.wallet.models import Wallet
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,16 +89,6 @@ class RegisterCommandHandler:
         self._entity_saver.add_one(user)
         # Flush so the users row exists for the FK-referencing INSERTs below.
         await self._transaction.flush()
-
-        # Every new user gets a RUB wallet at registration. Multi-currency
-        # wallets will be added lazily when the platform launches markets
-        # beyond RU; until then a single RUB wallet is enough.
-        self._entity_saver.add_one(
-            Wallet.create_for_user(
-                user_id=user.oid,
-                currency=Currency.RUB,
-            ),
-        )
 
         verify_token = await self._email_tokens.issue(
             user.oid,

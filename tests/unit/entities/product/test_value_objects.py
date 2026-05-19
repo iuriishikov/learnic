@@ -1,43 +1,24 @@
 import pytest
 
 from learnic.entities.product.constants import (
-    ACCESS_WINDOW_MINUTES_MAX,
     DESCRIPTION_MAX_LEN,
     DURATION_HOURS_MAX,
     DURATION_HOURS_MIN,
-    PRICE_AMOUNT_MAX,
-    PRICE_AMOUNT_MIN,
     QA_ANSWER_MAX_LEN,
     QA_QUESTION_MAX_LEN,
-    STREAM_URL_MAX_LEN,
     TITLE_MAX_LEN,
-    WEBINAR_DURATION_MINUTES_MAX,
-    WEBINAR_LESSONS_MAX,
-    WEBINAR_PARTICIPANTS_MIN,
 )
 from learnic.entities.product.errors import (
     EmptyProductFieldError,
-    InvalidAccessWindowError,
-    InvalidParticipantsLimitError,
-    InvalidStreamUrlError,
-    InvalidWebinarDurationError,
-    InvalidWebinarLessonsError,
     ProductDurationOutOfRangeError,
     ProductFieldTooLongError,
-    ProductPriceOutOfRangeError,
 )
 from learnic.entities.product.value_objects import (
-    AccessWindow,
     DurationHours,
-    ParticipantsLimit,
     ProductDescription,
-    ProductPriceAmount,
     ProductTitle,
     QAAnswer,
     QAQuestion,
-    StreamUrl,
-    WebinarLessonsCount,
-    WebinarSessionDuration,
 )
 
 
@@ -108,103 +89,3 @@ class TestQAAnswer:
     def test_rejects_too_long(self) -> None:
         with pytest.raises(ProductFieldTooLongError):
             QAAnswer("x" * (QA_ANSWER_MAX_LEN + 1))
-
-
-class TestWebinarLessonsCount:
-    def test_accepts_min(self) -> None:
-        assert WebinarLessonsCount(1).value == 1
-
-    def test_accepts_max(self) -> None:
-        assert WebinarLessonsCount(WEBINAR_LESSONS_MAX).value == WEBINAR_LESSONS_MAX
-
-    @pytest.mark.parametrize("value", [0, -1, WEBINAR_LESSONS_MAX + 1])
-    def test_rejects_out_of_range(self, value: int) -> None:
-        with pytest.raises(InvalidWebinarLessonsError):
-            WebinarLessonsCount(value)
-
-
-class TestParticipantsLimit:
-    def test_accepts_min(self) -> None:
-        assert (
-            ParticipantsLimit(WEBINAR_PARTICIPANTS_MIN).value
-            == WEBINAR_PARTICIPANTS_MIN
-        )
-
-    def test_rejects_below_min(self) -> None:
-        with pytest.raises(InvalidParticipantsLimitError):
-            ParticipantsLimit(0)
-
-
-class TestWebinarSessionDuration:
-    def test_accepts_typical(self) -> None:
-        assert WebinarSessionDuration(60).value == 60
-
-    @pytest.mark.parametrize(
-        "value",
-        [0, -1, WEBINAR_DURATION_MINUTES_MAX + 1],
-    )
-    def test_rejects_out_of_range(self, value: int) -> None:
-        with pytest.raises(InvalidWebinarDurationError):
-            WebinarSessionDuration(value)
-
-
-class TestAccessWindow:
-    def test_accepts_zero(self) -> None:
-        assert AccessWindow(0).value == 0
-
-    def test_accepts_max(self) -> None:
-        assert (
-            AccessWindow(ACCESS_WINDOW_MINUTES_MAX).value == ACCESS_WINDOW_MINUTES_MAX
-        )
-
-    @pytest.mark.parametrize(
-        "value",
-        [-1, ACCESS_WINDOW_MINUTES_MAX + 1],
-    )
-    def test_rejects_out_of_range(self, value: int) -> None:
-        with pytest.raises(InvalidAccessWindowError):
-            AccessWindow(value)
-
-
-class TestStreamUrl:
-    def test_accepts_https(self) -> None:
-        url = StreamUrl("https://meet.example.com/x")
-        assert url.value == "https://meet.example.com/x"
-
-    def test_accepts_http(self) -> None:
-        url = StreamUrl("http://meet.example.com/x")
-        assert url.value == "http://meet.example.com/x"
-
-    def test_rejects_blank(self) -> None:
-        with pytest.raises(InvalidStreamUrlError) as exc:
-            StreamUrl("   ")
-        assert exc.value.reason == "empty"
-
-    def test_rejects_too_long(self) -> None:
-        with pytest.raises(InvalidStreamUrlError) as exc:
-            StreamUrl("https://" + "x" * STREAM_URL_MAX_LEN)
-        assert exc.value.reason == "too_long"
-
-    def test_rejects_invalid_scheme(self) -> None:
-        with pytest.raises(InvalidStreamUrlError) as exc:
-            StreamUrl("ftp://example.com/x")
-        assert exc.value.reason == "invalid_scheme"
-
-
-class TestProductPriceAmount:
-    def test_accepts_zero(self) -> None:
-        assert ProductPriceAmount(PRICE_AMOUNT_MIN).value == 0
-
-    def test_accepts_max(self) -> None:
-        assert ProductPriceAmount(PRICE_AMOUNT_MAX).value == PRICE_AMOUNT_MAX
-
-    def test_rejects_negative(self) -> None:
-        with pytest.raises(ProductPriceOutOfRangeError) as exc:
-            ProductPriceAmount(PRICE_AMOUNT_MIN - 1)
-        assert exc.value.field == "price_amount"
-        assert exc.value.minimum == PRICE_AMOUNT_MIN
-        assert exc.value.maximum == PRICE_AMOUNT_MAX
-
-    def test_rejects_above_max(self) -> None:
-        with pytest.raises(ProductPriceOutOfRangeError):
-            ProductPriceAmount(PRICE_AMOUNT_MAX + 1)

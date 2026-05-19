@@ -17,8 +17,6 @@ from learnic.entities.product.value_objects import (
     DurationHours,
     ProductDescription,
     ProductTitle,
-    WebinarLessonsCount,
-    WebinarSessionDuration,
 )
 from learnic.entities.user.models import UserID
 
@@ -123,14 +121,3 @@ def course_product(author_id: UserID) -> Product:
     )
 
 
-@pytest.fixture
-def webinar_product(author_id: UserID) -> Product:
-    return Product.create_webinar(
-        author_id=author_id,
-        name=ProductTitle("Original webinar"),
-        description=ProductDescription("<p>Live.</p>"),
-        total_duration_in_hours=DurationHours(8),
-        total_lessons=WebinarLessonsCount(4),
-        default_duration_minutes=WebinarSessionDuration(90),
-        allow_recording=True,
-    )

@@ -116,29 +116,6 @@ async def test_get_draft_without_permission_raises() -> None:
         )
 
 
-async def test_get_draft_webinar_raises() -> None:
-    author_id = UserID(uuid.uuid4())
-    webinar = Product.create_webinar(
-        author_id=author_id,
-        name=ProductTitle("Live"),
-    )
-    product_gateway = AsyncMock()
-    product_gateway.with_id = AsyncMock(return_value=webinar)
-    reader = AsyncMock()
-    handler = GetCourseDraftQueryHandler(
-        authorizer=_allow_authorizer(),
-        product_gateway=product_gateway,
-        content_reader=reader,
-    )
-    with pytest.raises(ProductDoesNotSupportError):
-        await handler.run(
-            GetCourseDraftQuery(
-                actor_id=author_id,
-                product_id=ProductID(webinar.oid),
-            ),
-        )
-
-
 async def test_get_draft_missing_raises() -> None:
     author_id = UserID(uuid.uuid4())
     product_gateway = AsyncMock()

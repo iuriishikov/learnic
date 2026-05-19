@@ -41,7 +41,6 @@ def _make_view(
             last_name="B",
             patronymic=None,
         ),
-        webinar_details=None,
         cover=None,
         published_at=published_at or _NOW,
         created_at=_NOW,

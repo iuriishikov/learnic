@@ -50,9 +50,6 @@ from learnic.application.commands.auth.verify_wait import (
 from learnic.application.queries.auth.token_status import (
     GetTokenStatusQueryHandler,
 )
-from learnic.application.commands.cohort.add import (
-    AddCohortCommandHandler,
-)
 from learnic.application.commands.course_block.add_code import (
     AddCodeBlockCommandHandler,
 )
@@ -92,14 +89,8 @@ from learnic.application.commands.enrollment.complete import (
 from learnic.application.commands.enrollment.enroll_in_course import (
     EnrollStudentInCourseCommandHandler,
 )
-from learnic.application.commands.enrollment.enroll_in_cohort import (
-    EnrollStudentInCohortCommandHandler,
-)
 from learnic.application.commands.enrollment.grant_course import (
     GrantCourseEnrollmentCommandHandler,
-)
-from learnic.application.commands.enrollment.refund import (
-    RefundEnrollmentCommandHandler,
 )
 from learnic.application.commands.enrollment.update_progress import (
     UpdateProgressCommandHandler,
@@ -137,38 +128,8 @@ from learnic.application.commands.course_module.update_description import (
 from learnic.application.commands.course_release.create import (
     CreateCourseReleaseCommandHandler,
 )
-from learnic.application.commands.cohort.cancel import (
-    CancelCohortCommandHandler,
-)
-from learnic.application.commands.cohort.close_enrollment import (
-    CloseCohortEnrollmentCommandHandler,
-)
-from learnic.application.commands.cohort.complete import (
-    CompleteCohortCommandHandler,
-)
-from learnic.application.commands.cohort.mark_full import (
-    MarkCohortFullCommandHandler,
-)
-from learnic.application.commands.cohort.open_enrollment import (
-    OpenCohortEnrollmentCommandHandler,
-)
-from learnic.application.commands.cohort.reschedule import (
-    RescheduleCohortCommandHandler,
-)
-from learnic.application.commands.cohort.start import (
-    StartCohortCommandHandler,
-)
-from learnic.application.commands.cohort.update_max_participants import (
-    UpdateCohortMaxParticipantsCommandHandler,
-)
-from learnic.application.commands.cohort.update_name import (
-    UpdateCohortNameCommandHandler,
-)
 from learnic.application.commands.product.add_course import (
     AddCourseProductCommandHandler,
-)
-from learnic.application.commands.product.add_webinar import (
-    AddWebinarProductCommandHandler,
 )
 from learnic.application.commands.product.archive import (
     ArchiveProductCommandHandler,
@@ -196,9 +157,6 @@ from learnic.application.commands.product.publish import (
 )
 from learnic.application.commands.product.unarchive import (
     UnarchiveProductCommandHandler,
-)
-from learnic.application.commands.product.update_webinar_defaults import (
-    UpdateWebinarDefaultsCommandHandler,
 )
 from learnic.application.commands.product_collaboration.accept import (
     AcceptCollaborationInviteCommandHandler,
@@ -291,39 +249,6 @@ from learnic.application.commands.product_qa.reorder import (
 from learnic.application.commands.user.avatar.remove import (
     RemoveUserAvatarCommandHandler,
 )
-from learnic.application.commands.webinar_schedule.add import (
-    AddWebinarScheduleCommandHandler,
-)
-from learnic.application.commands.webinar_schedule.delete import (
-    DeleteWebinarScheduleCommandHandler,
-)
-from learnic.application.commands.webinar_schedule.materialize import (
-    MaterializeWebinarScheduleCommandHandler,
-)
-from learnic.application.commands.webinar_schedule.update import (
-    UpdateWebinarScheduleCommandHandler,
-)
-from learnic.application.commands.webinar_session.add_one_off import (
-    AddOneOffWebinarSessionCommandHandler,
-)
-from learnic.application.commands.webinar_session.attach_recording import (
-    AttachWebinarSessionRecordingCommandHandler,
-)
-from learnic.application.commands.webinar_session.cancel import (
-    CancelWebinarSessionCommandHandler,
-)
-from learnic.application.commands.webinar_session.change_stream_url import (
-    ChangeWebinarSessionStreamUrlCommandHandler,
-)
-from learnic.application.commands.webinar_session.complete import (
-    CompleteWebinarSessionCommandHandler,
-)
-from learnic.application.commands.webinar_session.remove_recording import (
-    RemoveWebinarSessionRecordingCommandHandler,
-)
-from learnic.application.commands.webinar_session.reschedule import (
-    RescheduleWebinarSessionCommandHandler,
-)
 from learnic.application.commands.user.avatar.set import (
     SetUserAvatarCommandHandler,
 )
@@ -388,10 +313,6 @@ from learnic.application.queries.user_experience.list_for_user import (
 )
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.email.sender import EmailSender
-from learnic.application.common.persistence.cohort import (
-    CohortGateway,
-    CohortReader,
-)
 from learnic.application.common.persistence.course_block import (
     LessonBlockGateway,
 )
@@ -408,14 +329,11 @@ from learnic.application.common.enrollment.service import EnrollmentService
 from learnic.application.common.enrollment.strategies import (
     EnrollmentStrategy,
 )
-from learnic.application.common.enrollment.webinar_strategy import (
-    WebinarEnrollmentStrategy,
-)
 from learnic.application.common.persistence.enrollment import (
     EnrollmentGateway,
     EnrollmentReader,
 )
-from learnic.entities.enrollment.enums import EnrollmentType
+from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.application.common.persistence.course_lesson import (
     CourseLessonGateway,
 )
@@ -501,50 +419,9 @@ from learnic.application.common.auth.role_hierarchy import (
     RoleHierarchy,
     RoleHierarchyService,
 )
-from learnic.application.common.persistence.webinar_schedule import (
-    WebinarScheduleGateway,
-    WebinarScheduleReader,
-)
-from learnic.application.common.persistence.webinar_session import (
-    WebinarSessionGateway,
-    WebinarSessionReader,
-)
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
-)
-from learnic.application.commands.order.purchase import (
-    PurchaseConfig,
-    PurchaseProductCommandHandler,
-)
-from learnic.application.commands.order.refund import (
-    RefundPurchaseCommandHandler,
-)
-from learnic.application.commands.product.change_price import (
-    ChangeProductPriceCommandHandler,
-)
-from learnic.application.commands.wallet.credit import (
-    CreditWalletCommandHandler,
-)
-from learnic.application.commands.wallet.release_ripe import (
-    ReleaseRipeFreezesCommandHandler,
-)
-from learnic.application.common.persistence.order import (
-    OrderGateway,
-    OrderReader,
-)
-from learnic.application.common.persistence.wallet import (
-    FreezeEntryGateway,
-    LedgerEntryGateway,
-    LedgerReader,
-    WalletGateway,
-    WalletReader,
-)
-from learnic.application.queries.wallet.get_ledger import (
-    GetWalletLedgerQueryHandler,
-)
-from learnic.application.queries.wallet.get_wallet import (
-    GetWalletQueryHandler,
 )
 from learnic.application.common.persistence.user import (
     UserGateway,
@@ -558,12 +435,6 @@ from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
 )
 from learnic.application.common.presence.tracker import PresenceTracker
-from learnic.application.common.scheduling.materializer import (
-    ScheduleMaterializer,
-)
-from learnic.application.common.scheduling.recurrence import (
-    RecurrenceRuleValidator,
-)
 from learnic.application.common.security.access_tokens import (
     AccessTokenService,
 )
@@ -623,12 +494,6 @@ from learnic.application.queries.product.recommend_for_me import (
     RankingWeights,
     RecommendForMeQueryHandler,
 )
-from learnic.application.queries.cohort.get import (
-    GetCohortQueryHandler,
-)
-from learnic.application.queries.cohort.get_for_webinar import (
-    GetWebinarCohortsQueryHandler,
-)
 from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQueryHandler,
 )
@@ -641,9 +506,6 @@ from learnic.application.queries.course_release.get_content import (
 from learnic.application.queries.course_release.list_for_product import (
     ListCourseReleasesQueryHandler,
 )
-from learnic.application.queries.enrollment.list_for_cohort import (
-    GetCohortEnrollmentsQueryHandler,
-)
 from learnic.application.queries.enrollment.list_for_product import (
     GetProductEnrollmentsQueryHandler,
 )
@@ -655,15 +517,6 @@ from learnic.application.queries.product_qa.list import (
 )
 from learnic.application.queries.user.get_cover import (
     GetUserCoverQueryHandler,
-)
-from learnic.application.queries.webinar_schedule.list_for_cohort import (
-    GetCohortSchedulesQueryHandler,
-)
-from learnic.application.queries.webinar_session.get import (
-    GetWebinarSessionQueryHandler,
-)
-from learnic.application.queries.webinar_session.list_for_cohort import (
-    GetCohortSessionsQueryHandler,
 )
 from learnic.application.commands.notification_preferences.update import (
     UpdateNotificationPreferencesCommandHandler,
@@ -691,7 +544,6 @@ from learnic.infrastructure.configs import (
     S3Config,
     SecurityConfig,
     TaskIQConfig,
-    WalletConfig,
     WebPushConfig,
 )
 from learnic.infrastructure.email.adapters.rusender import (
@@ -703,10 +555,6 @@ from learnic.infrastructure.email.renderer import (
 )
 from learnic.infrastructure.persistence.adapters.email_token import (
     EmailTokenStoreAlchemy,
-)
-from learnic.infrastructure.persistence.adapters.cohort import (
-    CohortMapperAlchemy,
-    CohortReaderAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.course_block import (
     LessonBlockGatewayAlchemy,
@@ -790,14 +638,6 @@ from learnic.infrastructure.auth.confirm_events_redis import (
 from learnic.infrastructure.auth.product_owner_resolver import (
     ProductOwnerResolverAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.webinar_schedule import (
-    WebinarScheduleMapperAlchemy,
-    WebinarScheduleReaderAlchemy,
-)
-from learnic.infrastructure.persistence.adapters.webinar_session import (
-    WebinarSessionMapperAlchemy,
-    WebinarSessionReaderAlchemy,
-)
 from learnic.infrastructure.persistence.adapters.refresh_token import (
     RefreshTokenStoreAlchemy,
 )
@@ -832,10 +672,6 @@ from learnic.infrastructure.persistence.adapters.transaction import (
     EntitySaverAlchemy,
     TransactionAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.order import (
-    OrderMapperAlchemy,
-    OrderReaderAlchemy,
-)
 from learnic.infrastructure.persistence.adapters.user import (
     UserMapperAlchemy,
     UserReaderAlchemy,
@@ -843,13 +679,6 @@ from learnic.infrastructure.persistence.adapters.user import (
 from learnic.infrastructure.persistence.adapters.user_social_link import (
     UserSocialLinkMapperAlchemy,
     UserSocialLinkReaderAlchemy,
-)
-from learnic.infrastructure.persistence.adapters.wallet import (
-    FreezeEntryMapperAlchemy,
-    LedgerEntryMapperAlchemy,
-    LedgerReaderAlchemy,
-    WalletMapperAlchemy,
-    WalletReaderAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.user_experience import (
     UserExperienceMapperAlchemy,
@@ -866,12 +695,6 @@ from learnic.infrastructure.product_events.event_bus_redis import (
 )
 from learnic.infrastructure.presence.adapters.tracker_redis import (
     PresenceTrackerRedis,
-)
-from learnic.infrastructure.scheduling.dateutil_materializer import (
-    DateutilScheduleMaterializer,
-)
-from learnic.infrastructure.scheduling.dateutil_recurrence import (
-    DateutilRecurrenceRuleValidator,
 )
 from learnic.infrastructure.security.argon2_hasher import (
     Argon2PasswordHasher,
@@ -933,20 +756,6 @@ class ConfigsProvider(Provider):
     @provide
     def app_config(self, configs: Configs) -> AppConfig:
         return configs.app
-
-    @provide
-    def wallet_config(self, configs: Configs) -> WalletConfig:
-        return configs.wallet
-
-    @provide
-    def purchase_config(self, wallet: WalletConfig) -> PurchaseConfig:
-        # PurchaseConfig is an application-layer DTO; we build it from
-        # the wallet env config so application handlers depend only on
-        # the lightweight DTO, not the broader BaseSettings shape.
-        return PurchaseConfig(
-            sale_hold_ttl_seconds=wallet.sale_hold_ttl_seconds,
-            commission_hold_ttl_seconds=wallet.commission_hold_ttl_seconds,
-        )
 
     @provide
     def recommendations_config(
@@ -1042,30 +851,6 @@ class GatewaysProvider(Provider):
     user_social_link_reader = provide(
         UserSocialLinkReaderAlchemy,
         provides=UserSocialLinkReader,
-    )
-    cohort_gateway = provide(
-        CohortMapperAlchemy,
-        provides=CohortGateway,
-    )
-    cohort_reader = provide(
-        CohortReaderAlchemy,
-        provides=CohortReader,
-    )
-    webinar_schedule_gateway = provide(
-        WebinarScheduleMapperAlchemy,
-        provides=WebinarScheduleGateway,
-    )
-    webinar_schedule_reader = provide(
-        WebinarScheduleReaderAlchemy,
-        provides=WebinarScheduleReader,
-    )
-    webinar_session_gateway = provide(
-        WebinarSessionMapperAlchemy,
-        provides=WebinarSessionGateway,
-    )
-    webinar_session_reader = provide(
-        WebinarSessionReaderAlchemy,
-        provides=WebinarSessionReader,
     )
     enrollment_gateway = provide(
         EnrollmentMapperAlchemy,
@@ -1176,34 +961,6 @@ class GatewaysProvider(Provider):
         StatisticMapperAlchemy,
         provides=StatisticGateway,
     )
-    wallet_gateway = provide(
-        WalletMapperAlchemy,
-        provides=WalletGateway,
-    )
-    wallet_reader = provide(
-        WalletReaderAlchemy,
-        provides=WalletReader,
-    )
-    freeze_entry_gateway = provide(
-        FreezeEntryMapperAlchemy,
-        provides=FreezeEntryGateway,
-    )
-    ledger_entry_gateway = provide(
-        LedgerEntryMapperAlchemy,
-        provides=LedgerEntryGateway,
-    )
-    ledger_reader = provide(
-        LedgerReaderAlchemy,
-        provides=LedgerReader,
-    )
-    order_gateway = provide(
-        OrderMapperAlchemy,
-        provides=OrderGateway,
-    )
-    order_reader = provide(
-        OrderReaderAlchemy,
-        provides=OrderReader,
-    )
     authorizer = provide(
         AuthorizerService,
         provides=Authorizer,
@@ -1298,19 +1055,6 @@ class PushProvider(Provider):
     scope = Scope.APP
 
     sender = provide(PywebpushSender, provides=PushSender)
-
-
-class SchedulingProvider(Provider):
-    scope = Scope.APP
-
-    rule_validator = provide(
-        DateutilRecurrenceRuleValidator,
-        provides=RecurrenceRuleValidator,
-    )
-    materializer = provide(
-        DateutilScheduleMaterializer,
-        provides=ScheduleMaterializer,
-    )
 
 
 class RedisProvider(Provider):
@@ -1428,13 +1172,13 @@ class NotificationChannelsProvider(Provider):
 
 
 class EnrollmentStrategiesProvider(Provider):
-    """Plug-in registry of per-product-type enrollment strategies.
+    """Plug-in registry of per-product-kind enrollment strategies.
 
     Same shape as :class:`NotificationChannelsProvider`. Adding a
-    new ``EnrollmentType`` means:
+    new ``EnrollmentKind`` means:
 
     1. Write a new ``EnrollmentStrategy`` impl alongside
-       ``CourseEnrollmentStrategy`` / ``WebinarEnrollmentStrategy``.
+       ``CourseEnrollmentStrategy``.
     2. Add it to ``_DECLARED_STRATEGIES`` in
        ``application/common/enrollment/strategies.py`` (module-load
        fail-fast).
@@ -1448,24 +1192,21 @@ class EnrollmentStrategiesProvider(Provider):
     scope = Scope.REQUEST
 
     course_strategy = provide(CourseEnrollmentStrategy)
-    webinar_strategy = provide(WebinarEnrollmentStrategy)
     enrollment_service = provide(EnrollmentService)
 
     @provide
     def strategies(
         self,
         course: CourseEnrollmentStrategy,
-        webinar: WebinarEnrollmentStrategy,
-    ) -> Mapping[EnrollmentType, EnrollmentStrategy]:
-        mapping: dict[EnrollmentType, EnrollmentStrategy] = {
-            EnrollmentType.COURSE: course,
-            EnrollmentType.WEBINAR: webinar,
+    ) -> Mapping[EnrollmentKind, EnrollmentStrategy]:
+        mapping: dict[EnrollmentKind, EnrollmentStrategy] = {
+            EnrollmentKind.COURSE: course,
         }
-        missing = set(EnrollmentType) - mapping.keys()
+        missing = set(EnrollmentKind) - mapping.keys()
         if missing:
             raise RuntimeError(
                 "EnrollmentStrategy registry incomplete; missing: "
-                f"{sorted(t.value for t in missing)}",
+                f"{sorted(k.value for k in missing)}",
             )
         return mapping
 
@@ -1529,7 +1270,6 @@ class InteractorsProvider(Provider):
     list_user_experiences = provide(ListUserExperiencesQueryHandler)
 
     add_course_product = provide(AddCourseProductCommandHandler)
-    add_webinar_product = provide(AddWebinarProductCommandHandler)
     change_product_name = provide(ChangeProductNameCommandHandler)
     change_product_description = provide(
         ChangeProductDescriptionCommandHandler,
@@ -1541,7 +1281,6 @@ class InteractorsProvider(Provider):
     archive_product = provide(ArchiveProductCommandHandler)
     unarchive_product = provide(UnarchiveProductCommandHandler)
     delete_product = provide(DeleteProductCommandHandler)
-    update_webinar_defaults = provide(UpdateWebinarDefaultsCommandHandler)
     get_product = provide(GetProductQueryHandler)
     get_my_products = provide(GetMyProductsQueryHandler)
     get_published_products = provide(GetPublishedProductsQueryHandler)
@@ -1563,60 +1302,6 @@ class InteractorsProvider(Provider):
     delete_product_qa = provide(DeleteProductQACommandHandler)
     get_product_qa_list = provide(GetProductQAListQueryHandler)
 
-    add_cohort = provide(AddCohortCommandHandler)
-    update_cohort_name = provide(UpdateCohortNameCommandHandler)
-    update_cohort_max_participants = provide(
-        UpdateCohortMaxParticipantsCommandHandler,
-    )
-    reschedule_cohort = provide(RescheduleCohortCommandHandler)
-    open_cohort_enrollment = provide(OpenCohortEnrollmentCommandHandler)
-    close_cohort_enrollment = provide(
-        CloseCohortEnrollmentCommandHandler,
-    )
-    mark_cohort_full = provide(MarkCohortFullCommandHandler)
-    start_cohort = provide(StartCohortCommandHandler)
-    complete_cohort = provide(CompleteCohortCommandHandler)
-    cancel_cohort = provide(CancelCohortCommandHandler)
-    get_cohort = provide(GetCohortQueryHandler)
-    get_webinar_cohorts = provide(GetWebinarCohortsQueryHandler)
-
-    add_webinar_schedule = provide(AddWebinarScheduleCommandHandler)
-    update_webinar_schedule = provide(
-        UpdateWebinarScheduleCommandHandler,
-    )
-    delete_webinar_schedule = provide(
-        DeleteWebinarScheduleCommandHandler,
-    )
-    materialize_webinar_schedule = provide(
-        MaterializeWebinarScheduleCommandHandler,
-    )
-    get_cohort_schedules = provide(GetCohortSchedulesQueryHandler)
-
-    add_one_off_webinar_session = provide(
-        AddOneOffWebinarSessionCommandHandler,
-    )
-    reschedule_webinar_session = provide(
-        RescheduleWebinarSessionCommandHandler,
-    )
-    cancel_webinar_session = provide(CancelWebinarSessionCommandHandler)
-    complete_webinar_session = provide(
-        CompleteWebinarSessionCommandHandler,
-    )
-    attach_webinar_session_recording = provide(
-        AttachWebinarSessionRecordingCommandHandler,
-    )
-    remove_webinar_session_recording = provide(
-        RemoveWebinarSessionRecordingCommandHandler,
-    )
-    change_webinar_session_stream_url = provide(
-        ChangeWebinarSessionStreamUrlCommandHandler,
-    )
-    get_webinar_session = provide(GetWebinarSessionQueryHandler)
-    get_cohort_sessions = provide(GetCohortSessionsQueryHandler)
-
-    enroll_student_in_cohort = provide(
-        EnrollStudentInCohortCommandHandler,
-    )
     enroll_student_in_course = provide(
         EnrollStudentInCourseCommandHandler,
     )
@@ -1625,8 +1310,6 @@ class InteractorsProvider(Provider):
     )
     update_progress = provide(UpdateProgressCommandHandler)
     complete_enrollment = provide(CompleteEnrollmentCommandHandler)
-    refund_enrollment = provide(RefundEnrollmentCommandHandler)
-    get_cohort_enrollments = provide(GetCohortEnrollmentsQueryHandler)
     get_product_enrollments = provide(GetProductEnrollmentsQueryHandler)
     get_student_enrollments = provide(GetStudentEnrollmentsQueryHandler)
 
@@ -1719,13 +1402,6 @@ class InteractorsProvider(Provider):
         UpdateNotificationPreferencesCommandHandler,
     )
 
-    credit_wallet = provide(CreditWalletCommandHandler)
-    release_ripe_freezes = provide(ReleaseRipeFreezesCommandHandler)
-    purchase_product = provide(PurchaseProductCommandHandler)
-    refund_purchase = provide(RefundPurchaseCommandHandler)
-    change_product_price = provide(ChangeProductPriceCommandHandler)
-    get_wallet = provide(GetWalletQueryHandler)
-    get_wallet_ledger = provide(GetWalletLedgerQueryHandler)
 
 
 class EmailProvider(Provider):
@@ -1770,7 +1446,6 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         S3Provider(),
         TasksProvider(),
         PushProvider(),
-        SchedulingProvider(),
         RedisProvider(),
         PresenceProvider(),
         CollaborationProvider(),

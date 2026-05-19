@@ -26,8 +26,6 @@ def fake_enrollment_gateway() -> AsyncMock:
     gw = AsyncMock()
     gw.with_id = AsyncMock(return_value=None)
     gw.with_product_and_student = AsyncMock(return_value=None)
-    gw.with_cohort_and_student = AsyncMock(return_value=None)
-    gw.for_cohort = AsyncMock(return_value=[])
     return gw
 
 
@@ -42,13 +40,6 @@ def fake_product_gateway() -> AsyncMock:
 def fake_release_gateway() -> AsyncMock:
     gw = AsyncMock()
     gw.latest_for_product = AsyncMock()
-    return gw
-
-
-@pytest.fixture
-def fake_cohort_gateway() -> AsyncMock:
-    gw = AsyncMock()
-    gw.with_id = AsyncMock()
     return gw
 
 

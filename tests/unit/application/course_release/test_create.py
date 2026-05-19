@@ -191,39 +191,6 @@ async def test_subsequent_release_does_not_change_status() -> None:
     product_event_bus.publish.assert_not_awaited()
 
 
-async def test_release_for_webinar_raises() -> None:
-    author = _author_id()
-    webinar = Product.create_webinar(
-        author_id=author,
-        name=ProductTitle("Live SQL"),
-    )
-    (
-        handler,
-        tx,
-        _authorizer,
-        saver,
-        product_gw,
-        release_gw,
-        snapshotter,
-        _,
-        product_event_bus,
-    ) = _make_handler()
-    product_gw.with_id.return_value = webinar
-
-    with pytest.raises(ProductDoesNotSupportError):
-        await handler.run(
-            CreateCourseReleaseCommand(
-                actor_id=author,
-                product_id=webinar.oid,
-                kind=CourseReleaseKind.MAJOR,
-            ),
-        )
-    saver.add_one.assert_not_called()
-    snapshotter.snapshot.assert_not_awaited()
-    tx.commit.assert_not_called()
-    product_event_bus.publish.assert_not_awaited()
-
-
 async def test_release_non_owner_raises() -> None:
     author = _author_id()
     other = _author_id()

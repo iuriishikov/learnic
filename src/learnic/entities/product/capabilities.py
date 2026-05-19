@@ -27,12 +27,6 @@ class ProductCapability(StrEnum):
     HAS_COURSE_ENROLLMENT = "has_course_enrollment"
     """Accepts asynchronous student enrollments into the course."""
 
-    HAS_COHORTS = "has_cohorts"
-    """Hosts time-bounded cohorts with webinar sessions."""
-
-    HAS_WEBINAR_SETTINGS = "has_webinar_settings"
-    """Carries webinar-specific defaults (duration, stream, recording)."""
-
 
 PRODUCT_TYPE_CAPABILITIES: Final[dict[ProductType, frozenset[ProductCapability]]] = {
     ProductType.COURSE: frozenset(
@@ -40,12 +34,6 @@ PRODUCT_TYPE_CAPABILITIES: Final[dict[ProductType, frozenset[ProductCapability]]
             ProductCapability.HAS_COURSE_CONTENT,
             ProductCapability.HAS_COURSE_RELEASES,
             ProductCapability.HAS_COURSE_ENROLLMENT,
-        },
-    ),
-    ProductType.WEBINAR: frozenset(
-        {
-            ProductCapability.HAS_COHORTS,
-            ProductCapability.HAS_WEBINAR_SETTINGS,
         },
     ),
 }

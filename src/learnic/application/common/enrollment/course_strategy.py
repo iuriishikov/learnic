@@ -18,8 +18,7 @@ from learnic.application.common.persistence.enrollment import (
     EnrollmentGateway,
 )
 from learnic.application.common.persistence.product import ProductGateway
-from learnic.application.common.persistence.transaction import EntitySaver
-from learnic.entities.enrollment.enums import EnrollmentType
+from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.entities.enrollment.models import Enrollment
 from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.user.models import UserID
@@ -27,33 +26,33 @@ from learnic.entities.user.models import UserID
 
 @final
 class CourseEnrollmentStrategy(EnrollmentStrategy):
-    """Concrete strategy for ``EnrollmentType.COURSE``.
+    """Concrete strategy for ``EnrollmentKind.COURSE``.
 
     Pre-conditions:
 
     * Product exists and supports
       ``ProductCapability.HAS_COURSE_ENROLLMENT`` (i.e. is a
-      ``COURSE``-type product).
+      ``COURSE``-kind product).
     * The course has at least one release — otherwise the
       enrollment can't be pinned to a release version.
 
     Constructs the :class:`Enrollment` via
     ``Enrollment.create_course`` (which also builds the
-    ``CourseDetails`` side row) and stages both for persistence
-    via :class:`EntitySaver`. The surrounding transaction commit
-    is the service's responsibility.
+    ``CourseEnrollmentDetails`` body) and stages persistence
+    through :class:`EnrollmentGateway.add` — the gateway owns the
+    cross-table insert because the polymorphic ``details`` body
+    is not mapped imperatively. The surrounding transaction
+    commit is the service's responsibility.
     """
 
-    enrollment_type: ClassVar[EnrollmentType] = EnrollmentType.COURSE
+    enrollment_kind: ClassVar[EnrollmentKind] = EnrollmentKind.COURSE
 
     def __init__(
         self,
-        entity_saver: EntitySaver,
         product_gateway: ProductGateway,
         enrollment_gateway: EnrollmentGateway,
         release_gateway: CourseReleaseGateway,
     ) -> None:
-        self._entity_saver: Final = entity_saver
         self._product_gateway: Final = product_gateway
         self._enrollment_gateway: Final = enrollment_gateway
         self._release_gateway: Final = release_gateway
@@ -94,7 +93,5 @@ class CourseEnrollmentStrategy(EnrollmentStrategy):
             product_id=target.product_id,
             release_id=latest_release.oid,
         )
-        assert enrollment.course_details is not None  # noqa: S101
-        self._entity_saver.add_one(enrollment)
-        self._entity_saver.add_one(enrollment.course_details)
+        await self._enrollment_gateway.add(enrollment)
         return enrollment

@@ -135,23 +135,6 @@ class AppConfig(BaseSettings):
     environment: Literal["development", "staging", "production"] = "production"
 
 
-class WalletConfig(BaseSettings):
-    """Refund-window TTLs for purchase freeze entries.
-
-    Defaults to 14 days for both shares. Dev overrides via env
-    (e.g. ``WALLET_SALE_HOLD_TTL_SECONDS=10``) make the release
-    worker trip on a freshly purchased product within seconds —
-    handy for manual end-to-end checks without waiting two weeks.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="WALLET_", env_file=".env", extra="ignore"
-    )
-
-    sale_hold_ttl_seconds: int = 14 * 24 * 3600
-    commission_hold_ttl_seconds: int = 14 * 24 * 3600
-
-
 class RecommendationsConfig(BaseSettings):
     """Ranking weights and popularity window for ``/users/me/recommended-products``.
 
@@ -183,7 +166,6 @@ class Configs:
         "security",
         "web_push",
         "app",
-        "wallet",
         "recommendations",
     )
 
@@ -198,7 +180,6 @@ class Configs:
         security: SecurityConfig,
         web_push: WebPushConfig,
         app: AppConfig,
-        wallet: WalletConfig,
         recommendations: RecommendationsConfig,
     ) -> None:
         self.postgres = postgres
@@ -210,7 +191,6 @@ class Configs:
         self.security = security
         self.web_push = web_push
         self.app = app
-        self.wallet = wallet
         self.recommendations = recommendations
 
 
@@ -225,6 +205,5 @@ def load_configs() -> Configs:
         security=SecurityConfig(),  # pyright: ignore[reportCallIssue]
         web_push=WebPushConfig(),  # pyright: ignore[reportCallIssue]
         app=AppConfig(),  # pyright: ignore[reportCallIssue]
-        wallet=WalletConfig(),  # pyright: ignore[reportCallIssue]
         recommendations=RecommendationsConfig(),  # pyright: ignore[reportCallIssue]
     )

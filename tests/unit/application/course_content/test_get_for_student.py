@@ -122,22 +122,6 @@ async def test_missing_product_raises_404() -> None:
         )
 
 
-async def test_webinar_product_raises_404() -> None:
-    webinar = Product.create_webinar(
-        author_id=_author(),
-        name=ProductTitle("Live SQL"),
-    )
-    handler, product_gw, _, _ = _make_handler()
-    product_gw.with_id.return_value = webinar
-    with pytest.raises(EntityNotFoundError):
-        await handler.run(
-            GetMyCourseContentQuery(
-                actor_id=_student(),
-                product_id=webinar.oid,
-            ),
-        )
-
-
 async def test_no_enrollment_raises_404() -> None:
     course = _course(_author())
     handler, product_gw, enrollment_gw, _ = _make_handler()
@@ -152,22 +136,22 @@ async def test_no_enrollment_raises_404() -> None:
         )
 
 
-async def test_refunded_enrollment_raises_404() -> None:
+async def test_revoked_enrollment_raises_404() -> None:
     student = _student()
     course = _course(_author())
-    refunded = _enrollment(
+    revoked = _enrollment(
         ProductID(course.oid),
         student,
-        status=EnrollmentStatus.REFUNDED,
+        status=EnrollmentStatus.REVOKED,
     )
     handler, product_gw, enrollment_gw, release_reader = _make_handler()
     product_gw.with_id.return_value = course
-    enrollment_gw.with_product_and_student.return_value = refunded
+    enrollment_gw.with_product_and_student.return_value = revoked
     with pytest.raises(EntityNotFoundError):
         await handler.run(
             GetMyCourseContentQuery(actor_id=student, product_id=course.oid),
         )
-    # Refunded → never even hits the reader.
+    # Revoked → never even hits the reader.
     release_reader.get_content.assert_not_awaited()
 
 
@@ -175,12 +159,14 @@ async def test_completed_enrollment_still_sees_content() -> None:
     student = _student()
     course = _course(_author())
     pinned = CourseReleaseID(uuid.uuid4())
+    # Completion lives on details.completed_at; status stays
+    # ACTIVE — a completed enrollment must still see content.
     completed = _enrollment(
         ProductID(course.oid),
         student,
         release_id=pinned,
-        status=EnrollmentStatus.COMPLETED,
     )
+    completed.mark_completed()
     expected = _content_view(pinned, ProductID(course.oid))
     handler, product_gw, enrollment_gw, release_reader = _make_handler()
     product_gw.with_id.return_value = course

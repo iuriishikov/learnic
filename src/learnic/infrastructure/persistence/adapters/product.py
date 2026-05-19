@@ -12,28 +12,22 @@ from learnic.application.common.persistence.product import (
     ProductReader,
     ProductView,
     RecommendationCandidate,
-    WebinarDetailsView,
 )
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.enrollment.enums import EnrollmentStatus
 from learnic.entities.file.ids import FileID
-from learnic.entities.product.enums import ProductStatus, ProductType
+from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
-from learnic.entities.product.webinar_details import WebinarDetails
 from learnic.entities.product_collaboration.enums import (
     CollaborationStatus,
 )
 from learnic.entities.user.models import UserID
-from learnic.infrastructure.persistence.models.cohort import cohorts_table
 from learnic.infrastructure.persistence.models.enrollment import (
-    enrollment_course_details_table,
-    enrollment_webinar_details_table,
     enrollments_table,
 )
 from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product import (
-    product_webinar_details_table,
     products_table,
 )
 from learnic.infrastructure.persistence.models.product_collaboration import (
@@ -51,16 +45,7 @@ class ProductMapperAlchemy(ProductGateway):
     async def with_id(self, oid: ProductID) -> Product | None:
         stmt = sa.select(Product).where(products_table.c.oid == oid)
         result = await self._session.execute(stmt)
-        product = result.scalar_one_or_none()
-        if product is None:
-            return None
-        if product.type is ProductType.WEBINAR:
-            details_stmt = sa.select(WebinarDetails).where(
-                product_webinar_details_table.c.product_id == oid,
-            )
-            details_result = await self._session.execute(details_stmt)
-            product.webinar_details = details_result.scalar_one_or_none()
-        return product
+        return result.scalar_one_or_none()
 
     @override
     async def delete(self, product: Product) -> None:
@@ -68,17 +53,6 @@ class ProductMapperAlchemy(ProductGateway):
 
 
 def _row_to_view(row: sa.Row[Any]) -> ProductView:
-    webinar_details: WebinarDetailsView | None = None
-    if row.wd_total_lessons is not None:
-        webinar_details = WebinarDetailsView(
-            total_lessons=row.wd_total_lessons,
-            default_duration_minutes=row.wd_default_duration_minutes,
-            allow_recording=row.wd_allow_recording,
-            default_max_participants=row.wd_default_max_participants,
-            default_stream_url=row.wd_default_stream_url,
-            access_window_minutes=row.wd_access_window_minutes,
-        )
-
     return ProductView(
         oid=ProductID(row.oid),
         type=row.type,
@@ -86,7 +60,6 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
         name=row.name,
         description=row.description,
         total_duration_in_hours=row.total_duration_in_hours,
-        price_amount=row.price_amount,
         author=UserRefView(
             oid=UserID(row.author_oid),
             email=row.author_email,
@@ -94,7 +67,6 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
             last_name=row.author_last_name,
             patronymic=row.author_patronymic,
         ),
-        webinar_details=webinar_details,
         cover=(
             FileView(
                 oid=FileID(row.cover_oid),
@@ -112,7 +84,6 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
 
 
 def _select_with_joins() -> sa.Select[Any]:
-    wd = product_webinar_details_table
     cover = files_table.alias("cover")
     return sa.select(
         products_table.c.oid,
@@ -121,7 +92,6 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.c.name,
         products_table.c.description,
         products_table.c.total_duration_in_hours,
-        products_table.c.price_amount,
         products_table.c.published_at,
         products_table.c.created_at,
         products_table.c.updated_at,
@@ -134,20 +104,10 @@ def _select_with_joins() -> sa.Select[Any]:
         users_table.c.first_name.label("author_first_name"),
         users_table.c.last_name.label("author_last_name"),
         users_table.c.patronymic.label("author_patronymic"),
-        wd.c.total_lessons.label("wd_total_lessons"),
-        wd.c.default_duration_minutes.label("wd_default_duration_minutes"),
-        wd.c.allow_recording.label("wd_allow_recording"),
-        wd.c.default_max_participants.label("wd_default_max_participants"),
-        wd.c.default_stream_url.label("wd_default_stream_url"),
-        wd.c.access_window_minutes.label("wd_access_window_minutes"),
     ).select_from(
         products_table.join(
             users_table,
             products_table.c.author_id == users_table.c.oid,
-        )
-        .outerjoin(
-            wd,
-            products_table.c.oid == wd.c.product_id,
         )
         .outerjoin(
             cover,
@@ -425,48 +385,16 @@ class ProductReaderAlchemy(ProductReader):
             sa.literal(timedelta(days=popularity_window_days)),
             sa.Interval,
         )
-        active_statuses = (
-            EnrollmentStatus.ACTIVE.value,
-            EnrollmentStatus.COMPLETED.value,
-        )
+        active_statuses = (EnrollmentStatus.ACTIVE.value,)
 
         # --- unified enrollments + product_id ------------------------ #
-        # Course enrollments carry product_id directly; webinar
-        # enrollments need one extra JOIN through cohorts since the
-        # enrollment ties to a cohort and the cohort ties to a
-        # webinar product. UNION ALL'd so every downstream signal
-        # treats both flows symmetrically — the Phase 1 webinar gap
-        # closes here.
-        course_enrolled = sa.select(
+        # ``product_id`` lives on the parent enrollments row now, so
+        # no subtype-table join is required.
+        all_enrollments = sa.select(
             enrollments_table.c.student_id.label("student_id"),
-            enrollment_course_details_table.c.product_id.label("product_id"),
+            enrollments_table.c.product_id.label("product_id"),
             enrollments_table.c.status.label("status"),
             enrollments_table.c.enrolled_at.label("enrolled_at"),
-        ).select_from(
-            enrollments_table.join(
-                enrollment_course_details_table,
-                enrollment_course_details_table.c.enrollment_id
-                == enrollments_table.c.oid,
-            ),
-        )
-        webinar_enrolled = sa.select(
-            enrollments_table.c.student_id.label("student_id"),
-            cohorts_table.c.webinar_id.label("product_id"),
-            enrollments_table.c.status.label("status"),
-            enrollments_table.c.enrolled_at.label("enrolled_at"),
-        ).select_from(
-            enrollments_table.join(
-                enrollment_webinar_details_table,
-                enrollment_webinar_details_table.c.enrollment_id
-                == enrollments_table.c.oid,
-            ).join(
-                cohorts_table,
-                cohorts_table.c.oid
-                == enrollment_webinar_details_table.c.cohort_id,
-            ),
-        )
-        all_enrollments = course_enrolled.union_all(
-            webinar_enrolled,
         ).cte("all_enrollments")
 
         # --- user profile CTEs --------------------------------------- #

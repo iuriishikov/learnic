@@ -6,14 +6,10 @@ from typing_extensions import override
 from learnic.application.common.email.components import EmailComponent
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.tasks.scheduler import TaskScheduler
-from learnic.entities.cohort.ids import WebinarScheduleID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.tasks.handlers.email import send_email_task
 from learnic.infrastructure.tasks.handlers.example import example_task
 from learnic.infrastructure.tasks.handlers.web_push import send_web_push_task
-from learnic.infrastructure.tasks.handlers.webinar_schedule import (
-    materialize_webinar_schedule_task,
-)
 
 
 class TaskSchedulerTaskIQ(TaskScheduler):
@@ -55,13 +51,6 @@ class TaskSchedulerTaskIQ(TaskScheduler):
             rendered.html,
             rendered.text,
         )
-
-    @override
-    async def schedule_materialize_webinar_schedule(
-        self,
-        schedule_id: WebinarScheduleID,
-    ) -> None:
-        await materialize_webinar_schedule_task.kiq(schedule_id)  # type: ignore[call-overload]
 
     @override
     async def schedule_send_web_push(

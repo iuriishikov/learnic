@@ -1,16 +1,12 @@
 from enum import StrEnum
 
 import sqlalchemy as sa
-from sqlalchemy.orm import composite
 
-from learnic.entities.enrollment.course_details import CourseDetails
 from learnic.entities.enrollment.enums import (
+    EnrollmentKind,
     EnrollmentStatus,
-    EnrollmentType,
 )
 from learnic.entities.enrollment.models import Enrollment
-from learnic.entities.enrollment.value_objects import ProgressPercent
-from learnic.entities.enrollment.webinar_details import WebinarDetails
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
 
@@ -19,20 +15,28 @@ def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
 
 
 # Common enrollment row — the discriminator + state machine fields.
-# Student is referenced here AND denormalised into each side-detail
-# table so the (parent_id, student_id) uniqueness constraints can
-# stay declarative (Postgres unique constraints span one table only).
+# ``product_id`` lives on the base row so the
+# UNIQUE(product_id, student_id) constraint sits directly on the
+# enrollments table (Postgres unique constraints span one table
+# only). The kind-specific subtype tables no longer need to
+# denormalise ``product_id``.
 enrollments_table = sa.Table(
     "enrollments",
     mapper_registry.metadata,
     sa.Column("oid", sa.Uuid, primary_key=True),
     sa.Column(
-        "type",
+        "kind",
         sa.Enum(
-            EnrollmentType,
-            name="enrollment_type",
+            EnrollmentKind,
+            name="enrollment_kind",
             values_callable=_enum_values,
         ),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
         nullable=False,
     ),
     sa.Column(
@@ -47,9 +51,6 @@ enrollments_table = sa.Table(
             EnrollmentStatus,
             name="enrollment_status",
             values_callable=_enum_values,
-            # NOTE: shares the prior course_enrollment_status name
-            # in upgrade migrations to avoid an extra PG enum drop
-            # + create cycle; see the data migration for details.
         ),
         nullable=False,
         server_default=EnrollmentStatus.ACTIVE.value,
@@ -60,14 +61,20 @@ enrollments_table = sa.Table(
         nullable=False,
         server_default=sa.func.now(),
     ),
+    sa.UniqueConstraint(
+        "product_id",
+        "student_id",
+        name="uq_enrollments_product_student",
+    ),
     sa.Index("ix_enrollments_student_id", "student_id"),
-    sa.Index("ix_enrollments_type_status", "type", "status"),
+    sa.Index("ix_enrollments_kind_status", "kind", "status"),
 )
 
 
-# Course-specific 1:1 side row. PK == FK enrollments.oid so the row
-# dies with its parent. Includes denormalised student_id so the
-# UNIQUE(product_id, student_id) constraint stays in DB.
+# Course-specific 1:1 subtype row. PK == FK enrollments.oid so the
+# row dies with its parent. ``product_id`` / ``student_id`` are
+# NOT denormalised here — they live on the parent enrollments row,
+# which now carries the UNIQUE(product_id, student_id) constraint.
 enrollment_course_details_table = sa.Table(
     "enrollment_course_details",
     mapper_registry.metadata,
@@ -76,18 +83,6 @@ enrollment_course_details_table = sa.Table(
         sa.Uuid,
         sa.ForeignKey("enrollments.oid", ondelete="CASCADE"),
         primary_key=True,
-    ),
-    sa.Column(
-        "product_id",
-        sa.Uuid,
-        sa.ForeignKey("products.oid", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    sa.Column(
-        "student_id",
-        sa.Uuid,
-        sa.ForeignKey("users.oid", ondelete="RESTRICT"),
-        nullable=False,
     ),
     sa.Column(
         "release_id",
@@ -110,60 +105,21 @@ enrollment_course_details_table = sa.Table(
         sa.DateTime(timezone=True),
         nullable=True,
     ),
-    sa.UniqueConstraint(
-        "product_id",
-        "student_id",
-        name="uq_enrollment_course_details_product_student",
-    ),
     sa.Index("ix_enrollment_course_details_release_id", "release_id"),
 )
 
 
-# Webinar-specific 1:1 side row. PK == FK enrollments.oid.
-enrollment_webinar_details_table = sa.Table(
-    "enrollment_webinar_details",
-    mapper_registry.metadata,
-    sa.Column(
-        "enrollment_id",
-        sa.Uuid,
-        sa.ForeignKey("enrollments.oid", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    sa.Column(
-        "cohort_id",
-        sa.Uuid,
-        sa.ForeignKey("cohorts.oid", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    sa.Column(
-        "student_id",
-        sa.Uuid,
-        sa.ForeignKey("users.oid", ondelete="RESTRICT"),
-        nullable=False,
-    ),
-    sa.UniqueConstraint(
-        "cohort_id",
-        "student_id",
-        name="uq_enrollment_webinar_details_cohort_student",
-    ),
-)
-
-
 _enrollment_mapped = False
-_course_details_mapped = False
-_webinar_details_mapped = False
 
 
 def map_enrollment_table() -> None:
-    """Apply imperative mapping from :class:`Enrollment`.
+    """Apply imperative mapping for :class:`Enrollment`.
 
-    Only the common columns are mapped here. ``course_details``
-    and ``webinar_details`` are left out of the imperative
-    mapping intentionally — the gateway loads them out-of-band
-    based on ``type`` (same pattern as ``Product`` /
-    ``WebinarDetails``). The class-level ``= None`` defaults on
-    those attributes keep them readable on freshly hydrated
-    instances.
+    Only the base columns are mapped here. The polymorphic
+    ``details`` field is intentionally NOT mapped — the gateway
+    inserts the right subtype row alongside the parent and loads
+    it back out-of-band based on ``kind`` (same pattern as
+    :class:`Notification` + :class:`NotificationDetails`).
     """
     global _enrollment_mapped  # noqa: PLW0603
     if _enrollment_mapped:
@@ -173,7 +129,8 @@ def map_enrollment_table() -> None:
         enrollments_table,
         properties={
             "oid": enrollments_table.c.oid,
-            "type": enrollments_table.c.type,
+            "kind": enrollments_table.c.kind,
+            "product_id": enrollments_table.c.product_id,
             "student_id": enrollments_table.c.student_id,
             "status": enrollments_table.c.status,
             "enrolled_at": enrollments_table.c.enrolled_at,
@@ -181,43 +138,3 @@ def map_enrollment_table() -> None:
         column_prefix="_col_",
     )
     _enrollment_mapped = True
-
-
-def map_enrollment_course_details_table() -> None:
-    global _course_details_mapped  # noqa: PLW0603
-    if _course_details_mapped:
-        return
-    mapper_registry.map_imperatively(
-        CourseDetails,
-        enrollment_course_details_table,
-        properties={
-            "oid": enrollment_course_details_table.c.enrollment_id,
-            "product_id": enrollment_course_details_table.c.product_id,
-            "student_id": enrollment_course_details_table.c.student_id,
-            "release_id": enrollment_course_details_table.c.release_id,
-            "progress": composite(
-                ProgressPercent,
-                enrollment_course_details_table.c.progress_percent,
-            ),
-            "completed_at": enrollment_course_details_table.c.completed_at,
-        },
-        column_prefix="_col_",
-    )
-    _course_details_mapped = True
-
-
-def map_enrollment_webinar_details_table() -> None:
-    global _webinar_details_mapped  # noqa: PLW0603
-    if _webinar_details_mapped:
-        return
-    mapper_registry.map_imperatively(
-        WebinarDetails,
-        enrollment_webinar_details_table,
-        properties={
-            "oid": enrollment_webinar_details_table.c.enrollment_id,
-            "cohort_id": enrollment_webinar_details_table.c.cohort_id,
-            "student_id": enrollment_webinar_details_table.c.student_id,
-        },
-        column_prefix="_col_",
-    )
-    _webinar_details_mapped = True

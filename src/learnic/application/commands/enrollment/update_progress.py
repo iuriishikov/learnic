@@ -31,12 +31,14 @@ class UpdateProgressCommandHandler:
 
     Course-only — the entity raises
     :class:`EnrollmentDoesNotSupportError` via
-    :meth:`Enrollment.require_supports` when called on a webinar.
+    :meth:`Enrollment.require_supports` for kinds that lack
+    ``HAS_PROGRESS``.
 
     Authorisation: only the student themselves may update.
-    Reaching :data:`PROGRESS_PERCENT_MAX` auto-transitions the
-    enrollment to ``COMPLETED`` (mirrors the previous
-    ``CourseEnrollment`` flow).
+    Reaching :data:`PROGRESS_PERCENT_MAX` auto-marks the
+    enrollment completed (sets ``details.completed_at``) but
+    does NOT change ``status`` — a completed enrollment is
+    still ACTIVE.
     """
 
     def __init__(
@@ -61,7 +63,7 @@ class UpdateProgressCommandHandler:
         enrollment.require_supports(EnrollmentCapability.HAS_PROGRESS)
         progress = ProgressPercent(data.progress_percent)
         if progress.value >= PROGRESS_PERCENT_MAX:
-            enrollment.complete()
+            enrollment.mark_completed()
         else:
             enrollment.update_progress(progress)
         await self._transaction.commit()

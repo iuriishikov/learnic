@@ -78,14 +78,6 @@ def course_product(author_id: UserID) -> Product:
 
 
 @pytest.fixture
-def webinar_product(author_id: UserID) -> Product:
-    return Product.create_webinar(
-        author_id=author_id,
-        name=ProductTitle("Live SQL"),
-    )
-
-
-@pytest.fixture
 def course_module(course_product: Product) -> CourseModule:
     return CourseModule.create(
         product_id=ProductID(course_product.oid),

@@ -9,15 +9,15 @@ class InvalidProgressPercentError(FieldError):
 
 
 class EnrollmentDoesNotSupportError(DomainError):
-    """Raised when an enrollment type lacks a requested capability.
+    """Raised when an enrollment kind lacks a requested capability.
 
     Mirrors :class:`ProductDoesNotSupportError`: a single error that
-    carries the offending enrollment, its type, and the capability
+    carries the offending enrollment, its kind, and the capability
     the operation needed, so the SPA can produce a useful message
-    without sprinkling ``if enrollment.type is not …`` across
+    without sprinkling ``if enrollment.kind is not …`` across
     handlers.
     """
 
     enrollment_id: object
-    enrollment_type: str
+    enrollment_kind: str
     capability: str

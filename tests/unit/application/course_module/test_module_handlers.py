@@ -162,38 +162,6 @@ async def test_add_module_first_position_is_zero(
     assert saved.position == 0
 
 
-async def test_add_module_on_webinar_raises_not_a_course(
-    fake_transaction: AsyncMock,
-    fake_authorizer: AsyncMock,
-    fake_entity_saver: MagicMock,
-    fake_product_gateway: AsyncMock,
-    fake_module_gateway: AsyncMock,
-    fake_event_bus: AsyncMock,
-    webinar_product: Product,
-    author_id: UserID,
-) -> None:
-    fake_product_gateway.with_id.return_value = webinar_product
-    handler = AddCourseModuleCommandHandler(
-        transaction=fake_transaction,
-        authorizer=fake_authorizer,
-        entity_saver=fake_entity_saver,
-        product_gateway=fake_product_gateway,
-        module_gateway=fake_module_gateway,
-        event_bus=fake_event_bus,
-    )
-
-    with pytest.raises(ProductDoesNotSupportError):
-        await handler.run(
-            AddCourseModuleCommand(
-                actor_id=author_id,
-                product_id=ProductID(webinar_product.oid),
-                title="X",
-            ),
-        )
-    fake_entity_saver.add_one.assert_not_called()
-    fake_transaction.commit.assert_not_called()
-
-
 async def test_add_module_non_owner_raises(
     fake_transaction: AsyncMock,
     fake_authorizer: AsyncMock,

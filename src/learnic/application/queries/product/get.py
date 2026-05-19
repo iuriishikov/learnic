@@ -5,7 +5,6 @@ from typing import Final, final
 from learnic.application.common.persistence.product import (
     ProductReader,
     ProductView,
-    WebinarDetailsView,
 )
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.application.common.storage.file_storage import FileStorage
@@ -36,9 +35,7 @@ class ProductOutput:
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    price_amount: int | None
     author: UserRefView
-    webinar_details: WebinarDetailsView | None
     cover_url: str | None
     published_at: datetime | None
     created_at: datetime
@@ -84,9 +81,7 @@ async def resolve_product_output(
         name=view.name,
         description=view.description,
         total_duration_in_hours=view.total_duration_in_hours,
-        price_amount=view.price_amount,
         author=view.author,
-        webinar_details=view.webinar_details,
         cover_url=cover_url,
         published_at=view.published_at,
         created_at=view.created_at,

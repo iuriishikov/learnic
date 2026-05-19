@@ -1,29 +1,30 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Self
 
-from learnic.entities.cohort.ids import CohortID
 from learnic.entities.common.base_entity import BaseEntity
 from learnic.entities.course_release.ids import CourseReleaseID
 from learnic.entities.enrollment.capabilities import (
-    ENROLLMENT_TYPE_CAPABILITIES,
+    ENROLLMENT_KIND_CAPABILITIES,
     EnrollmentCapability,
 )
 from learnic.entities.enrollment.constants import (
     PROGRESS_PERCENT_MAX,
 )
-from learnic.entities.enrollment.course_details import CourseDetails
+from learnic.entities.enrollment.details import (
+    CourseEnrollmentDetails,
+    EnrollmentDetails,
+)
 from learnic.entities.enrollment.enums import (
+    EnrollmentKind,
     EnrollmentStatus,
-    EnrollmentType,
 )
 from learnic.entities.enrollment.errors import (
     EnrollmentDoesNotSupportError,
 )
 from learnic.entities.enrollment.ids import EnrollmentID
 from learnic.entities.enrollment.value_objects import ProgressPercent
-from learnic.entities.enrollment.webinar_details import WebinarDetails
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
@@ -32,84 +33,58 @@ from learnic.entities.user.models import UserID
 class Enrollment(BaseEntity[EnrollmentID]):
     """A student's enrollment in a learning product.
 
-    Two flavours unified by ``type``:
+    Polymorphic on :attr:`kind`. The kind-specific body lives in
+    :attr:`details`, a subclass of :class:`EnrollmentDetails`
+    mapped to a kind-specific subtype table — same pattern as
+    :class:`Notification` + :class:`NotificationDetails`.
 
-    * ``COURSE`` — asynchronous, pinned to a specific course
-      release at signup, tracks a self-reported progress percent.
-      The course-specific data (``product_id``, ``release_id``,
-      ``progress``, ``completed_at``) lives in
-      :class:`CourseDetails`.
-    * ``WEBINAR`` — synchronous, attached to a cohort with its
-      own schedule. The webinar-specific data (``cohort_id``)
-      lives in :class:`WebinarDetails`.
-
-    Following the ``Product`` / ``WebinarDetails`` pattern, the
-    side-detail entity is **loaded out-of-band by the gateway**
-    after the main row is fetched (composition split, no ORM
-    relationship). The class-level ``= None`` defaults keep the
-    fields readable on freshly hydrated instances; SQLAlchemy
-    ignores them during load.
-
-    Statuses are shared (``ACTIVE | COMPLETED | REFUNDED``). The
-    historical webinar-specific ``DROPPED`` was retired — see
-    ``EnrollmentStatus`` for the migration story.
+    ``product_id`` lives on the base row so the
+    ``UNIQUE(product_id, student_id)`` constraint sits directly
+    on the enrollments table (Postgres unique constraints span
+    one table only). With ``product_id`` on the base, the details
+    subtype tables no longer need to denormalise it.
     """
 
-    type: EnrollmentType
+    product_id: ProductID
     student_id: UserID
+    kind: EnrollmentKind
     status: EnrollmentStatus
     enrolled_at: datetime
-    course_details: CourseDetails | None = None
-    webinar_details: WebinarDetails | None = None
+    details: EnrollmentDetails = field(default_factory=EnrollmentDetails)
 
     def supports(self, capability: EnrollmentCapability) -> bool:
-        return capability in ENROLLMENT_TYPE_CAPABILITIES[self.type]
+        return capability in ENROLLMENT_KIND_CAPABILITIES[self.kind]
 
     def require_supports(self, capability: EnrollmentCapability) -> None:
-        """Raise :class:`EnrollmentDoesNotSupportError` if missing.
-
-        Mirrors :meth:`Product.require_supports`. Keeps capability
-        gating in one place instead of scattering ``if type !=`` in
-        every handler.
-        """
+        """Raise :class:`EnrollmentDoesNotSupportError` if missing."""
         if not self.supports(capability):
             raise EnrollmentDoesNotSupportError(
                 enrollment_id=self.oid,
-                enrollment_type=self.type.value,
+                enrollment_kind=self.kind.value,
                 capability=capability.value,
             )
 
     def update_progress(self, new_progress: ProgressPercent) -> None:
-        """Course-only. Updates ``course_details.progress`` in place.
+        """Course-only. Updates ``details.progress`` in place."""
+        self.require_supports(EnrollmentCapability.HAS_PROGRESS)
+        assert isinstance(self.details, CourseEnrollmentDetails)  # noqa: S101
+        self.details.progress = new_progress
 
-        Reaching :data:`PROGRESS_PERCENT_MAX` does NOT auto-complete
-        — the application layer's handler is responsible for the
-        transition, mirroring the previous
-        ``update_course_progress`` flow.
+    def mark_completed(self) -> None:
+        """Mark course completion. Does NOT change status.
+
+        Completion lives on details (``completed_at``), orthogonal
+        to access state (``status``). A completed enrollment is
+        still ACTIVE; only revocation moves status off ACTIVE.
         """
         self.require_supports(EnrollmentCapability.HAS_PROGRESS)
-        assert self.course_details is not None  # noqa: S101
-        self.course_details.progress = new_progress
+        assert isinstance(self.details, CourseEnrollmentDetails)  # noqa: S101
+        self.details.progress = ProgressPercent(PROGRESS_PERCENT_MAX)
+        self.details.completed_at = datetime.now(timezone.utc)
 
-    def complete(self) -> None:
-        """Mark this enrollment completed.
-
-        For courses, also pins ``progress`` to 100 % and stamps
-        ``completed_at`` so the read-side projection mirrors the
-        previous ``CourseEnrollment.complete()`` shape. For
-        webinars the completion timestamp lives only on the
-        parent (``Enrollment`` carries no separate completion
-        field beyond ``status``).
-        """
-        self.status = EnrollmentStatus.COMPLETED
-        if self.course_details is not None:
-            self.course_details.progress = ProgressPercent(
-                PROGRESS_PERCENT_MAX,
-            )
-            self.course_details.completed_at = datetime.now(timezone.utc)
-
-    def refund(self) -> None:
-        self.status = EnrollmentStatus.REFUNDED
+    def revoke(self) -> None:
+        """Revoke this enrollment (author/admin action)."""
+        self.status = EnrollmentStatus.REVOKED
 
     @classmethod
     def create_course(
@@ -119,41 +94,16 @@ class Enrollment(BaseEntity[EnrollmentID]):
         product_id: ProductID,
         release_id: CourseReleaseID,
     ) -> Self:
-        oid = EnrollmentID(uuid.uuid4())
         return cls(
-            oid=oid,
-            type=EnrollmentType.COURSE,
+            oid=EnrollmentID(uuid.uuid4()),
+            product_id=product_id,
             student_id=student_id,
+            kind=EnrollmentKind.COURSE,
             status=EnrollmentStatus.ACTIVE,
             enrolled_at=datetime.now(timezone.utc),
-            course_details=CourseDetails.create(
-                enrollment_id=oid,
-                product_id=product_id,
-                student_id=student_id,
+            details=CourseEnrollmentDetails(
                 release_id=release_id,
                 progress=ProgressPercent(0),
-            ),
-            webinar_details=None,
-        )
-
-    @classmethod
-    def create_webinar(
-        cls,
-        *,
-        student_id: UserID,
-        cohort_id: CohortID,
-    ) -> Self:
-        oid = EnrollmentID(uuid.uuid4())
-        return cls(
-            oid=oid,
-            type=EnrollmentType.WEBINAR,
-            student_id=student_id,
-            status=EnrollmentStatus.ACTIVE,
-            enrolled_at=datetime.now(timezone.utc),
-            course_details=None,
-            webinar_details=WebinarDetails.create(
-                enrollment_id=oid,
-                cohort_id=cohort_id,
-                student_id=student_id,
+                completed_at=None,
             ),
         )

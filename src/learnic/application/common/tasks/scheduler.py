@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from learnic.application.common.email.components import EmailComponent
-from learnic.entities.cohort.ids import WebinarScheduleID
 from learnic.entities.user.models import UserID
 
 
@@ -15,24 +14,6 @@ class TaskScheduler(Protocol):
     """
 
     async def schedule_example(self, payload: str) -> None: ...
-
-    async def schedule_materialize_webinar_schedule(
-        self,
-        schedule_id: WebinarScheduleID,
-    ) -> None:
-        """Enqueue materialization of upcoming webinar sessions.
-
-        The worker loads ``WebinarSchedule(schedule_id)``, picks up
-        the cursor (max ``original_starts_at`` already materialised),
-        expands the rrule and writes the next batch of
-        :class:`WebinarSession` rows.
-
-        Idempotent: re-enqueueing on an already up-to-date schedule
-        produces no new sessions thanks to the
-        ``UNIQUE(schedule_id, original_starts_at)`` constraint and
-        the cursor.
-        """
-        ...
 
     async def schedule_send_email(
         self,

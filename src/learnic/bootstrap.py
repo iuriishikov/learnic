@@ -4,15 +4,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from learnic.infrastructure.configs import Configs, load_configs
-from learnic.infrastructure.persistence.models.cohort import (
-    map_cohort_table,
-    map_webinar_schedule_table,
-    map_webinar_session_table,
-)
 from learnic.infrastructure.persistence.models.enrollment import (
-    map_enrollment_course_details_table,
     map_enrollment_table,
-    map_enrollment_webinar_details_table,
 )
 from learnic.infrastructure.persistence.models.course_lesson import (
     map_course_lesson_table,
@@ -27,7 +20,6 @@ from learnic.infrastructure.persistence.models.file import map_file_table
 from learnic.infrastructure.persistence.models.product import (
     map_product_qa_table,
     map_product_table,
-    map_webinar_details_table,
 )
 from learnic.infrastructure.persistence.models.notification import (
     map_notification_table,
@@ -51,25 +43,13 @@ from learnic.infrastructure.persistence.models.user_experience import (
 from learnic.infrastructure.persistence.models.user_social_link import (
     map_user_social_link_table,
 )
-from learnic.infrastructure.persistence.models.order import (
-    map_order_table,
-)
-from learnic.infrastructure.persistence.models.wallet import (
-    map_freeze_entry_table,
-    map_ledger_entry_table,
-    map_wallet_table,
-)
 from learnic.presentation.http.routes.auth import router as auth_router
-from learnic.presentation.http.routes.cohort import (
-    router as cohort_router,
-)
 from learnic.presentation.http.routes.course_content import (
     router as course_content_router,
 )
 from learnic.presentation.http.routes.enrollment import (
     course_router as course_enrollment_router,
     me_router as my_enrollments_router,
-    webinar_router as webinar_enrollment_router,
 )
 from learnic.presentation.http.routes.course_release import (
     router as course_release_router,
@@ -119,12 +99,6 @@ from learnic.presentation.http.routes.product_ws import (
     router as product_ws_router,
 )
 from learnic.presentation.http.routes.root import router as root_router
-from learnic.presentation.http.routes.webinar_schedule import (
-    router as webinar_schedule_router,
-)
-from learnic.presentation.http.routes.webinar_session import (
-    router as webinar_session_router,
-)
 from learnic.presentation.http.routes.user import router as user_router
 from learnic.presentation.http.routes.user_experience import (
     me_router as my_user_experiences_router,
@@ -135,11 +109,6 @@ from learnic.presentation.http.routes.user_social_link import (
     router as user_social_links_router,
 )
 from learnic.presentation.http.routes.dev import dev_router
-from learnic.presentation.http.routes.order import (
-    me_orders_router,
-    product_purchase_router,
-)
-from learnic.presentation.http.routes.wallet import me_wallet_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -161,10 +130,6 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(my_products_router)
     app.include_router(product_qa_router)
     app.include_router(product_ws_router)
-    app.include_router(cohort_router)
-    app.include_router(webinar_schedule_router)
-    app.include_router(webinar_session_router)
-    app.include_router(webinar_enrollment_router)
     app.include_router(course_enrollment_router)
     app.include_router(my_enrollments_router)
     app.include_router(course_content_router)
@@ -184,9 +149,6 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(push_public_router)
     app.include_router(push_me_router)
     app.include_router(auth_ws_router)
-    app.include_router(me_wallet_router)
-    app.include_router(product_purchase_router)
-    app.include_router(me_orders_router)
     if configs.app.environment == "development":
         # Dev-only router — physically absent from prod builds.
         # See dev.py's module docstring for the safety rationale.
@@ -203,19 +165,9 @@ def setup_map_tables() -> None:
     map_user_experience_table()
     map_user_social_link_table()
     map_file_table()
-    map_wallet_table()
-    map_freeze_entry_table()
-    map_ledger_entry_table()
-    map_order_table()
     map_product_table()
-    map_webinar_details_table()
     map_product_qa_table()
-    map_cohort_table()
-    map_webinar_schedule_table()
-    map_webinar_session_table()
     map_enrollment_table()
-    map_enrollment_course_details_table()
-    map_enrollment_webinar_details_table()
     map_course_module_table()
     map_course_lesson_table()
     map_course_release_table()

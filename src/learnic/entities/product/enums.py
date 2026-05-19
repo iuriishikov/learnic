@@ -3,7 +3,6 @@ from enum import StrEnum
 
 class ProductType(StrEnum):
     COURSE = "course"
-    WEBINAR = "webinar"
 
 
 class ProductStatus(StrEnum):

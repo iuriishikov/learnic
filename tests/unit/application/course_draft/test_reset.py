@@ -190,36 +190,6 @@ async def test_reset_non_owner_raises() -> None:
     event_bus.publish.assert_not_awaited()
 
 
-async def test_reset_for_webinar_raises() -> None:
-    author = _author_id()
-    webinar = Product.create_webinar(
-        author_id=author,
-        name=ProductTitle("Live SQL"),
-    )
-    (
-        handler,
-        tx,
-        _authorizer,
-        product_gw,
-        _,
-        resetter,
-        event_bus,
-    ) = _make_handler()
-    product_gw.with_id.return_value = webinar
-
-    with pytest.raises(ProductDoesNotSupportError):
-        await handler.run(
-            ResetCourseDraftCommand(
-                actor_id=author,
-                product_id=webinar.oid,
-                release_id=CourseReleaseID(uuid.uuid4()),
-            ),
-        )
-    resetter.reset.assert_not_awaited()
-    tx.commit.assert_not_awaited()
-    event_bus.publish.assert_not_awaited()
-
-
 async def test_reset_release_not_found_raises() -> None:
     author = _author_id()
     course = _course(author)

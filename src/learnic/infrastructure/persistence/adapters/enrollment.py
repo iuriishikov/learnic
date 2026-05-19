@@ -5,57 +5,95 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.enrollment import (
-    CourseDetailsView,
+    CourseEnrollmentDetailsView,
     EnrollmentGateway,
     EnrollmentReader,
     EnrollmentView,
-    WebinarDetailsView,
 )
-from learnic.entities.cohort.ids import CohortID
 from learnic.entities.course_release.ids import CourseReleaseID
-from learnic.entities.enrollment.course_details import CourseDetails
-from learnic.entities.enrollment.enums import EnrollmentType
+from learnic.entities.enrollment.details import (
+    CourseEnrollmentDetails,
+    EnrollmentDetails,
+)
+from learnic.entities.enrollment.enums import (
+    EnrollmentKind,
+    EnrollmentStatus,
+)
 from learnic.entities.enrollment.ids import EnrollmentID
 from learnic.entities.enrollment.models import Enrollment
-from learnic.entities.enrollment.webinar_details import WebinarDetails
+from learnic.entities.enrollment.value_objects import ProgressPercent
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.enrollment import (
     enrollment_course_details_table,
-    enrollment_webinar_details_table,
     enrollments_table,
 )
 
 
 class EnrollmentMapperAlchemy(EnrollmentGateway):
-    """Write-side gateway. Loads side details out-of-band by type.
+    """Write-side gateway.
 
-    Same shape as :class:`ProductMapperAlchemy`: the main row is
-    fetched, then a single follow-up query loads the relevant
-    side-detail entity based on ``type``. Keeps the imperative
-    mapping simple (no ORM relationship) and the gateway honest
-    about its read pattern.
+    Inserts the parent row + matching subtype row inside the
+    caller's transaction (commit stays with the application
+    handler). Loads rebuild the polymorphic ``details`` body by
+    dispatching on ``kind`` — same pattern as
+    :class:`NotificationGatewayAlchemy`.
     """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session: Final = session
 
     async def _hydrate_details(self, enrollment: Enrollment) -> None:
-        if enrollment.type is EnrollmentType.COURSE:
-            course_stmt = sa.select(CourseDetails).where(
-                enrollment_course_details_table.c.enrollment_id
-                == enrollment.oid,
+        if enrollment.kind is EnrollmentKind.COURSE:
+            enrollment.details = await self._load_course_details(
+                enrollment.oid,
             )
-            course_result = await self._session.execute(course_stmt)
-            enrollment.course_details = course_result.scalar_one_or_none()
-        else:
-            webinar_stmt = sa.select(WebinarDetails).where(
-                enrollment_webinar_details_table.c.enrollment_id
-                == enrollment.oid,
+            return
+        # No other kinds yet — defensive fallback keeps the base
+        # empty body so callers can still operate on the parent.
+        enrollment.details = EnrollmentDetails()
+
+    async def _load_course_details(
+        self,
+        enrollment_id: EnrollmentID,
+    ) -> CourseEnrollmentDetails:
+        cd = enrollment_course_details_table
+        stmt = sa.select(
+            cd.c.release_id,
+            cd.c.progress_percent,
+            cd.c.completed_at,
+        ).where(cd.c.enrollment_id == enrollment_id)
+        row = (await self._session.execute(stmt)).one()
+        return CourseEnrollmentDetails(
+            release_id=CourseReleaseID(row.release_id),
+            progress=ProgressPercent(row.progress_percent),
+            completed_at=row.completed_at,
+        )
+
+    @override
+    async def add(self, enrollment: Enrollment) -> None:
+        await self._session.execute(
+            sa.insert(enrollments_table).values(
+                oid=enrollment.oid,
+                kind=enrollment.kind.value,
+                product_id=enrollment.product_id,
+                student_id=enrollment.student_id,
+                status=enrollment.status.value,
+                enrolled_at=enrollment.enrolled_at,
+            ),
+        )
+        if enrollment.kind is EnrollmentKind.COURSE:
+            assert isinstance(  # noqa: S101
+                enrollment.details,
+                CourseEnrollmentDetails,
             )
-            webinar_result = await self._session.execute(webinar_stmt)
-            enrollment.webinar_details = (
-                webinar_result.scalar_one_or_none()
+            await self._session.execute(
+                sa.insert(enrollment_course_details_table).values(
+                    enrollment_id=enrollment.oid,
+                    release_id=enrollment.details.release_id,
+                    progress_percent=enrollment.details.progress.value,
+                    completed_at=enrollment.details.completed_at,
+                ),
             )
 
     @override
@@ -74,17 +112,9 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         product_id: ProductID,
         student_id: UserID,
     ) -> Enrollment | None:
-        stmt = (
-            sa.select(Enrollment)
-            .join(
-                enrollment_course_details_table,
-                enrollment_course_details_table.c.enrollment_id
-                == enrollments_table.c.oid,
-            )
-            .where(
-                enrollment_course_details_table.c.product_id == product_id,
-                enrollment_course_details_table.c.student_id == student_id,
-            )
+        stmt = sa.select(Enrollment).where(
+            enrollments_table.c.product_id == product_id,
+            enrollments_table.c.student_id == student_id,
         )
         result = await self._session.execute(stmt)
         enrollment = result.scalar_one_or_none()
@@ -94,82 +124,45 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         return enrollment
 
     @override
-    async def with_cohort_and_student(
+    async def is_enrolled(
         self,
-        cohort_id: CohortID,
         student_id: UserID,
-    ) -> Enrollment | None:
-        stmt = (
-            sa.select(Enrollment)
-            .join(
-                enrollment_webinar_details_table,
-                enrollment_webinar_details_table.c.enrollment_id
-                == enrollments_table.c.oid,
-            )
-            .where(
-                enrollment_webinar_details_table.c.cohort_id == cohort_id,
-                enrollment_webinar_details_table.c.student_id == student_id,
-            )
+        product_id: ProductID,
+    ) -> bool:
+        stmt = sa.select(sa.literal(True)).where(
+            enrollments_table.c.product_id == product_id,
+            enrollments_table.c.student_id == student_id,
+            enrollments_table.c.status == EnrollmentStatus.ACTIVE.value,
         )
         result = await self._session.execute(stmt)
-        enrollment = result.scalar_one_or_none()
-        if enrollment is None:
-            return None
-        await self._hydrate_details(enrollment)
-        return enrollment
-
-    @override
-    async def for_cohort(
-        self,
-        cohort_id: CohortID,
-    ) -> list[Enrollment]:
-        stmt = (
-            sa.select(Enrollment)
-            .join(
-                enrollment_webinar_details_table,
-                enrollment_webinar_details_table.c.enrollment_id
-                == enrollments_table.c.oid,
-            )
-            .where(enrollment_webinar_details_table.c.cohort_id == cohort_id)
-            .order_by(enrollments_table.c.enrolled_at.asc())
-        )
-        result = await self._session.execute(stmt)
-        enrollments = list(result.scalars().all())
-        for e in enrollments:
-            await self._hydrate_details(e)
-        return enrollments
+        return result.scalar() is not None
 
 
 def _select_view() -> sa.Select[Any]:
     cd = enrollment_course_details_table
-    wd = enrollment_webinar_details_table
     return sa.select(
         enrollments_table.c.oid,
-        enrollments_table.c.type,
+        enrollments_table.c.kind,
+        enrollments_table.c.product_id,
         enrollments_table.c.student_id,
         enrollments_table.c.status,
         enrollments_table.c.enrolled_at,
-        cd.c.product_id.label("course_product_id"),
         cd.c.release_id.label("course_release_id"),
         cd.c.progress_percent.label("course_progress_percent"),
         cd.c.completed_at.label("course_completed_at"),
-        wd.c.cohort_id.label("webinar_cohort_id"),
     ).select_from(
         enrollments_table.outerjoin(
             cd,
             cd.c.enrollment_id == enrollments_table.c.oid,
-        ).outerjoin(
-            wd,
-            wd.c.enrollment_id == enrollments_table.c.oid,
         ),
     )
 
 
 def _row_to_view(row: sa.Row[Any]) -> EnrollmentView:
-    course_details: CourseDetailsView | None = None
-    if row.course_product_id is not None:
-        course_details = CourseDetailsView(
-            product_id=ProductID(row.course_product_id),
+    kind = EnrollmentKind(row.kind)
+    details: CourseEnrollmentDetailsView | None = None
+    if kind is EnrollmentKind.COURSE:
+        details = CourseEnrollmentDetailsView(
             release_id=(
                 CourseReleaseID(row.course_release_id)
                 if row.course_release_id is not None
@@ -178,19 +171,14 @@ def _row_to_view(row: sa.Row[Any]) -> EnrollmentView:
             progress_percent=row.course_progress_percent,
             completed_at=row.course_completed_at,
         )
-    webinar_details: WebinarDetailsView | None = None
-    if row.webinar_cohort_id is not None:
-        webinar_details = WebinarDetailsView(
-            cohort_id=CohortID(row.webinar_cohort_id),
-        )
     return EnrollmentView(
         oid=EnrollmentID(row.oid),
-        type=row.type,
+        kind=kind,
+        product_id=ProductID(row.product_id),
         student_id=UserID(row.student_id),
         status=row.status,
         enrolled_at=row.enrolled_at,
-        course_details=course_details,
-        webinar_details=webinar_details,
+        details=details,
     )
 
 
@@ -203,24 +191,9 @@ class EnrollmentReaderAlchemy(EnrollmentReader):
         self,
         product_id: ProductID,
     ) -> list[EnrollmentView]:
-        cd = enrollment_course_details_table
         stmt = (
             _select_view()
-            .where(cd.c.product_id == product_id)
-            .order_by(enrollments_table.c.enrolled_at.asc())
-        )
-        rows = (await self._session.execute(stmt)).all()
-        return [_row_to_view(row) for row in rows]
-
-    @override
-    async def for_cohort(
-        self,
-        cohort_id: CohortID,
-    ) -> list[EnrollmentView]:
-        wd = enrollment_webinar_details_table
-        stmt = (
-            _select_view()
-            .where(wd.c.cohort_id == cohort_id)
+            .where(enrollments_table.c.product_id == product_id)
             .order_by(enrollments_table.c.enrolled_at.asc())
         )
         rows = (await self._session.execute(stmt)).all()

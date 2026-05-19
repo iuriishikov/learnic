@@ -1,29 +1,28 @@
 from enum import StrEnum
 
 
-class EnrollmentType(StrEnum):
-    """Discriminator for the two enrollment shapes.
+class EnrollmentKind(StrEnum):
+    """Discriminator for the polymorphic enrollment body.
 
-    Mirrors the :class:`ProductType` split — every enrollment is
-    either tied to a course product (``COURSE``) or to a webinar
-    cohort (``WEBINAR``). The type drives which side-detail row
-    exists and which capabilities the enrollment supports.
+    Each kind maps to exactly one subtype table in
+    :mod:`learnic.infrastructure.persistence.models.enrollment` and
+    one :class:`EnrollmentDetails` subclass — same pattern as
+    :class:`NotificationKind`. Adding a new kind requires a new
+    ``enrollment_<kind>`` subtype table and a matching
+    ``EnrollmentDetails`` subclass.
     """
 
     COURSE = "course"
-    WEBINAR = "webinar"
 
 
 class EnrollmentStatus(StrEnum):
-    """Lifecycle states shared by both enrollment types.
+    """Lifecycle states for an enrollment.
 
-    Webinar-specific ``DROPPED`` does not exist: dropping a
-    webinar enrollment goes through the refund flow instead. A
-    student who wants to walk away without payment reversal is
-    not modelled — that would require a separate `CANCELLED`
-    status with explicit semantics.
+    ``ACTIVE`` is the normal state. ``REVOKED`` is set by an
+    author/admin action and removes access. Course-completion
+    lives on ``CourseEnrollmentDetails.completed_at`` (orthogonal
+    to access state) — a completed enrollment is still ACTIVE.
     """
 
     ACTIVE = "active"
-    COMPLETED = "completed"
-    REFUNDED = "refunded"
+    REVOKED = "revoked"

@@ -13,39 +13,21 @@ from learnic.entities.product.enums import ProductStatus, ProductType
 from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import (
-    AccessWindow,
     DurationHours,
-    ParticipantsLimit,
     ProductDescription,
-    ProductPriceAmount,
     ProductTitle,
-    StreamUrl,
-    WebinarLessonsCount,
-    WebinarSessionDuration,
 )
-from learnic.entities.product.webinar_details import WebinarDetails
 from learnic.entities.user.models import UserID
 
 
 @dataclass
 class Product(BaseEntity[ProductID]):
-    """A user-owned learning product (course or webinar).
+    """A user-owned learning product (course only at this phase).
 
     Only ``name`` is a required identity field at creation time —
     every other piece of metadata (``description``,
-    ``total_duration_in_hours``, ``cover_file_id``, and the entire
-    ``webinar_details`` sub-entity for webinar products) is optional
-    and starts as ``None``. Authors fill these in incrementally via
-    PATCH/PUT endpoints before publishing.
-
-    The ``webinar_details`` slot is ``None`` for products of type
-    ``COURSE`` *and* for freshly created webinar products that have
-    not yet had defaults set. It is loaded out-of-band by the
-    ``ProductGateway`` after the row is fetched (composition split,
-    no ORM relationship), and is intentionally absent from
-    imperative mapping — SQLAlchemy ignores it during load and the
-    class-level ``= None`` default keeps the attribute readable on
-    freshly hydrated instances.
+    ``total_duration_in_hours``, ``cover_file_id``) is optional
+    and starts as ``None``.
     """
 
     author_id: UserID
@@ -58,8 +40,6 @@ class Product(BaseEntity[ProductID]):
     description: ProductDescription | None = None
     total_duration_in_hours: DurationHours | None = None
     cover_file_id: FileID | None = None
-    webinar_details: WebinarDetails | None = None
-    price: ProductPriceAmount | None = None
 
     def supports(self, capability: ProductCapability) -> bool:
         """Return whether this product's type advertises ``capability``."""
@@ -101,16 +81,6 @@ class Product(BaseEntity[ProductID]):
         previous = self.cover_file_id
         self.cover_file_id = None
         return previous
-
-    def attach_webinar_details(self, details: WebinarDetails) -> None:
-        """Attach freshly created webinar defaults to this product."""
-        self.webinar_details = details
-
-    def set_price(self, price: ProductPriceAmount) -> None:
-        self.price = price
-
-    def clear_price(self) -> None:
-        self.price = None
 
     def publish(self) -> None:
         if self.status is ProductStatus.PUBLISHED:
@@ -157,62 +127,4 @@ class Product(BaseEntity[ProductID]):
             created_at=now,
             updated_at=now,
             cover_file_id=cover_file_id,
-            webinar_details=None,
-        )
-
-    @classmethod
-    def create_webinar(
-        cls,
-        author_id: UserID,
-        name: ProductTitle,
-        description: ProductDescription | None = None,
-        total_duration_in_hours: DurationHours | None = None,
-        *,
-        total_lessons: WebinarLessonsCount | None = None,
-        default_duration_minutes: WebinarSessionDuration | None = None,
-        allow_recording: bool | None = None,
-        default_max_participants: ParticipantsLimit | None = None,
-        default_stream_url: StreamUrl | None = None,
-        access_window_minutes: AccessWindow | None = None,
-        cover_file_id: FileID | None = None,
-    ) -> Self:
-        """Create a webinar product.
-
-        ``webinar_details`` is built only if every required default
-        (``total_lessons``, ``default_duration_minutes``,
-        ``allow_recording``) is provided up-front. Otherwise the
-        product is created with ``webinar_details=None`` and the
-        author fills in defaults later via the
-        ``UpdateWebinarDefaults`` use case.
-        """
-        now = datetime.now(timezone.utc)
-        oid = ProductID(uuid.uuid4())
-        details: WebinarDetails | None = None
-        if (
-            total_lessons is not None
-            and default_duration_minutes is not None
-            and allow_recording is not None
-        ):
-            details = WebinarDetails.create(
-                product_id=oid,
-                total_lessons=total_lessons,
-                default_duration_minutes=default_duration_minutes,
-                allow_recording=allow_recording,
-                default_max_participants=default_max_participants,
-                default_stream_url=default_stream_url,
-                access_window_minutes=access_window_minutes,
-            )
-        return cls(
-            oid=oid,
-            author_id=author_id,
-            type=ProductType.WEBINAR,
-            name=name,
-            description=description,
-            total_duration_in_hours=total_duration_in_hours,
-            status=ProductStatus.DRAFT,
-            published_at=None,
-            created_at=now,
-            updated_at=now,
-            cover_file_id=cover_file_id,
-            webinar_details=details,
         )

@@ -15,18 +15,6 @@ from learnic.entities.user.models import UserID
 
 
 @dataclass(slots=True, frozen=True)
-class WebinarDetailsView:
-    """Read-side projection of webinar-specific defaults."""
-
-    total_lessons: int
-    default_duration_minutes: int
-    allow_recording: bool
-    default_max_participants: int | None
-    default_stream_url: str | None
-    access_window_minutes: int | None
-
-
-@dataclass(slots=True, frozen=True)
 class ProductView:
     """Read-side projection of :class:`Product` returned by the Reader."""
 
@@ -36,9 +24,7 @@ class ProductView:
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    price_amount: int | None
     author: UserRefView
-    webinar_details: WebinarDetailsView | None
     cover: FileView | None
     published_at: datetime | None
     created_at: datetime
@@ -63,12 +49,7 @@ class RecommendationCandidate:
 
 
 class ProductGateway(Protocol):
-    """Write-side lookups for :class:`Product`.
-
-    ``with_id`` returns a fully-hydrated aggregate including
-    ``webinar_details`` for products of type ``WEBINAR`` (loaded
-    via a follow-up query inside the adapter).
-    """
+    """Write-side lookups for :class:`Product`."""
 
     async def with_id(self, oid: ProductID) -> Product | None: ...
 

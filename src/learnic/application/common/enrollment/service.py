@@ -2,13 +2,15 @@ from collections.abc import Mapping
 from typing import Final, final
 
 from learnic.application.common.enrollment.strategies import (
+    CourseEnrollmentTarget,
     EnrollmentStrategy,
     EnrollmentTarget,
 )
 from learnic.application.common.errors import AlreadyEnrolledError
 from learnic.application.common.persistence.transaction import Transaction
-from learnic.entities.enrollment.enums import EnrollmentType
+from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.entities.enrollment.ids import EnrollmentID
+from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
 
@@ -22,31 +24,30 @@ class EnrollmentService:
     is no public HTTP endpoint that calls this directly** —
     arbitrary-student grants are an admin operation; exposing
     them on the SPA side would let any caller create enrollments
-    for arbitrary users. Type-specific HTTP handlers build the
+    for arbitrary users. Kind-specific HTTP handlers build the
     right :class:`EnrollmentTarget` from URL/auth context and
     delegate here.
 
     Dispatch is plug-in: the constructor receives a
-    ``Mapping[EnrollmentType, EnrollmentStrategy]`` registered
+    ``Mapping[EnrollmentKind, EnrollmentStrategy]`` registered
     in :class:`EnrollmentStrategiesProvider` in ``ioc.py``, same
     pattern as :class:`NotifierService` with delivery channels.
-    Adding a new product type only requires writing a strategy
+    Adding a new product kind only requires writing a strategy
     and adding it to that mapping — this service does not
     change.
 
-    Owns the cross-type concerns:
+    Owns the cross-kind concerns:
 
     * "Already enrolled?" gate via :meth:`EnrollmentStrategy.find_existing`.
     * Transaction commit after the strategy stages everything.
 
-    Type-specific work (parent validation, type-specific
-    pre-conditions, side effects like cohort capacity flip)
-    lives in the matching strategy.
+    Kind-specific work (parent validation, kind-specific
+    pre-conditions) lives in the matching strategy.
     """
 
     def __init__(
         self,
-        strategies: Mapping[EnrollmentType, EnrollmentStrategy],
+        strategies: Mapping[EnrollmentKind, EnrollmentStrategy],
         transaction: Transaction,
     ) -> None:
         self._strategies: Final = strategies
@@ -57,10 +58,26 @@ class EnrollmentService:
         student_id: UserID,
         target: EnrollmentTarget,
     ) -> EnrollmentID:
-        strategy = self._strategies[target.enrollment_type]
+        strategy = self._strategies[target.enrollment_kind]
         existing = await strategy.find_existing(student_id, target)
         if existing is not None:
             raise AlreadyEnrolledError(target.parent_id, student_id)
         enrollment = await strategy.enroll(student_id, target)
         await self._transaction.commit()
         return enrollment.oid
+
+    async def enroll_in_course(
+        self,
+        student_id: UserID,
+        product_id: ProductID,
+    ) -> EnrollmentID:
+        """Convenience: enroll a student into a course product.
+
+        Thin wrapper that builds the :class:`CourseEnrollmentTarget`
+        so internal callers (other application services, scripts,
+        admin grants) do not have to import strategy targets.
+        """
+        return await self.enroll(
+            student_id=student_id,
+            target=CourseEnrollmentTarget(product_id=product_id),
+        )
