@@ -166,3 +166,65 @@ code_blocks_table = sa.Table(
         nullable=False,
     ),
 )
+
+
+# ``options`` for both choice subtypes is a JSONB array of
+# ``{"oid": "<uuid>", "label": "<str>"}`` objects — same denormalized
+# rationale as ``code_blocks.tabs`` (opaque to SQL, invariants enforced
+# upstream by the domain entity). For single-choice the correct id is
+# a plain UUID column; for multi-choice it's a JSONB string-array so
+# we don't fight asyncpg's UUID[] adapter for a payload that's never
+# queried by element.
+single_choice_blocks_table = sa.Table(
+    "single_choice_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("options", JSONB, nullable=False),
+    sa.Column("correct_option_id", sa.Uuid, nullable=False),
+)
+
+
+multi_choice_blocks_table = sa.Table(
+    "multi_choice_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("options", JSONB, nullable=False),
+    sa.Column("correct_option_ids", JSONB, nullable=False),
+)
+
+
+text_input_blocks_table = sa.Table(
+    "text_input_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    # JSONB array of raw author-provided answer strings. Stored
+    # verbatim; normalisation happens at check-time on the entity.
+    sa.Column("accepted_answers", JSONB, nullable=False),
+    sa.Column(
+        "case_sensitive",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column(
+        "trim_whitespace",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.text("true"),
+    ),
+)

@@ -6,7 +6,10 @@ from learnic.entities.course_block.models import (
     HtmlBlock,
     KatexBlock,
     LessonBlock,
+    MultiChoiceBlock,
     RutubeVideoBlock,
+    SingleChoiceBlock,
+    TextInputBlock,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
 
@@ -48,6 +51,18 @@ class LessonBlockGateway(Protocol):
     async def add_code(self, block: CodeBlock) -> None: ...
 
     async def update_code(self, block: CodeBlock) -> None: ...
+
+    async def add_single_choice(self, block: SingleChoiceBlock) -> None: ...
+
+    async def update_single_choice(self, block: SingleChoiceBlock) -> None: ...
+
+    async def add_multi_choice(self, block: MultiChoiceBlock) -> None: ...
+
+    async def update_multi_choice(self, block: MultiChoiceBlock) -> None: ...
+
+    async def add_text_input(self, block: TextInputBlock) -> None: ...
+
+    async def update_text_input(self, block: TextInputBlock) -> None: ...
 
     async def delete(self, oid: LessonBlockID) -> None: ...
 

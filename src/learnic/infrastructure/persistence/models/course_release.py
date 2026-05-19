@@ -262,6 +262,61 @@ course_release_code_blocks_table = sa.Table(
 )
 
 
+# Snapshot mirrors of the draft choice / text-input subtype tables —
+# same shapes, FK rebased to ``course_release_blocks``.
+course_release_single_choice_blocks_table = sa.Table(
+    "course_release_single_choice_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("options", JSONB, nullable=False),
+    sa.Column("correct_option_id", sa.Uuid, nullable=False),
+)
+
+
+course_release_multi_choice_blocks_table = sa.Table(
+    "course_release_multi_choice_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("options", JSONB, nullable=False),
+    sa.Column("correct_option_ids", JSONB, nullable=False),
+)
+
+
+course_release_text_input_blocks_table = sa.Table(
+    "course_release_text_input_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("accepted_answers", JSONB, nullable=False),
+    sa.Column(
+        "case_sensitive",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column(
+        "trim_whitespace",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.text("true"),
+    ),
+)
+
+
 _release_mapped = False
 
 

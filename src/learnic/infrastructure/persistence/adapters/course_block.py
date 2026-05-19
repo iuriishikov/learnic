@@ -10,13 +10,18 @@ from learnic.application.common.persistence.course_block import (
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import (
+    ChoiceOption,
     CodeBlock,
     CodeTab,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
+    MultiChoiceBlock,
     RutubeVideoBlock,
+    SingleChoiceBlock,
+    TextInputBlock,
 )
+from learnic.entities.course_block.value_objects import AcceptedAnswer
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.infrastructure.persistence.blocks.registry import (
     _common_from_row,
@@ -27,7 +32,10 @@ from learnic.infrastructure.persistence.models.course_block import (
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
+    multi_choice_blocks_table,
     rutube_video_blocks_table,
+    single_choice_blocks_table,
+    text_input_blocks_table,
 )
 
 
@@ -41,6 +49,16 @@ def _tabs_to_jsonb(tabs: list[CodeTab]) -> list[dict[str, str]]:
         }
         for tab in tabs
     ]
+
+
+def _options_to_jsonb(options: list[ChoiceOption]) -> list[dict[str, str]]:
+    """Serialize choice options into JSONB-friendly dicts."""
+    return [{"oid": str(o.oid), "label": o.label.value} for o in options]
+
+
+def _accepted_answers_to_jsonb(answers: list[AcceptedAnswer]) -> list[str]:
+    """Serialize accepted answers into a JSONB string array."""
+    return [a.value for a in answers]
 
 
 def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
@@ -69,6 +87,23 @@ def _select_blocks() -> sa.Select[Any]:
         rutube_video_blocks_table.c.external_id.label("rutube_external_id"),
         rutube_video_blocks_table.c.title.label("rutube_title"),
         code_blocks_table.c.tabs.label("code_tabs"),
+        single_choice_blocks_table.c.options.label("single_choice_options"),
+        single_choice_blocks_table.c.correct_option_id.label(
+            "single_choice_correct_option_id",
+        ),
+        multi_choice_blocks_table.c.options.label("multi_choice_options"),
+        multi_choice_blocks_table.c.correct_option_ids.label(
+            "multi_choice_correct_option_ids",
+        ),
+        text_input_blocks_table.c.accepted_answers.label(
+            "text_input_accepted_answers",
+        ),
+        text_input_blocks_table.c.case_sensitive.label(
+            "text_input_case_sensitive",
+        ),
+        text_input_blocks_table.c.trim_whitespace.label(
+            "text_input_trim_whitespace",
+        ),
     ).select_from(
         lesson_blocks_table.outerjoin(
             html_blocks_table,
@@ -85,6 +120,18 @@ def _select_blocks() -> sa.Select[Any]:
         .outerjoin(
             code_blocks_table,
             lesson_blocks_table.c.oid == code_blocks_table.c.oid,
+        )
+        .outerjoin(
+            single_choice_blocks_table,
+            lesson_blocks_table.c.oid == single_choice_blocks_table.c.oid,
+        )
+        .outerjoin(
+            multi_choice_blocks_table,
+            lesson_blocks_table.c.oid == multi_choice_blocks_table.c.oid,
+        )
+        .outerjoin(
+            text_input_blocks_table,
+            lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
         ),
     )
 
@@ -246,6 +293,123 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
             sa.update(code_blocks_table)
             .where(code_blocks_table.c.oid == block.oid)
             .values(tabs=_tabs_to_jsonb(block.tabs)),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_single_choice(self, block: SingleChoiceBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.SINGLE_CHOICE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(single_choice_blocks_table).values(
+                oid=block.oid,
+                options=_options_to_jsonb(block.options),
+                correct_option_id=block.correct_option_id,
+            ),
+        )
+
+    @override
+    async def update_single_choice(self, block: SingleChoiceBlock) -> None:
+        await self._session.execute(
+            sa.update(single_choice_blocks_table)
+            .where(single_choice_blocks_table.c.oid == block.oid)
+            .values(
+                options=_options_to_jsonb(block.options),
+                correct_option_id=block.correct_option_id,
+            ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_multi_choice(self, block: MultiChoiceBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.MULTI_CHOICE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(multi_choice_blocks_table).values(
+                oid=block.oid,
+                options=_options_to_jsonb(block.options),
+                correct_option_ids=[str(o) for o in block.correct_option_ids],
+            ),
+        )
+
+    @override
+    async def update_multi_choice(self, block: MultiChoiceBlock) -> None:
+        await self._session.execute(
+            sa.update(multi_choice_blocks_table)
+            .where(multi_choice_blocks_table.c.oid == block.oid)
+            .values(
+                options=_options_to_jsonb(block.options),
+                correct_option_ids=[str(o) for o in block.correct_option_ids],
+            ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_text_input(self, block: TextInputBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.TEXT_INPUT.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(text_input_blocks_table).values(
+                oid=block.oid,
+                accepted_answers=_accepted_answers_to_jsonb(
+                    block.accepted_answers,
+                ),
+                case_sensitive=block.case_sensitive,
+                trim_whitespace=block.trim_whitespace,
+            ),
+        )
+
+    @override
+    async def update_text_input(self, block: TextInputBlock) -> None:
+        await self._session.execute(
+            sa.update(text_input_blocks_table)
+            .where(text_input_blocks_table.c.oid == block.oid)
+            .values(
+                accepted_answers=_accepted_answers_to_jsonb(
+                    block.accepted_answers,
+                ),
+                case_sensitive=block.case_sensitive,
+                trim_whitespace=block.trim_whitespace,
+            ),
         )
         await self._session.execute(
             sa.update(lesson_blocks_table)

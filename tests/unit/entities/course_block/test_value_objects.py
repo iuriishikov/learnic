@@ -1,10 +1,12 @@
 import pytest
 
 from learnic.entities.course_block.constants import (
+    CHOICE_OPTION_LABEL_MAX_LEN,
     CODE_BLOCK_MAX_LEN,
     CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    TEXT_INPUT_ANSWER_MAX_LEN,
     VIDEO_TITLE_MAX_LEN,
 )
 from learnic.entities.course_block.errors import (
@@ -14,6 +16,8 @@ from learnic.entities.course_block.errors import (
     UnsupportedCodeLanguageError,
 )
 from learnic.entities.course_block.value_objects import (
+    AcceptedAnswer,
+    ChoiceOptionLabel,
     CodeLanguage,
     CodeSource,
     CodeTabLabel,
@@ -176,3 +180,42 @@ class TestCodeTabLabel:
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):
             CodeTabLabel("x" * (CODE_TAB_LABEL_MAX_LEN + 1))
+
+
+class TestChoiceOptionLabel:
+    def test_accepts_typical(self) -> None:
+        assert ChoiceOptionLabel("Yes").value == "Yes"
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(EmptyBlockContentError):
+            ChoiceOptionLabel("")
+
+    def test_rejects_blank(self) -> None:
+        with pytest.raises(EmptyBlockContentError):
+            ChoiceOptionLabel("   ")
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(BlockContentTooLongError):
+            ChoiceOptionLabel("x" * (CHOICE_OPTION_LABEL_MAX_LEN + 1))
+
+
+class TestAcceptedAnswer:
+    def test_accepts_typical(self) -> None:
+        assert AcceptedAnswer("Paris").value == "Paris"
+
+    def test_preserves_whitespace_for_later_normalisation(self) -> None:
+        # The VO stores raw input; the block's check-time normalisation
+        # decides what to do with surrounding whitespace.
+        assert AcceptedAnswer(" Paris ").value == " Paris "
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(EmptyBlockContentError):
+            AcceptedAnswer("")
+
+    def test_rejects_blank(self) -> None:
+        with pytest.raises(EmptyBlockContentError):
+            AcceptedAnswer("   ")
+
+    def test_rejects_too_long(self) -> None:
+        with pytest.raises(BlockContentTooLongError):
+            AcceptedAnswer("x" * (TEXT_INPUT_ANSWER_MAX_LEN + 1))

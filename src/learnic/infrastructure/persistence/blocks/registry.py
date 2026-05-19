@@ -18,6 +18,7 @@ Adding a new :class:`BlockType` variant is now a single new
 growing a fifth branch each.
 """
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
@@ -25,24 +26,34 @@ from typing import Any, Final
 import sqlalchemy as sa
 
 from learnic.application.common.persistence.course_content import (
+    ChoiceOptionView,
     CodeBlockView,
     CodeTabView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
+    MultiChoiceBlockView,
     RutubeVideoBlockView,
+    SingleChoiceBlockView,
+    TextInputBlockView,
 )
 from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
 from learnic.entities.course_block.models import (
+    ChoiceOption,
     CodeBlock,
     CodeTab,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
+    MultiChoiceBlock,
     RutubeVideoBlock,
+    SingleChoiceBlock,
+    TextInputBlock,
 )
 from learnic.entities.course_block.value_objects import (
+    AcceptedAnswer,
+    ChoiceOptionLabel,
     CodeLanguage,
     CodeSource,
     CodeTabLabel,
@@ -57,13 +68,19 @@ from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
     html_blocks_table,
     katex_blocks_table,
+    multi_choice_blocks_table,
     rutube_video_blocks_table,
+    single_choice_blocks_table,
+    text_input_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_release import (
     course_release_code_blocks_table,
     course_release_html_blocks_table,
     course_release_katex_blocks_table,
+    course_release_multi_choice_blocks_table,
     course_release_rutube_video_blocks_table,
+    course_release_single_choice_blocks_table,
+    course_release_text_input_blocks_table,
 )
 
 
@@ -110,6 +127,30 @@ def _jsonb_to_tabs(raw: Any) -> list[CodeTab]:
         )
         for item in raw
     ]
+
+
+def _jsonb_to_option_views(raw: Any) -> list[ChoiceOptionView]:
+    return [
+        ChoiceOptionView(oid=item["oid"], label=item["label"]) for item in raw
+    ]
+
+
+def _jsonb_to_options(raw: Any) -> list[ChoiceOption]:
+    return [
+        ChoiceOption(
+            oid=ChoiceOptionID(uuid.UUID(item["oid"])),
+            label=ChoiceOptionLabel(item["label"]),
+        )
+        for item in raw
+    ]
+
+
+def _jsonb_to_correct_ids(raw: Any) -> frozenset[ChoiceOptionID]:
+    return frozenset(ChoiceOptionID(uuid.UUID(s)) for s in raw)
+
+
+def _jsonb_to_accepted_answers(raw: Any) -> list[AcceptedAnswer]:
+    return [AcceptedAnswer(s) for s in raw]
 
 
 @dataclass(slots=True, frozen=True)
@@ -286,6 +327,133 @@ def _code_release_insert_value(
     return {"oid": new_oid, "tabs": row.code_tabs}
 
 
+# ============================== Single Choice ============================== #
+
+
+def _single_choice_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> SingleChoiceBlock:
+    return SingleChoiceBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        options=_jsonb_to_options(row.single_choice_options),
+        correct_option_id=ChoiceOptionID(row.single_choice_correct_option_id),
+    )
+
+
+def _single_choice_row_to_view(row: sa.Row[Any]) -> SingleChoiceBlockView:
+    return SingleChoiceBlockView(
+        type=BlockType.SINGLE_CHOICE,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        options=_jsonb_to_option_views(row.single_choice_options),
+        correct_option_id=str(row.single_choice_correct_option_id),
+    )
+
+
+def _single_choice_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "options": row.single_choice_options,
+        "correct_option_id": row.single_choice_correct_option_id,
+    }
+
+
+# ============================== Multi Choice ============================== #
+
+
+def _multi_choice_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> MultiChoiceBlock:
+    return MultiChoiceBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        options=_jsonb_to_options(row.multi_choice_options),
+        correct_option_ids=_jsonb_to_correct_ids(
+            row.multi_choice_correct_option_ids,
+        ),
+    )
+
+
+def _multi_choice_row_to_view(row: sa.Row[Any]) -> MultiChoiceBlockView:
+    return MultiChoiceBlockView(
+        type=BlockType.MULTI_CHOICE,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        options=_jsonb_to_option_views(row.multi_choice_options),
+        correct_option_ids=list(row.multi_choice_correct_option_ids),
+    )
+
+
+def _multi_choice_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "options": row.multi_choice_options,
+        "correct_option_ids": row.multi_choice_correct_option_ids,
+    }
+
+
+# ============================== Text Input ============================== #
+
+
+def _text_input_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> TextInputBlock:
+    return TextInputBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        accepted_answers=_jsonb_to_accepted_answers(
+            row.text_input_accepted_answers,
+        ),
+        case_sensitive=row.text_input_case_sensitive,
+        trim_whitespace=row.text_input_trim_whitespace,
+    )
+
+
+def _text_input_row_to_view(row: sa.Row[Any]) -> TextInputBlockView:
+    return TextInputBlockView(
+        type=BlockType.TEXT_INPUT,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        accepted_answers=list(row.text_input_accepted_answers),
+        case_sensitive=row.text_input_case_sensitive,
+        trim_whitespace=row.text_input_trim_whitespace,
+    )
+
+
+def _text_input_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "accepted_answers": row.text_input_accepted_answers,
+        "case_sensitive": row.text_input_case_sensitive,
+        "trim_whitespace": row.text_input_trim_whitespace,
+    }
+
+
 # ============================== Registry ============================== #
 
 
@@ -321,6 +489,30 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
         row_to_entity=_code_row_to_entity,
         row_to_view=_code_row_to_view,
         release_insert_value=_code_release_insert_value,
+    ),
+    BlockType.SINGLE_CHOICE: BlockSpec(
+        kind=BlockType.SINGLE_CHOICE,
+        draft_subtype_table=single_choice_blocks_table,
+        release_subtype_table=course_release_single_choice_blocks_table,
+        row_to_entity=_single_choice_row_to_entity,
+        row_to_view=_single_choice_row_to_view,
+        release_insert_value=_single_choice_release_insert_value,
+    ),
+    BlockType.MULTI_CHOICE: BlockSpec(
+        kind=BlockType.MULTI_CHOICE,
+        draft_subtype_table=multi_choice_blocks_table,
+        release_subtype_table=course_release_multi_choice_blocks_table,
+        row_to_entity=_multi_choice_row_to_entity,
+        row_to_view=_multi_choice_row_to_view,
+        release_insert_value=_multi_choice_release_insert_value,
+    ),
+    BlockType.TEXT_INPUT: BlockSpec(
+        kind=BlockType.TEXT_INPUT,
+        draft_subtype_table=text_input_blocks_table,
+        release_subtype_table=course_release_text_input_blocks_table,
+        row_to_entity=_text_input_row_to_entity,
+        row_to_view=_text_input_row_to_view,
+        release_insert_value=_text_input_release_insert_value,
     ),
 }
 

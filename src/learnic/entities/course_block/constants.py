@@ -23,3 +23,24 @@ CODE_TAB_LABEL_MAX_LEN: Final = 32
 # stops being a legible variant picker and starts being a "do you really
 # want a folder explorer?" — and we already have Lessons for that.
 CODE_BLOCK_MAX_TABS: Final = 8
+
+# Visible label for one option inside a choice block. Plain text only —
+# rich content goes in the preceding HTML block; the option is just a
+# radio/checkbox caption.
+CHOICE_OPTION_LABEL_MAX_LEN: Final = 200
+# A choice question only makes sense with at least two options.
+CHOICE_BLOCK_MIN_OPTIONS: Final = 2
+# Hard cap on options. More than ~8 stops being a "pick one/several" UX
+# and becomes a poor-man's dropdown — at which point a different block
+# type would be the honest answer.
+CHOICE_BLOCK_MAX_OPTIONS: Final = 8
+
+# Accepted answer for a text-input block. Short by design — comparison
+# is exact-match after normalisation, not free-form review, so multi-
+# sentence answers don't fit the model.
+TEXT_INPUT_ANSWER_MAX_LEN: Final = 500
+# Author must provide at least one accepted answer.
+TEXT_INPUT_MIN_ACCEPTED: Final = 1
+# Hard cap on accepted-answer list — 10 synonyms covers realistic
+# variants (case/spelling) without becoming an unmaintainable list.
+TEXT_INPUT_MAX_ACCEPTED: Final = 10

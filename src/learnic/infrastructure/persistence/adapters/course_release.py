@@ -48,7 +48,10 @@ from learnic.infrastructure.persistence.models.course_block import (
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
+    multi_choice_blocks_table,
     rutube_video_blocks_table,
+    single_choice_blocks_table,
+    text_input_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_lesson import (
     course_lessons_table,
@@ -63,7 +66,10 @@ from learnic.infrastructure.persistence.models.course_release import (
     course_release_katex_blocks_table,
     course_release_lessons_table,
     course_release_modules_table,
+    course_release_multi_choice_blocks_table,
     course_release_rutube_video_blocks_table,
+    course_release_single_choice_blocks_table,
+    course_release_text_input_blocks_table,
     course_releases_table,
 )
 
@@ -283,6 +289,27 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 ),
                 rutube_video_blocks_table.c.title.label("rutube_title"),
                 code_blocks_table.c.tabs.label("code_tabs"),
+                single_choice_blocks_table.c.options.label(
+                    "single_choice_options",
+                ),
+                single_choice_blocks_table.c.correct_option_id.label(
+                    "single_choice_correct_option_id",
+                ),
+                multi_choice_blocks_table.c.options.label(
+                    "multi_choice_options",
+                ),
+                multi_choice_blocks_table.c.correct_option_ids.label(
+                    "multi_choice_correct_option_ids",
+                ),
+                text_input_blocks_table.c.accepted_answers.label(
+                    "text_input_accepted_answers",
+                ),
+                text_input_blocks_table.c.case_sensitive.label(
+                    "text_input_case_sensitive",
+                ),
+                text_input_blocks_table.c.trim_whitespace.label(
+                    "text_input_trim_whitespace",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -300,6 +327,18 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 .outerjoin(
                     code_blocks_table,
                     lesson_blocks_table.c.oid == code_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    single_choice_blocks_table,
+                    lesson_blocks_table.c.oid == single_choice_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    multi_choice_blocks_table,
+                    lesson_blocks_table.c.oid == multi_choice_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    text_input_blocks_table,
+                    lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == release.product_id)
@@ -492,6 +531,27 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                     course_release_code_blocks_table.c.tabs.label(
                         "code_tabs",
                     ),
+                    course_release_single_choice_blocks_table.c.options.label(
+                        "single_choice_options",
+                    ),
+                    course_release_single_choice_blocks_table.c.correct_option_id.label(  # noqa: E501
+                        "single_choice_correct_option_id",
+                    ),
+                    course_release_multi_choice_blocks_table.c.options.label(
+                        "multi_choice_options",
+                    ),
+                    course_release_multi_choice_blocks_table.c.correct_option_ids.label(  # noqa: E501
+                        "multi_choice_correct_option_ids",
+                    ),
+                    course_release_text_input_blocks_table.c.accepted_answers.label(  # noqa: E501
+                        "text_input_accepted_answers",
+                    ),
+                    course_release_text_input_blocks_table.c.case_sensitive.label(  # noqa: E501
+                        "text_input_case_sensitive",
+                    ),
+                    course_release_text_input_blocks_table.c.trim_whitespace.label(  # noqa: E501
+                        "text_input_trim_whitespace",
+                    ),
                 )
                 .select_from(
                     course_release_blocks_table.outerjoin(
@@ -513,6 +573,21 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                         course_release_code_blocks_table,
                         course_release_blocks_table.c.oid
                         == course_release_code_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_single_choice_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_single_choice_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_multi_choice_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_multi_choice_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_text_input_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_text_input_blocks_table.c.oid,
                     ),
                 )
                 .where(course_release_blocks_table.c.release_id == release_id)

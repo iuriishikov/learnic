@@ -18,6 +18,12 @@ class BlockType(StrEnum):
     KATEX = "katex"
     RUTUBE_VIDEO = "rutube_video"
     CODE = "code"
+    # Interactive answer blocks. The question prompt itself lives in a
+    # preceding HTML block — these block types carry ONLY the answer
+    # field and the (server-side, never leaked) correctness data.
+    SINGLE_CHOICE = "single_choice"
+    MULTI_CHOICE = "multi_choice"
+    TEXT_INPUT = "text_input"
 
 
 class CodeBlockLanguage(StrEnum):

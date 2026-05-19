@@ -57,3 +57,75 @@ class DuplicateCodeTabLabelError(FieldError):
     """
 
     label: str
+
+
+class TooFewChoiceOptionsError(FieldError):
+    """Raised when a choice block has fewer options than the lower bound."""
+
+    limit: int
+
+
+class TooManyChoiceOptionsError(FieldError):
+    """Raised when a choice block exceeds ``CHOICE_BLOCK_MAX_OPTIONS``."""
+
+    limit: int
+
+
+class DuplicateChoiceOptionLabelError(FieldError):
+    """Raised when two options inside one choice block share a label."""
+
+    label: str
+
+
+class DuplicateChoiceOptionIdError(FieldError):
+    """Raised when two options inside one choice block share an id.
+
+    Option ids are domain-generated UUIDs; a collision indicates a
+    serialization/load bug (e.g. the snapshotter copied an id
+    instead of regenerating). Surface it loudly.
+    """
+
+    option_id: str
+
+
+class CorrectOptionNotInOptionsError(FieldError):
+    """Raised when a single-choice block's correct id is not in its options."""
+
+    option_id: str
+
+
+class EmptyCorrectOptionsError(FieldError):
+    """Raised when a multi-choice block has no correct options.
+
+    A multi-choice question with zero correct answers is undecidable —
+    every submission would be wrong, including the empty one.
+    """
+
+
+class CorrectOptionsNotSubsetError(FieldError):
+    """Raised when a multi-choice block's correct ids are not in options."""
+
+    option_ids: tuple[str, ...]
+
+
+class TooFewAcceptedAnswersError(FieldError):
+    """Raised when a text-input block has no accepted answers."""
+
+    limit: int
+
+
+class TooManyAcceptedAnswersError(FieldError):
+    """Raised when a text-input block exceeds ``TEXT_INPUT_MAX_ACCEPTED``."""
+
+    limit: int
+
+
+class DuplicateAcceptedAnswerError(FieldError):
+    """Raised when two accepted answers in a text-input block are identical.
+
+    Identity is checked under the block's own normalisation flags
+    (``case_sensitive`` / ``trim_whitespace``) — two raw strings that
+    differ only in trailing whitespace collide when trim is on.
+    """
+
+    value: str

@@ -26,7 +26,10 @@ from learnic.entities.course_block.models import (
     HtmlBlock,
     KatexBlock,
     LessonBlock,
+    MultiChoiceBlock,
     RutubeVideoBlock,
+    SingleChoiceBlock,
+    TextInputBlock,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_lesson.models import CourseLesson
@@ -90,11 +93,56 @@ class RutubeVideoBlockSnapshot:
     title: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class ChoiceOptionSnapshot:
+    oid: str
+    label: str
+
+
+@dataclass(slots=True, frozen=True)
+class SingleChoiceBlockSnapshot:
+    """Authoring-side wire shape.
+
+    The ``correct_option_id`` is sent verbatim because this channel
+    is auth-gated for course collaborators (authors). The
+    student-facing public view, exposed only through the release
+    HTTP endpoint, strips the correct id at the presentation layer.
+    """
+
+    type: Literal["single_choice"]
+    oid: str
+    position: int
+    options: list[ChoiceOptionSnapshot]
+    correct_option_id: str
+
+
+@dataclass(slots=True, frozen=True)
+class MultiChoiceBlockSnapshot:
+    type: Literal["multi_choice"]
+    oid: str
+    position: int
+    options: list[ChoiceOptionSnapshot]
+    correct_option_ids: list[str]
+
+
+@dataclass(slots=True, frozen=True)
+class TextInputBlockSnapshot:
+    type: Literal["text_input"]
+    oid: str
+    position: int
+    accepted_answers: list[str]
+    case_sensitive: bool
+    trim_whitespace: bool
+
+
 BlockSnapshot = (
     HtmlBlockSnapshot
     | KatexBlockSnapshot
     | CodeBlockSnapshot
     | RutubeVideoBlockSnapshot
+    | SingleChoiceBlockSnapshot
+    | MultiChoiceBlockSnapshot
+    | TextInputBlockSnapshot
 )
 
 
@@ -138,6 +186,37 @@ def _block_snapshot(block: LessonBlock) -> BlockSnapshot:
                 )
                 for tab in block.tabs
             ],
+        )
+    if isinstance(block, SingleChoiceBlock):
+        return SingleChoiceBlockSnapshot(
+            type="single_choice",
+            oid=str(block.oid),
+            position=block.position,
+            options=[
+                ChoiceOptionSnapshot(oid=str(o.oid), label=o.label.value)
+                for o in block.options
+            ],
+            correct_option_id=str(block.correct_option_id),
+        )
+    if isinstance(block, MultiChoiceBlock):
+        return MultiChoiceBlockSnapshot(
+            type="multi_choice",
+            oid=str(block.oid),
+            position=block.position,
+            options=[
+                ChoiceOptionSnapshot(oid=str(o.oid), label=o.label.value)
+                for o in block.options
+            ],
+            correct_option_ids=[str(o) for o in block.correct_option_ids],
+        )
+    if isinstance(block, TextInputBlock):
+        return TextInputBlockSnapshot(
+            type="text_input",
+            oid=str(block.oid),
+            position=block.position,
+            accepted_answers=[a.value for a in block.accepted_answers],
+            case_sensitive=block.case_sensitive,
+            trim_whitespace=block.trim_whitespace,
         )
     assert_never(block)
 
@@ -522,6 +601,37 @@ def _block_snapshot_from_wire(data: dict[str, Any]) -> BlockSnapshot:
                 )
                 for tab in data["tabs"]
             ],
+        )
+    if block_type == "single_choice":
+        return SingleChoiceBlockSnapshot(
+            type="single_choice",
+            oid=data["oid"],
+            position=data["position"],
+            options=[
+                ChoiceOptionSnapshot(oid=o["oid"], label=o["label"])
+                for o in data["options"]
+            ],
+            correct_option_id=data["correct_option_id"],
+        )
+    if block_type == "multi_choice":
+        return MultiChoiceBlockSnapshot(
+            type="multi_choice",
+            oid=data["oid"],
+            position=data["position"],
+            options=[
+                ChoiceOptionSnapshot(oid=o["oid"], label=o["label"])
+                for o in data["options"]
+            ],
+            correct_option_ids=list(data["correct_option_ids"]),
+        )
+    if block_type == "text_input":
+        return TextInputBlockSnapshot(
+            type="text_input",
+            oid=data["oid"],
+            position=data["position"],
+            accepted_answers=list(data["accepted_answers"]),
+            case_sensitive=data["case_sensitive"],
+            trim_whitespace=data["trim_whitespace"],
         )
     msg = f"unknown block snapshot type: {block_type!r}"
     raise ValueError(msg)

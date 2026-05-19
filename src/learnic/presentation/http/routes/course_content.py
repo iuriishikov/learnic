@@ -98,6 +98,7 @@ from learnic.application.common.errors import (
     WrongBlockTypeError,
 )
 from learnic.application.common.persistence.course_content import (
+    ChoiceOptionView,
     CodeBlockView,
     CourseDraftView,
     DraftLessonView,
@@ -105,18 +106,27 @@ from learnic.application.common.persistence.course_content import (
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
+    MultiChoiceBlockView,
     RutubeVideoBlockView,
+    SingleChoiceBlockView,
+    TextInputBlockView,
 )
 from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQuery,
     GetCourseDraftQueryHandler,
 )
 from learnic.entities.course_block.constants import (
+    CHOICE_BLOCK_MAX_OPTIONS,
+    CHOICE_BLOCK_MIN_OPTIONS,
+    CHOICE_OPTION_LABEL_MAX_LEN,
     CODE_BLOCK_MAX_LEN,
     CODE_BLOCK_MAX_TABS,
     CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    TEXT_INPUT_ANSWER_MAX_LEN,
+    TEXT_INPUT_MAX_ACCEPTED,
+    TEXT_INPUT_MIN_ACCEPTED,
     VIDEO_TITLE_MAX_LEN,
 )
 from learnic.entities.course_block.enums import BlockType, CodeBlockLanguage
@@ -580,21 +590,189 @@ class CodeBlockSchema(BaseModel):
         )
 
 
-LessonBlockSchema = Annotated[
-    HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema | CodeBlockSchema,
-    Discriminator("type"),
-]
+class ChoiceOptionSchema(BaseModel):
+    """One selectable option inside a choice block (read-only)."""
+
+    oid: UUID = Field(
+        description="Stable option id (survives reorder / label edits).",
+        examples=["c1d2e3f4-5678-4abc-9012-3456789abcde"],
+    )
+    label: str = Field(
+        description=(
+            "Plain-text option caption. "
+            f"Max {CHOICE_OPTION_LABEL_MAX_LEN} chars "
+            "(`CHOICE_OPTION_LABEL_MAX_LEN`)."
+        ),
+        min_length=1,
+        max_length=CHOICE_OPTION_LABEL_MAX_LEN,
+        examples=["Paris"],
+    )
+
+    @classmethod
+    def from_view(cls, view: ChoiceOptionView) -> Self:
+        return cls(oid=UUID(view.oid), label=view.label)
 
 
-def _block_view_to_schema(
-    view: LessonBlockView,
-) -> HtmlBlockSchema | KatexBlockSchema | RutubeVideoBlockSchema | CodeBlockSchema:
+class SingleChoiceBlockSchema(BaseModel):
+    """Single-choice answer block projection (authoring-side, read-only).
+
+    The question prompt itself is NOT part of this block — it lives
+    in a preceding HTML block. This schema carries only the answer
+    field configuration. ``correct_option_id`` is included because
+    this projection is for authors; the student-facing public view
+    drops it (see release-content endpoints).
+    """
+
+    type: Literal[BlockType.SINGLE_CHOICE] = Field(
+        default=BlockType.SINGLE_CHOICE,
+        description="Discriminator — always `single_choice` for this schema.",
+    )
+    oid: UUID = Field(examples=["d1e2f3a4-5b6c-4d7e-8f90-1a2b3c4d5e6f"])
+    position: int = Field(examples=[2])
+    options: list[ChoiceOptionSchema] = Field(
+        description=(
+            f"Between {CHOICE_BLOCK_MIN_OPTIONS} and "
+            f"{CHOICE_BLOCK_MAX_OPTIONS} options "
+            "(`CHOICE_BLOCK_MIN_OPTIONS` / `CHOICE_BLOCK_MAX_OPTIONS`)."
+        ),
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+    correct_option_id: UUID = Field(
+        description=(
+            "Id of the option the student must pick. Always one of "
+            "`options[*].oid`. Authors only — stripped from the "
+            "release-side public view sent to learners."
+        ),
+        examples=["c1d2e3f4-5678-4abc-9012-3456789abcde"],
+    )
+
+    @classmethod
+    def from_view(cls, view: SingleChoiceBlockView) -> Self:
+        return cls(
+            type=BlockType.SINGLE_CHOICE,
+            oid=view.oid,
+            position=view.position,
+            options=[ChoiceOptionSchema.from_view(o) for o in view.options],
+            correct_option_id=UUID(view.correct_option_id),
+        )
+
+
+class MultiChoiceBlockSchema(BaseModel):
+    """Multi-choice answer block projection (authoring-side, read-only)."""
+
+    type: Literal[BlockType.MULTI_CHOICE] = Field(
+        default=BlockType.MULTI_CHOICE,
+        description="Discriminator — always `multi_choice` for this schema.",
+    )
+    oid: UUID = Field(examples=["e1f2a3b4-5c6d-4e7f-8a90-1b2c3d4e5f60"])
+    position: int = Field(examples=[3])
+    options: list[ChoiceOptionSchema] = Field(
+        description=(
+            f"Between {CHOICE_BLOCK_MIN_OPTIONS} and "
+            f"{CHOICE_BLOCK_MAX_OPTIONS} options."
+        ),
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+    correct_option_ids: list[UUID] = Field(
+        description=(
+            "Subset of `options[*].oid` the student must pick — "
+            "order does not matter, set semantics. Authors only."
+        ),
+        min_length=1,
+    )
+
+    @classmethod
+    def from_view(cls, view: MultiChoiceBlockView) -> Self:
+        return cls(
+            type=BlockType.MULTI_CHOICE,
+            oid=view.oid,
+            position=view.position,
+            options=[ChoiceOptionSchema.from_view(o) for o in view.options],
+            correct_option_ids=[UUID(o) for o in view.correct_option_ids],
+        )
+
+
+class TextInputBlockSchema(BaseModel):
+    """Free-text answer block projection (authoring-side, read-only).
+
+    Like the choice schemas, this exposes the accepted answers
+    because the projection is for authors. The student-facing
+    public view drops the answer list.
+    """
+
+    type: Literal[BlockType.TEXT_INPUT] = Field(
+        default=BlockType.TEXT_INPUT,
+        description="Discriminator — always `text_input` for this schema.",
+    )
+    oid: UUID = Field(examples=["f1a2b3c4-5d6e-4f70-8192-3a4b5c6d7e8f"])
+    position: int = Field(examples=[4])
+    accepted_answers: list[str] = Field(
+        description=(
+            "Author-provided list of accepted answers. Comparison "
+            "happens at check-time under the block's own "
+            "normalisation flags. Max "
+            f"{TEXT_INPUT_MAX_ACCEPTED} entries "
+            f"(`TEXT_INPUT_MAX_ACCEPTED`), each up to "
+            f"{TEXT_INPUT_ANSWER_MAX_LEN} chars "
+            "(`TEXT_INPUT_ANSWER_MAX_LEN`). Authors only."
+        ),
+        min_length=TEXT_INPUT_MIN_ACCEPTED,
+        max_length=TEXT_INPUT_MAX_ACCEPTED,
+    )
+    case_sensitive: bool = Field(
+        description=(
+            "If true, the student's answer must match casing exactly."
+        ),
+        examples=[False],
+    )
+    trim_whitespace: bool = Field(
+        description=(
+            "If true, surrounding whitespace is stripped from both "
+            "sides before comparison."
+        ),
+        examples=[True],
+    )
+
+    @classmethod
+    def from_view(cls, view: TextInputBlockView) -> Self:
+        return cls(
+            type=BlockType.TEXT_INPUT,
+            oid=view.oid,
+            position=view.position,
+            accepted_answers=list(view.accepted_answers),
+            case_sensitive=view.case_sensitive,
+            trim_whitespace=view.trim_whitespace,
+        )
+
+
+_LessonBlockSchemaUnion = (
+    HtmlBlockSchema
+    | KatexBlockSchema
+    | RutubeVideoBlockSchema
+    | CodeBlockSchema
+    | SingleChoiceBlockSchema
+    | MultiChoiceBlockSchema
+    | TextInputBlockSchema
+)
+
+LessonBlockSchema = Annotated[_LessonBlockSchemaUnion, Discriminator("type")]
+
+
+def _block_view_to_schema(view: LessonBlockView) -> _LessonBlockSchemaUnion:
     if isinstance(view, HtmlBlockView):
         return HtmlBlockSchema.from_view(view)
     if isinstance(view, KatexBlockView):
         return KatexBlockSchema.from_view(view)
     if isinstance(view, CodeBlockView):
         return CodeBlockSchema.from_view(view)
+    if isinstance(view, SingleChoiceBlockView):
+        return SingleChoiceBlockSchema.from_view(view)
+    if isinstance(view, MultiChoiceBlockView):
+        return MultiChoiceBlockSchema.from_view(view)
+    if isinstance(view, TextInputBlockView):
+        return TextInputBlockSchema.from_view(view)
     return RutubeVideoBlockSchema.from_view(view)
 
 

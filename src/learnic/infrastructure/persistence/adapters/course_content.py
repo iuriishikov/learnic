@@ -20,7 +20,10 @@ from learnic.infrastructure.persistence.models.course_block import (
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
+    multi_choice_blocks_table,
     rutube_video_blocks_table,
+    single_choice_blocks_table,
+    text_input_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_lesson import (
     course_lessons_table,
@@ -81,6 +84,27 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 ),
                 rutube_video_blocks_table.c.title.label("rutube_title"),
                 code_blocks_table.c.tabs.label("code_tabs"),
+                single_choice_blocks_table.c.options.label(
+                    "single_choice_options",
+                ),
+                single_choice_blocks_table.c.correct_option_id.label(
+                    "single_choice_correct_option_id",
+                ),
+                multi_choice_blocks_table.c.options.label(
+                    "multi_choice_options",
+                ),
+                multi_choice_blocks_table.c.correct_option_ids.label(
+                    "multi_choice_correct_option_ids",
+                ),
+                text_input_blocks_table.c.accepted_answers.label(
+                    "text_input_accepted_answers",
+                ),
+                text_input_blocks_table.c.case_sensitive.label(
+                    "text_input_case_sensitive",
+                ),
+                text_input_blocks_table.c.trim_whitespace.label(
+                    "text_input_trim_whitespace",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -98,6 +122,18 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 .outerjoin(
                     code_blocks_table,
                     lesson_blocks_table.c.oid == code_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    single_choice_blocks_table,
+                    lesson_blocks_table.c.oid == single_choice_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    multi_choice_blocks_table,
+                    lesson_blocks_table.c.oid == multi_choice_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    text_input_blocks_table,
+                    lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == product_id)

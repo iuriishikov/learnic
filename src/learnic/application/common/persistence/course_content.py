@@ -62,7 +62,71 @@ class CodeBlockView:
     tabs: list[CodeTabView]
 
 
-LessonBlockView = HtmlBlockView | KatexBlockView | RutubeVideoBlockView | CodeBlockView
+@dataclass(slots=True, frozen=True)
+class ChoiceOptionView:
+    """One option inside a choice block, as projected to the read side.
+
+    Plain ``(oid, label)`` — UUIDs are kept as strings here because
+    this view layer crosses to JSON without further encoding.
+    """
+
+    oid: str
+    label: str
+
+
+@dataclass(slots=True, frozen=True)
+class SingleChoiceBlockView:
+    """Authoring-side projection of a single-choice answer block.
+
+    Carries the ``correct_option_id`` — fine for the authoring tree
+    (the author needs to see what they configured). The public
+    student-facing view drops it; see ``presentation/http/...``
+    for the HTTP-boundary stripping.
+    """
+
+    type: Literal[BlockType.SINGLE_CHOICE]
+    oid: LessonBlockID
+    position: int
+    options: list[ChoiceOptionView]
+    correct_option_id: str
+
+
+@dataclass(slots=True, frozen=True)
+class MultiChoiceBlockView:
+    """Authoring-side projection of a multi-choice answer block."""
+
+    type: Literal[BlockType.MULTI_CHOICE]
+    oid: LessonBlockID
+    position: int
+    options: list[ChoiceOptionView]
+    correct_option_ids: list[str]
+
+
+@dataclass(slots=True, frozen=True)
+class TextInputBlockView:
+    """Authoring-side projection of a text-input answer block.
+
+    Carries the ``accepted_answers`` — same authoring rationale as
+    the choice views; the public student-facing view drops the list.
+    """
+
+    type: Literal[BlockType.TEXT_INPUT]
+    oid: LessonBlockID
+    position: int
+    accepted_answers: list[str]
+    case_sensitive: bool
+    trim_whitespace: bool
+
+
+LessonBlockView = (
+    HtmlBlockView
+    | KatexBlockView
+    | RutubeVideoBlockView
+    | CodeBlockView
+    | SingleChoiceBlockView
+    | MultiChoiceBlockView
+    | TextInputBlockView
+)
 
 
 @dataclass(slots=True, frozen=True)

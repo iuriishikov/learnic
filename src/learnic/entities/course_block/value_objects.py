@@ -3,11 +3,13 @@ from typing import ClassVar, Self
 
 from learnic.entities.common.value_object import ValueObject
 from learnic.entities.course_block.constants import (
+    CHOICE_OPTION_LABEL_MAX_LEN,
     CODE_BLOCK_MAX_LEN,
     CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
+    TEXT_INPUT_ANSWER_MAX_LEN,
     VIDEO_TITLE_MAX_LEN,
 )
 from learnic.entities.course_block.enums import CodeBlockLanguage
@@ -152,3 +154,48 @@ class CodeTabLabel(ValueObject):
     def __post_init__(self) -> None:
         if len(self.value) > CODE_TAB_LABEL_MAX_LEN:
             raise BlockContentTooLongError("label", CODE_TAB_LABEL_MAX_LEN)
+
+
+class ChoiceOptionLabel(ValueObject):
+    """Visible caption for one option inside a choice block.
+
+    Plain text — the question prompt (rich content) lives in the
+    preceding HTML block, the option itself is just a radio /
+    checkbox caption. Stored verbatim; newlines are tolerated but
+    discouraged (the frontend renders the label single-line by
+    default). Cross-option uniqueness lives on the parent block.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value.strip():
+            raise EmptyBlockContentError("option_label")
+        if len(self.value) > CHOICE_OPTION_LABEL_MAX_LEN:
+            raise BlockContentTooLongError(
+                "option_label",
+                CHOICE_OPTION_LABEL_MAX_LEN,
+            )
+
+
+class AcceptedAnswer(ValueObject):
+    """One accepted answer for a text-input block, stored verbatim.
+
+    Normalisation (case folding, whitespace trimming) is applied at
+    check-time per the parent block's flags — the VO stores raw
+    author input so an author can later flip a flag without losing
+    fidelity. Empty / blank values are rejected: an answer the
+    student can submit by leaving the field untouched is almost
+    certainly an authoring mistake.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value.strip():
+            raise EmptyBlockContentError("accepted_answer")
+        if len(self.value) > TEXT_INPUT_ANSWER_MAX_LEN:
+            raise BlockContentTooLongError(
+                "accepted_answer",
+                TEXT_INPUT_ANSWER_MAX_LEN,
+            )
