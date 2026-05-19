@@ -12,16 +12,10 @@ from learnic.application.queries.course_content.get_for_student import (
     GetMyCourseContentQuery,
     GetMyCourseContentQueryHandler,
 )
-from learnic.entities.course_enrollment.enums import (
-    CourseEnrollmentStatus,
-)
-from learnic.entities.course_enrollment.ids import CourseEnrollmentID
-from learnic.entities.course_enrollment.models import CourseEnrollment
-from learnic.entities.course_enrollment.value_objects import (
-    ProgressPercent,
-)
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.enrollment.enums import EnrollmentStatus
+from learnic.entities.enrollment.models import Enrollment
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle
@@ -48,22 +42,19 @@ def _enrollment(
     student_id: UserID,
     *,
     release_id: CourseReleaseID | None = None,
-    status: CourseEnrollmentStatus = CourseEnrollmentStatus.ACTIVE,
-) -> CourseEnrollment:
-    return CourseEnrollment(
-        oid=CourseEnrollmentID(uuid.uuid4()),
-        product_id=product_id,
+    status: EnrollmentStatus = EnrollmentStatus.ACTIVE,
+) -> Enrollment:
+    e = Enrollment.create_course(
         student_id=student_id,
+        product_id=product_id,
         release_id=release_id or CourseReleaseID(uuid.uuid4()),
-        status=status,
-        progress=ProgressPercent(0),
-        enrolled_at=datetime.now(timezone.utc),
-        completed_at=None,
     )
+    e.status = status
+    return e
 
 
 def _content_view(
-    release_id: CourseReleaseID, product_id: ProductID
+    release_id: CourseReleaseID, product_id: ProductID,
 ) -> CourseReleaseContentView:
     return CourseReleaseContentView(
         release_id=release_id,
@@ -167,7 +158,7 @@ async def test_refunded_enrollment_raises_404() -> None:
     refunded = _enrollment(
         ProductID(course.oid),
         student,
-        status=CourseEnrollmentStatus.REFUNDED,
+        status=EnrollmentStatus.REFUNDED,
     )
     handler, product_gw, enrollment_gw, release_reader = _make_handler()
     product_gw.with_id.return_value = course
@@ -188,7 +179,7 @@ async def test_completed_enrollment_still_sees_content() -> None:
         ProductID(course.oid),
         student,
         release_id=pinned,
-        status=CourseEnrollmentStatus.COMPLETED,
+        status=EnrollmentStatus.COMPLETED,
     )
     expected = _content_view(pinned, ProductID(course.oid))
     handler, product_gw, enrollment_gw, release_reader = _make_handler()

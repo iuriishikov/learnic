@@ -28,12 +28,21 @@ from learnic.application.common.errors import (
     RoleNameAlreadyTakenError,
 )
 from learnic.entities.common.errors import FieldError
+from learnic.entities.order.errors import (
+    OrderActorMismatchError,
+    OrderAlreadyRefundedError,
+    RefundWindowClosedError,
+)
 from learnic.entities.product_collaboration.errors import (
     OperationNotAllowedInStatusError,
 )
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
     RoleHierarchyViolationError,
+)
+from learnic.entities.wallet.errors import (
+    InsufficientFundsError,
+    ProductHasNoPriceError,
 )
 from learnic.presentation.http.common.errors.translators import (
     EntityNotFoundTranslator,
@@ -270,4 +279,48 @@ COLLABORATION_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_WITH_FIELD_MAP,
     NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
     InviteEmailMismatchError: INVITE_EMAIL_MISMATCH_RULE,
+}
+
+# --- Wallets / Orders --------------------------------------------------
+
+INSUFFICIENT_FUNDS_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""409 with body ``{"error": "InsufficientFundsError",
+"available": int, "required": int}`` — the wallet does not cover
+the requested debit. ``available`` / ``required`` are minor units."""
+
+PRODUCT_HAS_NO_PRICE_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+"""409 — product cannot be purchased because its price is unset."""
+
+ORDER_ALREADY_REFUNDED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+
+REFUND_WINDOW_CLOSED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+
+ORDER_ACTOR_MISMATCH_RULE: Final[Rule] = rule(
+    status=HTTPStatus.FORBIDDEN,
+    translator=_named,
+)
+
+PURCHASE_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_WITH_FIELD_MAP,
+    InsufficientFundsError: INSUFFICIENT_FUNDS_RULE,
+    ProductHasNoPriceError: PRODUCT_HAS_NO_PRICE_RULE,
+}
+
+REFUND_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_WITH_FIELD_MAP,
+    OrderActorMismatchError: ORDER_ACTOR_MISMATCH_RULE,
+    OrderAlreadyRefundedError: ORDER_ALREADY_REFUNDED_RULE,
+    RefundWindowClosedError: REFUND_WINDOW_CLOSED_RULE,
 }

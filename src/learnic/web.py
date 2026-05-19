@@ -155,7 +155,7 @@ per kind).
 **Product `kind` values** (`ProductPayload` union):
 
 - Metadata: `name_changed`, `description_changed`,
-  `duration_changed`.
+  `duration_changed`, `price_changed`.
 - Cover: `cover_changed`, `cover_removed`.
 - Status: `published`, `archived`, `unarchived`, `deleted`.
 - Webinar defaults: `webinar_defaults_updated`.
@@ -165,10 +165,15 @@ per kind).
   `collaboration_accepted`, `collaboration_declined`,
   `collaboration_revoked`, `collaboration_grants_updated`.
 - Role catalogue: `role_created`, `role_updated`, `role_deleted`.
+- Tags: `tags_changed`.
 
 `payload` carries id-level fields plus the new value when trivial
 (e.g. `name_changed` → `{"name": "..."}`); for non-trivial changes
 the client should refetch the affected resource via REST.
+`price_changed` carries `{"amount": <int>}` — the new price in
+minor units (kopecks for RUB); currency is implicit (account
+currency, RUB-only at this phase). The SPA can apply it in place
+without a REST refetch.
 `webinar_defaults_updated` is emitted by the PUT-style replace of
 all webinar defaults and carries the full new snapshot —
 `total_lessons` (int), `default_duration_minutes` (int),
@@ -216,6 +221,14 @@ id. Crucially, `role_updated` doubles as a permission-change
 signal for every collaborator that holds this role: the SPA must
 recompute their effective permissions (drop the role from the
 local cache, re-derive any UI gating) when the event arrives.
+
+`tags_changed` fires on `PUT /products/{product_id}/tags` and
+carries `{"tags": [{"oid": "<UUID>", "name": "<string>",
+"color": "<string>"}, ...]}` — the full ordered post-mutation
+tag list. The SPA replaces the cached `product.tags` array
+verbatim; there are no per-item add/remove deltas because the
+product tag set is always rewritten in one shot. Order in the
+payload mirrors storage (`product_tags.position` ascending).
 
 **Content `kind` values** (`ContentPayload` union — courses only):
 
@@ -461,6 +474,52 @@ interval.
 
 Subscriptions are scoped to a single connection. Reconnects must
 replay the desired `subscribe` list.
+
+## Money / minor units
+
+Every money amount the API emits or accepts is in **minor units of
+the wallet's currency**:
+
+- For `RUB` (currently the only supported currency), 1 RUB = 100
+  kopecks. A wallet showing `150_00` holds 150 RUB.
+- Floats are never used over the wire. The server represents every
+  amount as a JSON integer; the SPA does the same on the way back.
+- Negative amounts appear only on signed-`delta` ledger entries
+  (debits). Balances (`available`, `pending`) and request bodies
+  (`amount`) are always non-negative integers.
+
+The minor-unit convention is documented end-to-end so a generated
+SDK can apply the same rule wherever a money field appears.
+
+## Wallets and orders
+
+A wallet is a money holder pinned to one (user, currency) pair.
+Every registered user has a `RUB` wallet from sign-up (older users
+were backfilled at migration time).
+
+**Purchase flow.** `POST /products/{id}/purchase` debits the
+caller's `available` balance by the product's price and creates an
+`Order` referencing two freeze rows: one carrying the author's
+share, one carrying the platform's commission. Both stay in
+`frozen` state until their `unfreeze_at` passes (typically 14 days,
+configurable via `WALLET_SALE_HOLD_TTL_SECONDS` for dev). A
+periodic worker tick releases ripe freezes into the corresponding
+`available` balance.
+
+**Refund flow.** While both freezes are still `frozen`, the buyer
+can `POST /users/me/orders/{id}/refund`: the freezes flip to
+`cancelled`, the price returns to the buyer's `available`, and the
+ledger gets a `refund` row plus two `cancel_freeze` informational
+rows. Once either freeze has been released, the window is closed
+and the SPA should redirect the user to support.
+
+**Ledger.** `GET /users/me/wallet/ledger` returns every money
+event that touched the wallet (`purchase`, `refund`, `freeze`,
+`release`, `cancel_freeze`, `topup`, `adjustment`) with a signed
+`delta`. Informational events (`freeze`, `cancel_freeze`) carry
+`delta = 0` because the money is on the freeze row, not on
+`available`. Summing `delta` over all entries of a wallet equals
+`available` — an invariant that supports self-checking and audit.
 """.strip()
 
 OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
@@ -567,33 +626,32 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
-        "name": "WebinarEnrollments",
+        "name": "Enrollments",
         "description": (
-            "Student enrollments in webinar cohorts. "
-            "`POST /cohorts/{cohort_id}/enrollments` self-enrolls "
-            "the current user (returns 409 `EnrollmentClosed`, "
-            "`AlreadyEnrolled`, or `CohortFull` on pre-condition "
-            "failure). `GET /cohorts/{cohort_id}/enrollments` lists "
-            "for the host/author. "
-            "`GET /users/me/webinar-enrollments` returns the current "
-            "user's enrollments. Drop/complete/refund endpoints under "
-            "`/cohorts/{cohort_id}/enrollments/{enrollment_id}/...` "
-            "— self-drop is allowed; complete/refund are host-or-author."
-        ),
-    },
-    {
-        "name": "CourseEnrollments",
-        "description": (
-            "Student enrollments in self-paced course products. "
-            "`POST /courses/{course_id}/enrollments` self-enrolls the "
-            "current user (returns 409 `NotACourse` or "
-            "`AlreadyEnrolled` on pre-condition failure). "
-            "`PATCH /courses/{course_id}/enrollments/{enrollment_id}"
-            "/progress` is student-only and auto-completes at 100. "
-            "Complete/refund endpoints are author-only. "
-            "`GET /users/me/course-enrollments` returns the current "
-            "user's enrollments; "
-            "`GET /courses/{course_id}/enrollments` is author-only."
+            "Student enrollments — unified across course and "
+            "webinar products. `type` on the response shape "
+            "discriminates: `course` carries `course_details` "
+            "(product_id, release_id, progress_percent, "
+            "completed_at), `webinar` carries `webinar_details` "
+            "(cohort_id). "
+            "Create: `POST /courses/{course_id}/enrollments` "
+            "(course self-enroll; 409 on `ProductDoesNotSupport`, "
+            "`AlreadyEnrolled`, or `CannotEnrollInUnreleased"
+            "Course`) or `POST /cohorts/{cohort_id}/enrollments` "
+            "(webinar; 409 on `EnrollmentClosed`, `AlreadyEnrolled`, "
+            "or `CohortFull`). "
+            "Caller-scoped: `GET /users/me/enrollments` returns "
+            "both types. List by parent: "
+            "`GET /courses/{course_id}/enrollments` (author/"
+            "`READ_PRODUCT`) and `GET /cohorts/{cohort_id}/"
+            "enrollments` (host/author). "
+            "Item ops: "
+            "`PATCH /courses/{course_id}/enrollments/{id}/progress` "
+            "is student-only and auto-completes at 100; "
+            "`/complete` and `/refund` are author-only for course, "
+            "host-or-author for webinar. No `drop` — walk-away "
+            "semantics go through refund (the historical "
+            "webinar-only `DROPPED` status was retired)."
         ),
     },
     {
@@ -630,6 +688,27 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "the unified product channel "
             "`WS /products/{product_id}/events` — see the "
             "**WebSocket channels** section in the API description."
+        ),
+    },
+    {
+        "name": "Tags",
+        "description": (
+            "Globally-shared name + color labels attachable to any "
+            "product. Tags are append-only and not author-scoped: "
+            "any authenticated user can search the pool, and any "
+            "user with `edit_description` on a product can attach "
+            "existing tags or mint new ones via the get-or-create "
+            "branch of `PUT /products/{product_id}/tags`. "
+            "Dedup happens by `slug` (lower-cased, "
+            "whitespace-collapsed `name`); two clients typing the "
+            "same tag converge on the same row. Color is owned by "
+            "the first creator and stored canonical-hex (validated "
+            "by `pydantic_extra_types.color.Color`); per-product "
+            "overrides are intentionally not supported. Real-time "
+            "deltas of a product's tag list flow over the product "
+            "channel `WS /products/{product_id}/events` as "
+            "`tags_changed` — see the **WebSocket channels** "
+            "section in the API description."
         ),
     },
     {
@@ -712,6 +791,40 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "**WebSocket channels** section in the API description."
         ),
     },
+    {
+        "name": "Wallet",
+        "description": (
+            "Per-user money holder. `GET /users/me/wallet` returns "
+            "available + pending totals; `GET /users/me/wallet/ledger` "
+            "returns the immutable journal of every credit and debit. "
+            "All amounts are in **minor units** (kopecks for RUB) — "
+            "see the *Money / minor units* section in the API "
+            "description for the convention and rationale."
+        ),
+    },
+    {
+        "name": "Orders",
+        "description": (
+            "Purchases of paid products. `POST /products/{id}/purchase` "
+            "charges the caller's wallet and freezes the author's and "
+            "platform's shares until the refund window closes. "
+            "`POST /users/me/orders/{id}/refund` reverses the order "
+            "while both freezes are still in `frozen` state — once "
+            "either is released by the worker, the refund window has "
+            "closed and the buyer is redirected to support."
+        ),
+    },
+    {
+        "name": "Dev",
+        "description": (
+            "Development-only endpoints, registered only when "
+            "`APP_ENVIRONMENT=development`. Bypass the missing "
+            "payment integration: `POST /dev/wallet/topup` credits "
+            "the caller's own wallet; `POST /dev/freezes/release-now` "
+            "runs the release worker synchronously instead of waiting "
+            "for the next scheduler tick. Absent from prod builds."
+        ),
+    },
 ]
 
 
@@ -733,7 +846,7 @@ def _create_app(configs: Configs) -> FastAPI:
         openapi_tags=OPENAPI_TAGS,
         lifespan=_lifespan,
     )
-    setup_routes(app)
+    setup_routes(app, configs)
     container = setup_providers(configs)
     setup_dishka(container, app)
     return app

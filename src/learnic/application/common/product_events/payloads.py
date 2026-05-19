@@ -26,6 +26,7 @@ from learnic.entities.product_collaboration.ids import (
 )
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
+from learnic.entities.tag.models import Tag
 from learnic.entities.user.models import UserID
 
 
@@ -50,6 +51,12 @@ class DescriptionChangedPayload:
 class DurationChangedPayload:
     KIND: ClassVar[Literal["duration_changed"]] = "duration_changed"
     total_duration_in_hours: int
+
+
+@dataclass(slots=True, frozen=True)
+class PriceChangedPayload:
+    KIND: ClassVar[Literal["price_changed"]] = "price_changed"
+    amount: int
 
 
 @dataclass(slots=True, frozen=True)
@@ -345,10 +352,42 @@ class RoleDeletedPayload:
         return cls(role_id=str(role_id))
 
 
+# ---------------------------------------------------------------- #
+# Tag payloads.
+#
+# A product's tag list is mutated in one shot
+# (``PUT /products/{product_id}/tags``), so a single
+# ``tags_changed`` payload carries the new ordered list. The SPA
+# replaces the cached ``product.tags`` array verbatim — no
+# per-item add/remove events. Order in the payload mirrors the
+# order in storage (``product_tags.position`` ascending).
+# ---------------------------------------------------------------- #
+
+
+@dataclass(slots=True, frozen=True)
+class TagsChangedPayload:
+    KIND: ClassVar[Literal["tags_changed"]] = "tags_changed"
+    tags: list[dict[str, str]]
+
+    @classmethod
+    def of(cls, tags: list[Tag]) -> "TagsChangedPayload":
+        return cls(
+            tags=[
+                {
+                    "oid": str(tag.oid),
+                    "name": tag.name.value,
+                    "color": tag.color.value,
+                }
+                for tag in tags
+            ],
+        )
+
+
 ProductPayload = (
     NameChangedPayload
     | DescriptionChangedPayload
     | DurationChangedPayload
+    | PriceChangedPayload
     | CoverChangedPayload
     | CoverRemovedPayload
     | PublishedPayload
@@ -369,6 +408,7 @@ ProductPayload = (
     | RoleCreatedPayload
     | RoleUpdatedPayload
     | RoleDeletedPayload
+    | TagsChangedPayload
 )
 
 
@@ -388,6 +428,8 @@ def payload_from_wire(kind: str, data: dict[str, Any]) -> ProductPayload:
         return DurationChangedPayload(
             total_duration_in_hours=data["total_duration_in_hours"],
         )
+    if kind == PriceChangedPayload.KIND:
+        return PriceChangedPayload(amount=data["amount"])
     if kind == CoverChangedPayload.KIND:
         return CoverChangedPayload(cover_file_id=data["cover_file_id"])
     if kind == CoverRemovedPayload.KIND:
@@ -492,5 +534,7 @@ def payload_from_wire(kind: str, data: dict[str, Any]) -> ProductPayload:
         )
     if kind == RoleDeletedPayload.KIND:
         return RoleDeletedPayload(role_id=data["role_id"])
+    if kind == TagsChangedPayload.KIND:
+        return TagsChangedPayload(tags=list(data["tags"]))
     msg = f"unknown product payload kind: {kind!r}"
     raise ValueError(msg)

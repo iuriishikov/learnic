@@ -10,6 +10,7 @@ from fastapi import (
     Path,
     Query,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -20,7 +21,7 @@ from learnic.application.commands.cohort.add import (
     AddCohortCommand,
     AddCohortCommandHandler,
 )
-from learnic.application.commands.course_enrollment.enroll import (
+from learnic.application.commands.enrollment.enroll_in_course import (
     EnrollStudentInCourseCommand,
     EnrollStudentInCourseCommandHandler,
 )
@@ -47,6 +48,10 @@ from learnic.application.commands.product.change_duration import (
 from learnic.application.commands.product.change_name import (
     ChangeProductNameCommand,
     ChangeProductNameCommandHandler,
+)
+from learnic.application.commands.product.change_price import (
+    ChangeProductPriceCommand,
+    ChangeProductPriceCommandHandler,
 )
 from learnic.application.commands.product.cover.remove import (
     RemoveProductCoverCommand,
@@ -85,18 +90,24 @@ from learnic.application.common.errors import (
     ProductNotArchivedError,
     ProductNotInDraftError,
 )
-from learnic.application.common.persistence.course_enrollment import (
-    CourseEnrollmentView,
+from learnic.application.queries.enrollment.list_for_product import (
+    GetProductEnrollmentsQuery,
+    GetProductEnrollmentsQueryHandler,
 )
-from learnic.application.queries.course_enrollment.list_for_product import (
-    GetProductCourseEnrollmentsQuery,
-    GetProductCourseEnrollmentsQueryHandler,
+from learnic.presentation.http.routes.enrollment import (
+    EnrollmentSchema,
 )
 from learnic.application.common.pagination import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
+    SEARCH_QUERY_MAX_LEN,
+    SEARCH_QUERY_MIN_LEN,
     Pagination,
 )
+from learnic.application.common.statistics.collector import (
+    StatisticsCollector,
+)
+from learnic.entities.statistic.models import Statistic
 from learnic.application.common.persistence.product import (
     WebinarDetailsView,
 )
@@ -123,6 +134,14 @@ from learnic.application.queries.product.get_published import (
     GetPublishedProductsQuery,
     GetPublishedProductsQueryHandler,
 )
+from learnic.application.queries.product.search import (
+    SearchPublishedProductsQuery,
+    SearchPublishedProductsQueryHandler,
+)
+from learnic.application.queries.product.recommend_for_me import (
+    RecommendForMeQuery,
+    RecommendForMeQueryHandler,
+)
 from learnic.application.queries.product_qa.list import (
     GetProductQAListQuery,
     GetProductQAListQueryHandler,
@@ -136,6 +155,8 @@ from learnic.entities.product.constants import (
     DESCRIPTION_MAX_LEN,
     DURATION_HOURS_MAX,
     DURATION_HOURS_MIN,
+    PRICE_AMOUNT_MAX,
+    PRICE_AMOUNT_MIN,
     QA_ANSWER_MAX_LEN,
     QA_QUESTION_MAX_LEN,
     STREAM_URL_MAX_LEN,
@@ -151,9 +172,6 @@ from learnic.entities.product.enums import (
     ProductType,
 )
 from learnic.entities.product.errors import ProductDoesNotSupportError
-from learnic.entities.course_enrollment.enums import (
-    CourseEnrollmentStatus,
-)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.presentation.http.common.auth_deps import (
@@ -189,7 +207,14 @@ router = ErrorAwareRouter(
 # is course-scoped.
 course_router = ErrorAwareRouter(
     prefix="/courses",
-    tags=["CourseEnrollments"],
+    tags=["Enrollments"],
+    route_class=DishkaErrorAwareRoute,
+)
+
+# Caller-scoped views over products (rule 14: live under /users/me).
+me_router = ErrorAwareRouter(
+    prefix="/users/me",
+    tags=["Products"],
     route_class=DishkaErrorAwareRoute,
 )
 
@@ -272,6 +297,29 @@ class ChangeProductDurationSchema(BaseModel):
     )
 
 
+class ChangeProductPriceSchema(BaseModel):
+    """Body for ``PATCH /products/{id}/price``."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"amount": 500_00}]},
+    )
+
+    amount: int = Field(
+        description=(
+            "Price in minor units (kopecks for RUB). Must be in "
+            f"`[{PRICE_AMOUNT_MIN}, {PRICE_AMOUNT_MAX}]` "
+            "(`PRICE_AMOUNT_MIN` / `PRICE_AMOUNT_MAX` — see "
+            "`entities/product/constants.py`). Zero is allowed to "
+            "mark the product as free-but-sellable. Currency is "
+            "implicit: products are denominated in the owner's "
+            "account currency (RUB-only at this phase)."
+        ),
+        ge=PRICE_AMOUNT_MIN,
+        le=PRICE_AMOUNT_MAX,
+        examples=[500_00],
+    )
+
+
 # ---------------------------- response schemas ------------------------- #
 
 
@@ -312,6 +360,7 @@ class ProductSchema(BaseModel):
                     "name": "Async Python deep dive",
                     "description": "<p>A 30-hour course.</p>",
                     "total_duration_in_hours": 30,
+                    "price_amount": 500_00,
                     "author": {
                         "oid": "550e8400-e29b-41d4-a716-446655440000",
                         "full_name": "Lovelace Ada",
@@ -336,6 +385,18 @@ class ProductSchema(BaseModel):
     name: str
     description: str | None
     total_duration_in_hours: int | None
+    price_amount: int | None = Field(
+        default=None,
+        description=(
+            "Current price in minor units (kopecks for RUB), or "
+            "`null` for products that have never had a price set "
+            "(DRAFT products start without one). Currency is "
+            "implicit — products are denominated in the owner's "
+            "account currency (RUB-only at this phase). See "
+            "`PATCH /products/{id}/price` to set or update."
+        ),
+        examples=[None, 500_00],
+    )
     author: UserRefSchema
     webinar_details: WebinarDetailsSchema | None
     cover_url: str | None = Field(
@@ -363,6 +424,7 @@ class ProductSchema(BaseModel):
             name=view.name,
             description=view.description,
             total_duration_in_hours=view.total_duration_in_hours,
+            price_amount=view.price_amount,
             author=UserRefSchema.from_view(view.author),
             webinar_details=(
                 WebinarDetailsSchema.from_view(view.webinar_details)
@@ -836,6 +898,55 @@ async def change_duration(
     )
 
 
+@router.patch(
+    "/{product_id}/price",
+    summary="Change a product's price",
+    operation_id="changeProductPrice",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def change_price(
+    request: Request,
+    payload: ChangeProductPriceSchema,
+    interactor: FromDishka[ChangeProductPriceCommandHandler],
+    auth: FromDishka[Authenticator],
+    product_id: UUID = _PRODUCT_ID_PATH,
+) -> None:
+    """Set or update the product's price.
+
+    Owner-only — non-author collaborators (any role) get HTTP 403
+    even with editor permissions on the product.
+
+    Args:
+        request: Source of the access-token cookie.
+        payload: ``{"amount": int}`` — minor units (kopecks for RUB),
+            bounded by ``[PRICE_AMOUNT_MIN, PRICE_AMOUNT_MAX]``.
+        interactor: Injected change-price command handler.
+        auth: Injected authenticator that validates the access cookie.
+        product_id: Target product's UUID, parsed from the URL path.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotResourceOwnerError: Caller is not the product's author;
+            HTTP 403.
+        EntityNotFoundError: No product with the given id; HTTP 404.
+        FieldError: ``ProductPriceAmount`` VO invariants violated
+            (out-of-range amount); HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        ChangeProductPriceCommand(
+            actor_id=ctx.user_id,
+            product_id=ProductID(product_id),
+            amount=payload.amount,
+        ),
+    )
+
+
 @router.post(
     "/{product_id}/cover",
     summary="Upload (or replace) a product's cover image",
@@ -1229,12 +1340,32 @@ async def check_name_availability(
 
 @router.get(
     "",
-    summary="List published products (public catalog)",
+    summary="List or search published products (public catalog)",
     operation_id="getPublishedProducts",
     response_model=list[ProductSchema],
+    responses={
+        200: {
+            "headers": {
+                "x-total-count": {
+                    "description": (
+                        "Total number of products matching the filter "
+                        "(without pagination). Used by the SPA to "
+                        "render numbered page controls — "
+                        "`ceil(total / limit)` is the total page "
+                        "count."
+                    ),
+                    "schema": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
+    },
 )
 async def get_published(
-    interactor: FromDishka[GetPublishedProductsQueryHandler],
+    response: Response,
+    list_interactor: FromDishka[GetPublishedProductsQueryHandler],
+    search_interactor: FromDishka[
+        SearchPublishedProductsQueryHandler
+    ],
     offset: int = Query(
         0,
         ge=0,
@@ -1248,24 +1379,66 @@ async def get_published(
         description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
         examples=[20],
     ),
+    q: str | None = Query(
+        None,
+        min_length=SEARCH_QUERY_MIN_LEN,
+        max_length=SEARCH_QUERY_MAX_LEN,
+        description=(
+            "Optional free-text search query. When omitted or empty, "
+            "returns published products ordered by ``created_at`` "
+            "descending (newest first). When provided, performs a "
+            "weighted full-text + fuzzy search across product name "
+            "(weight A), author full name (B), attached tag names "
+            "(B), and HTML-stripped description (C), ranked by "
+            "``ts_rank_cd`` blended with ``pg_trgm`` similarity "
+            "(typo-tolerant). Length bounds: "
+            f"`[{SEARCH_QUERY_MIN_LEN}, {SEARCH_QUERY_MAX_LEN}]` "
+            "(`SEARCH_QUERY_MIN_LEN` / `SEARCH_QUERY_MAX_LEN`)."
+        ),
+        examples=["python", "иванов", "машинное обучение"],
+    ),
 ) -> list[ProductSchema]:
-    """Return all published products (public catalog), newest first.
+    """Return the public catalog of published products.
+
+    Two modes share one URL — discriminated by the presence of ``q``:
+
+    * **List mode** (``q`` omitted) — newest-first paginated catalog,
+      identical to the legacy behaviour.
+    * **Search mode** (``q`` provided) — weighted multi-field
+      full-text search (name, author full name, tag names,
+      HTML-stripped description) with a ``pg_trgm`` fuzzy fallback
+      for typos and transliteration. Search is morphology-aware via
+      the Russian text-search dictionary ("курсы" matches "курс").
 
     Args:
-        interactor: Injected get-published-products query handler.
+        response: Injected FastAPI response so the handler can set
+            the ``X-Total-Count`` header.
+        list_interactor: Injected newest-first query handler.
+        search_interactor: Injected full-text search query handler.
         offset: Pagination offset.
         limit: Page size.
+        q: Optional free-text query. When empty / omitted, list mode
+            applies; otherwise search mode runs.
 
     Returns:
-        List of :class:`ProductSchema`, ordered by ``created_at``
-        descending.
+        List of :class:`ProductSchema` (body). In list mode ordered
+        by ``created_at`` desc; in search mode ordered by combined
+        ranking (``ts_rank_cd`` × 2 + ``similarity``) then
+        ``created_at`` desc. The ``X-Total-Count`` response header
+        carries the unpaginated match total so the SPA can drive
+        numbered page controls without a second round-trip.
     """
-    views = await interactor.run(
-        GetPublishedProductsQuery(
-            pagination=Pagination(limit=limit, offset=offset),
-        ),
-    )
-    return [ProductSchema.from_output(view) for view in views]
+    pagination = Pagination(limit=limit, offset=offset)
+    if q is None or not q.strip():
+        result = await list_interactor.run(
+            GetPublishedProductsQuery(pagination=pagination),
+        )
+    else:
+        result = await search_interactor.run(
+            SearchPublishedProductsQuery(q=q, pagination=pagination),
+        )
+    response.headers["X-Total-Count"] = str(result.total)
+    return [ProductSchema.from_output(view) for view in result.items]
 
 
 @router.get(
@@ -1273,16 +1446,35 @@ async def get_published(
     summary="Get a single product",
     operation_id="getProductById",
     response_model=ProductSchema,
+    dependencies=_AUTH_SECURITY,
     error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
 async def get_one(
+    request: Request,
     interactor: FromDishka[GetProductQueryHandler],
+    auth: FromDishka[Authenticator],
+    stats: FromDishka[StatisticsCollector],
     product_id: UUID = _PRODUCT_ID_PATH,
 ) -> ProductSchema:
     """Return a single product by id (public).
 
+    Authentication is **optional**: anonymous callers receive the
+    same payload as signed-in ones. A valid access cookie has one
+    extra effect — the call records a ``product_view`` statistic
+    attributed to the caller. Authors viewing their own products
+    are **not** filtered out: a self-view is a valid analytics
+    signal (preview / dashboard navigation) and the SPA can split
+    it out later via ``actor_id == product.author_id``. A missing
+    or stale cookie degrades silently to the anonymous path.
+
     Args:
+        request: Source of the (optional) access cookie and
+            ``Referer`` header used for the stat row.
         interactor: Injected get-product query handler.
+        auth: Injected authenticator; consulted via
+            :meth:`Authenticator.authenticate_optional`.
+        stats: Injected statistics collector; failures are
+            swallowed by the collector implementation.
         product_id: Target product's UUID, parsed from the URL path.
 
     Returns:
@@ -1293,7 +1485,17 @@ async def get_one(
     Raises:
         EntityNotFoundError: No product with the given id; HTTP 404.
     """
-    view = await interactor.run(GetProductQuery(oid=ProductID(product_id)))
+    target_id = ProductID(product_id)
+    view = await interactor.run(GetProductQuery(oid=target_id))
+    ctx = await auth.authenticate_optional(request)
+    if ctx is not None:
+        await stats.record(
+            Statistic.for_product_view(
+                actor_id=ctx.user_id,
+                product_id=target_id,
+                referrer=request.headers.get("referer"),
+            ),
+        )
     return ProductSchema.from_output(view)
 
 
@@ -1872,30 +2074,6 @@ class CreatedCourseEnrollmentSchema(BaseModel):
     )
 
 
-class CourseEnrollmentListItemSchema(BaseModel):
-    """Course enrollment projection in ``GET /courses/{course_id}/enrollments``."""
-
-    oid: UUID
-    product_id: UUID
-    student_id: UUID
-    status: CourseEnrollmentStatus
-    progress_percent: int
-    enrolled_at: datetime
-    completed_at: datetime | None
-
-    @classmethod
-    def from_view(cls, view: CourseEnrollmentView) -> Self:
-        return cls(
-            oid=view.oid,
-            product_id=view.product_id,
-            student_id=view.student_id,
-            status=view.status,
-            progress_percent=view.progress_percent,
-            enrolled_at=view.enrolled_at,
-            completed_at=view.completed_at,
-        )
-
-
 # ===================== Course-enrollment routes ======================== #
 
 
@@ -1958,20 +2136,22 @@ async def enroll_in_course(
     "/{course_id}/enrollments",
     summary="List a course's enrollments",
     operation_id="getCourseEnrollments",
-    response_model=list[CourseEnrollmentListItemSchema],
+    response_model=list[EnrollmentSchema],
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
 async def get_course_enrollments(
     request: Request,
-    interactor: FromDishka[GetProductCourseEnrollmentsQueryHandler],
+    interactor: FromDishka[GetProductEnrollmentsQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: UUID = _COURSE_ID_PATH,
-) -> list[CourseEnrollmentListItemSchema]:
+) -> list[EnrollmentSchema]:
     """Return course enrollments.
 
     Caller needs ``READ_PRODUCT`` on the product (owner or any
-    collaborator with that permission).
+    collaborator with that permission). Returns the unified
+    :class:`EnrollmentSchema`; ``type`` is always ``"course"``
+    for this endpoint.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -1981,9 +2161,74 @@ async def get_course_enrollments(
     """
     ctx = await auth.authenticate(request)
     views = await interactor.run(
-        GetProductCourseEnrollmentsQuery(
+        GetProductEnrollmentsQuery(
             actor_id=ctx.user_id,
             product_id=ProductID(course_id),
         ),
     )
-    return [CourseEnrollmentListItemSchema.from_view(v) for v in views]
+    return [EnrollmentSchema.from_view(v) for v in views]
+
+
+# ---------------------------- recommendations ------------------------- #
+
+
+@me_router.get(
+    "/recommended-products",
+    summary="Get products recommended for the current user",
+    operation_id="getMyRecommendedProducts",
+    response_model=list[ProductSchema],
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def get_my_recommended_products(
+    request: Request,
+    interactor: FromDishka[RecommendForMeQueryHandler],
+    auth: FromDishka[Authenticator],
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
+        examples=[20],
+    ),
+) -> list[ProductSchema]:
+    """Return published products ranked for the authenticated user.
+
+    Ranking blends four signals (tag affinity, author affinity,
+    recent popularity, freshness) configured by
+    ``RECOMMENDATIONS_WEIGHT_*`` env vars. Products the user owns
+    or is already actively/completed enrolled in are excluded
+    server-side. ``REFUNDED`` enrollments do not exclude — similar
+    offers stay relevant.
+
+    Cold start (no enrollment history) collapses to
+    ``popularity + freshness``, returning a "top of the platform"
+    list rather than an empty response.
+
+    Args:
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        List of :class:`ProductSchema`, ordered by descending
+        recommendation score (re-ranked in the handler, not on the
+        DB). Same projection as ``GET /products`` so existing SPA
+        product cards render unchanged.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+    """
+    ctx = await auth.authenticate(request)
+    outputs = await interactor.run(
+        RecommendForMeQuery(
+            user_id=ctx.user_id,
+            pagination=Pagination(limit=limit, offset=offset),
+        ),
+    )
+    return [ProductSchema.from_output(view) for view in outputs]

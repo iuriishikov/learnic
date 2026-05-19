@@ -61,6 +61,10 @@ from learnic.application.common.pagination import (
     MAX_LIMIT,
     Pagination,
 )
+from learnic.application.common.statistics.collector import (
+    StatisticsCollector,
+)
+from learnic.entities.statistic.models import Statistic
 from learnic.application.queries.product.get_by_user import (
     GetUserProductsQuery,
     GetUserProductsQueryHandler,
@@ -368,17 +372,35 @@ async def search(
     summary="Get a user's public profile",
     operation_id="getUserById",
     response_model=UserSchema,
+    dependencies=_AUTH_SECURITY,
     error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
 async def get(
+    request: Request,
     interactor: FromDishka[GetUserQueryHandler],
+    auth: FromDishka[Authenticator],
+    stats: FromDishka[StatisticsCollector],
     user_id: UUID = _USER_ID_PATH,
 ) -> UserSchema:
     """Return a user by id with presigned URLs for avatar/cover.
 
+    Authentication is **optional**: anonymous callers receive the
+    same payload as signed-in ones. A valid access cookie has one
+    extra effect — the call records a ``profile_view`` statistic
+    attributed to the caller (skipped when the caller is the
+    profile owner). A missing or stale cookie degrades silently
+    to the anonymous path, so a logged-out browser never sees a
+    401 here.
+
     Args:
-        user_id: Target user's UUID, parsed from the URL path.
+        request: Source of the (optional) access cookie and
+            ``Referer`` header used for the stat row.
         interactor: Injected get-user query handler.
+        auth: Injected authenticator; consulted via
+            :meth:`Authenticator.authenticate_optional`.
+        stats: Injected statistics collector; failures are
+            swallowed by the collector implementation.
+        user_id: Target user's UUID, parsed from the URL path.
 
     Returns:
         ``UserSchema`` with profile fields and short-lived presigned
@@ -388,7 +410,17 @@ async def get(
     Raises:
         EntityNotFoundError: No user with the given id; HTTP 404.
     """
-    view = await interactor.run(GetUserQuery(oid=UserID(user_id)))
+    target_id = UserID(user_id)
+    view = await interactor.run(GetUserQuery(oid=target_id))
+    ctx = await auth.authenticate_optional(request)
+    if ctx is not None and ctx.user_id != target_id:
+        await stats.record(
+            Statistic.for_profile_view(
+                actor_id=ctx.user_id,
+                target_user_id=target_id,
+                referrer=request.headers.get("referer"),
+            ),
+        )
     return UserSchema.from_view(view)
 
 

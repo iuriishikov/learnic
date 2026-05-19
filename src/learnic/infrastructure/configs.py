@@ -119,6 +119,59 @@ class WebPushConfig(BaseSettings):
     vapid_subject: str = "mailto:noreply@learnic.local"
 
 
+class AppConfig(BaseSettings):
+    """Top-level deployment flags that gate environment-specific routes.
+
+    Currently only ``environment`` lives here; the value drives the
+    ``/dev/...`` router registration in :func:`bootstrap.setup_routes`
+    so dev-only endpoints physically do not exist in production
+    builds.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_", env_file=".env", extra="ignore"
+    )
+
+    environment: Literal["development", "staging", "production"] = "production"
+
+
+class WalletConfig(BaseSettings):
+    """Refund-window TTLs for purchase freeze entries.
+
+    Defaults to 14 days for both shares. Dev overrides via env
+    (e.g. ``WALLET_SALE_HOLD_TTL_SECONDS=10``) make the release
+    worker trip on a freshly purchased product within seconds —
+    handy for manual end-to-end checks without waiting two weeks.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="WALLET_", env_file=".env", extra="ignore"
+    )
+
+    sale_hold_ttl_seconds: int = 14 * 24 * 3600
+    commission_hold_ttl_seconds: int = 14 * 24 * 3600
+
+
+class RecommendationsConfig(BaseSettings):
+    """Ranking weights and popularity window for ``/users/me/recommended-products``.
+
+    Weights are linear blend coefficients on max-scaled signals;
+    ratios are what matters, not absolute values. Defaults below
+    are a sensible starting prior — tune via env once conversion
+    data is collected.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="RECOMMENDATIONS_", env_file=".env", extra="ignore"
+    )
+
+    weight_tag: float = 0.40
+    weight_author: float = 0.15
+    weight_popularity: float = 0.30
+    weight_freshness: float = 0.15
+    popularity_window_days: int = 30
+
+
 class Configs:
     __slots__ = (
         "postgres",
@@ -129,6 +182,9 @@ class Configs:
         "rusender",
         "security",
         "web_push",
+        "app",
+        "wallet",
+        "recommendations",
     )
 
     def __init__(
@@ -141,6 +197,9 @@ class Configs:
         rusender: RusenderConfig,
         security: SecurityConfig,
         web_push: WebPushConfig,
+        app: AppConfig,
+        wallet: WalletConfig,
+        recommendations: RecommendationsConfig,
     ) -> None:
         self.postgres = postgres
         self.asgi = asgi
@@ -150,6 +209,9 @@ class Configs:
         self.rusender = rusender
         self.security = security
         self.web_push = web_push
+        self.app = app
+        self.wallet = wallet
+        self.recommendations = recommendations
 
 
 def load_configs() -> Configs:
@@ -162,4 +224,7 @@ def load_configs() -> Configs:
         rusender=RusenderConfig(),  # pyright: ignore[reportCallIssue]
         security=SecurityConfig(),  # pyright: ignore[reportCallIssue]
         web_push=WebPushConfig(),  # pyright: ignore[reportCallIssue]
+        app=AppConfig(),  # pyright: ignore[reportCallIssue]
+        wallet=WalletConfig(),  # pyright: ignore[reportCallIssue]
+        recommendations=RecommendationsConfig(),  # pyright: ignore[reportCallIssue]
     )

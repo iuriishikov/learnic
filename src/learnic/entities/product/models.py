@@ -17,6 +17,7 @@ from learnic.entities.product.value_objects import (
     DurationHours,
     ParticipantsLimit,
     ProductDescription,
+    ProductPriceAmount,
     ProductTitle,
     StreamUrl,
     WebinarLessonsCount,
@@ -58,6 +59,7 @@ class Product(BaseEntity[ProductID]):
     total_duration_in_hours: DurationHours | None = None
     cover_file_id: FileID | None = None
     webinar_details: WebinarDetails | None = None
+    price: ProductPriceAmount | None = None
 
     def supports(self, capability: ProductCapability) -> bool:
         """Return whether this product's type advertises ``capability``."""
@@ -103,6 +105,12 @@ class Product(BaseEntity[ProductID]):
     def attach_webinar_details(self, details: WebinarDetails) -> None:
         """Attach freshly created webinar defaults to this product."""
         self.webinar_details = details
+
+    def set_price(self, price: ProductPriceAmount) -> None:
+        self.price = price
+
+    def clear_price(self) -> None:
+        self.price = None
 
     def publish(self) -> None:
         if self.status is ProductStatus.PUBLISHED:

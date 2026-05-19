@@ -5,6 +5,8 @@ from learnic.entities.product.constants import (
     DESCRIPTION_MAX_LEN,
     DURATION_HOURS_MAX,
     DURATION_HOURS_MIN,
+    PRICE_AMOUNT_MAX,
+    PRICE_AMOUNT_MIN,
     QA_ANSWER_MAX_LEN,
     QA_QUESTION_MAX_LEN,
     STREAM_URL_MAX_LEN,
@@ -24,6 +26,7 @@ from learnic.entities.product.errors import (
     InvalidWebinarLessonsError,
     ProductDurationOutOfRangeError,
     ProductFieldTooLongError,
+    ProductPriceOutOfRangeError,
 )
 
 
@@ -63,6 +66,26 @@ class DurationHours(ValueObject):
                 "total_duration_in_hours",
                 DURATION_HOURS_MIN,
                 DURATION_HOURS_MAX,
+            )
+
+
+class ProductPriceAmount(ValueObject):
+    """A product price in minor units (kopecks for RUB).
+
+    Bounded by ``[PRICE_AMOUNT_MIN, PRICE_AMOUNT_MAX]`` — a product
+    cannot cost more than 50 000 RUB (a deliberate per-product
+    cap, tighter than the platform-wide ``MinorAmount`` invariant
+    in ``entities/wallet``).
+    """
+
+    value: int
+
+    def __post_init__(self) -> None:
+        if self.value < PRICE_AMOUNT_MIN or self.value > PRICE_AMOUNT_MAX:
+            raise ProductPriceOutOfRangeError(
+                "price_amount",
+                PRICE_AMOUNT_MIN,
+                PRICE_AMOUNT_MAX,
             )
 
 

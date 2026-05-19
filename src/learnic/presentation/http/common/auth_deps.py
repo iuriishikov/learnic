@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,8 @@ from learnic.presentation.http.common.cookies import (
     REFRESH_COOKIE,
     SIGNUP_SESSION_COOKIE,
 )
+
+_logger = logging.getLogger(__name__)
 
 access_cookie_scheme: Final = APIKeyCookie(
     name=ACCESS_COOKIE,
@@ -97,6 +100,48 @@ class Authenticator:
             payload.family_id
         ):
             raise InvalidTokenError
+        return AccessContext(
+            user_id=payload.user_id,
+            jti=payload.jti,
+            family_id=payload.family_id,
+            expires_at=payload.expires_at,
+        )
+
+    async def authenticate_optional(
+        self,
+        request: Request,
+    ) -> AccessContext | None:
+        """Decode the access cookie if present; never raise.
+
+        Used by side-effect endpoints that serve both anonymous
+        and authenticated callers — typically public reads that
+        record a per-actor analytics event when the caller is
+        signed in. Three outcomes:
+
+        - **No cookie** → ``None`` (anonymous caller, no event).
+        - **Cookie valid** → :class:`AccessContext`.
+        - **Cookie malformed / expired / denied** → ``None``,
+          logged at debug. The request still serves the public
+          payload; the anonymous degradation is intentional so
+          a stale cookie never breaks a public read.
+
+        For protected endpoints continue using
+        :meth:`authenticate` — silent fallback there is a
+        security bug, not a feature.
+        """
+        token = request.cookies.get(ACCESS_COOKIE)
+        if not token:
+            return None
+        try:
+            payload = self._access_tokens.decode(token)
+        except InvalidTokenError:
+            _logger.debug("Optional auth: token decode failed")
+            return None
+        if payload.family_id is not None and await self._denylist.is_family_denied(
+            payload.family_id,
+        ):
+            _logger.debug("Optional auth: family denied")
+            return None
         return AccessContext(
             user_id=payload.user_id,
             jti=payload.jti,

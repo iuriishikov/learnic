@@ -36,12 +36,29 @@ class ProductOutput:
     name: str
     description: str | None
     total_duration_in_hours: int | None
+    price_amount: int | None
     author: UserRefView
     webinar_details: WebinarDetailsView | None
     cover_url: str | None
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class PaginatedProductsOutput:
+    """A page of :class:`ProductOutput` plus the total match count.
+
+    ``total`` is the count of products matching the same filter as
+    ``items`` **without** pagination — the numerator the SPA needs
+    to render numbered page controls (``Math.ceil(total / per_page)``).
+    Routes surface ``total`` via the ``X-Total-Count`` response header
+    so the JSON body stays a plain ``list[ProductSchema]`` and existing
+    clients don't break.
+    """
+
+    items: list["ProductOutput"]
+    total: int
 
 
 async def resolve_product_output(
@@ -67,6 +84,7 @@ async def resolve_product_output(
         name=view.name,
         description=view.description,
         total_duration_in_hours=view.total_duration_in_hours,
+        price_amount=view.price_amount,
         author=view.author,
         webinar_details=view.webinar_details,
         cover_url=cover_url,

@@ -36,6 +36,14 @@ class ProductDurationOutOfRangeError(FieldError):
     maximum: int
 
 
+class ProductPriceOutOfRangeError(FieldError):
+    """Raised when product price is outside the allowed range."""
+
+    field: str
+    minimum: int
+    maximum: int
+
+
 class InvalidWebinarLessonsError(FieldError):
     """Raised when total lessons count is outside the allowed range."""
 

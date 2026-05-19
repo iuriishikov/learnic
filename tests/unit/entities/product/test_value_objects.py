@@ -5,6 +5,8 @@ from learnic.entities.product.constants import (
     DESCRIPTION_MAX_LEN,
     DURATION_HOURS_MAX,
     DURATION_HOURS_MIN,
+    PRICE_AMOUNT_MAX,
+    PRICE_AMOUNT_MIN,
     QA_ANSWER_MAX_LEN,
     QA_QUESTION_MAX_LEN,
     STREAM_URL_MAX_LEN,
@@ -22,12 +24,14 @@ from learnic.entities.product.errors import (
     InvalidWebinarLessonsError,
     ProductDurationOutOfRangeError,
     ProductFieldTooLongError,
+    ProductPriceOutOfRangeError,
 )
 from learnic.entities.product.value_objects import (
     AccessWindow,
     DurationHours,
     ParticipantsLimit,
     ProductDescription,
+    ProductPriceAmount,
     ProductTitle,
     QAAnswer,
     QAQuestion,
@@ -185,3 +189,22 @@ class TestStreamUrl:
         with pytest.raises(InvalidStreamUrlError) as exc:
             StreamUrl("ftp://example.com/x")
         assert exc.value.reason == "invalid_scheme"
+
+
+class TestProductPriceAmount:
+    def test_accepts_zero(self) -> None:
+        assert ProductPriceAmount(PRICE_AMOUNT_MIN).value == 0
+
+    def test_accepts_max(self) -> None:
+        assert ProductPriceAmount(PRICE_AMOUNT_MAX).value == PRICE_AMOUNT_MAX
+
+    def test_rejects_negative(self) -> None:
+        with pytest.raises(ProductPriceOutOfRangeError) as exc:
+            ProductPriceAmount(PRICE_AMOUNT_MIN - 1)
+        assert exc.value.field == "price_amount"
+        assert exc.value.minimum == PRICE_AMOUNT_MIN
+        assert exc.value.maximum == PRICE_AMOUNT_MAX
+
+    def test_rejects_above_max(self) -> None:
+        with pytest.raises(ProductPriceOutOfRangeError):
+            ProductPriceAmount(PRICE_AMOUNT_MAX + 1)

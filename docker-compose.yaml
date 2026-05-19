@@ -74,6 +74,45 @@ services:
         reservations:
           memory: 256M
 
+  worker:
+    <<: *default
+    build:
+      context: .
+      target: runtime
+    container_name: learnic-worker
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    command: ["taskiq", "worker", "learnic.worker:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *default
+    build:
+      context: .
+      target: runtime
+    container_name: learnic-scheduler
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    # Periodic scheduler — emits cron-labeled tasks (e.g.
+    # release_ripe_freezes_task every minute) onto the broker.
+    # Worker side consumes them.
+    command: ["taskiq", "scheduler", "learnic.worker:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   caddy:
     <<: *default
     image: caddy:2-alpine

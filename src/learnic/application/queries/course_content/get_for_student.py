@@ -2,17 +2,15 @@ from dataclasses import dataclass
 from typing import Final, final
 
 from learnic.application.common.errors import EntityNotFoundError
-from learnic.application.common.persistence.course_enrollment import (
-    CourseEnrollmentGateway,
-)
 from learnic.application.common.persistence.course_release import (
     CourseReleaseContentView,
     CourseReleaseReader,
 )
-from learnic.application.common.persistence.product import ProductGateway
-from learnic.entities.course_enrollment.enums import (
-    CourseEnrollmentStatus,
+from learnic.application.common.persistence.enrollment import (
+    EnrollmentGateway,
 )
+from learnic.application.common.persistence.product import ProductGateway
+from learnic.entities.enrollment.enums import EnrollmentStatus
 from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -46,7 +44,7 @@ class GetMyCourseContentQueryHandler:
     def __init__(
         self,
         product_gateway: ProductGateway,
-        enrollment_gateway: CourseEnrollmentGateway,
+        enrollment_gateway: EnrollmentGateway,
         release_reader: CourseReleaseReader,
     ) -> None:
         self._product_gateway: Final = product_gateway
@@ -70,13 +68,21 @@ class GetMyCourseContentQueryHandler:
             data.product_id,
             data.actor_id,
         )
-        if enrollment is None or enrollment.status is CourseEnrollmentStatus.REFUNDED:
+        if enrollment is None or enrollment.status is EnrollmentStatus.REFUNDED:
             raise EntityNotFoundError(data.product_id)
+        # Course-flow gating above guarantees a course enrollment;
+        # the gateway hydrates ``course_details`` from the
+        # side-detail table.
+        assert enrollment.course_details is not None  # noqa: S101
 
-        view = await self._release_reader.get_content(enrollment.release_id)
+        view = await self._release_reader.get_content(
+            enrollment.course_details.release_id,
+        )
         if view is None:
             # Enrollment row exists but the pinned release is
             # missing — invariant violation; surface as 404 so
             # the client retries / contacts support.
-            raise EntityNotFoundError(enrollment.release_id)
+            raise EntityNotFoundError(
+                enrollment.course_details.release_id,
+            )
         return view

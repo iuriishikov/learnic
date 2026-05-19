@@ -1,6 +1,7 @@
 from enum import StrEnum
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import composite
 
 from learnic.entities.product.constants import (
@@ -20,6 +21,7 @@ from learnic.entities.product.value_objects import (
     DurationHours,
     ParticipantsLimit,
     ProductDescription,
+    ProductPriceAmount,
     ProductTitle,
     QAAnswer,
     QAQuestion,
@@ -98,6 +100,24 @@ products_table = sa.Table(
             name="fk_products_cover_file_id",
         ),
         nullable=True,
+    ),
+    # Product price in minor units (kopecks for RUB). NULL while the
+    # product is still in DRAFT and has not had a price set via
+    # ``ChangeProductPriceCommand``. Currency lives on the buyer's
+    # wallet / account — the product itself is currency-agnostic
+    # (RUB-only at this phase). See migration
+    # ``b1c8d9e0f234_drop_product_price_currency`` for the rationale.
+    sa.Column("price_amount", sa.BigInteger(), nullable=True),
+    # DB-managed search columns — populated by the
+    # ``refresh_product_search()`` trigger function (see migration
+    # ``ad03search0001``). Never written from app code; not mapped
+    # on the ``Product`` entity (see ``exclude_properties`` in
+    # ``map_product_table``).
+    sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
+    sa.Column("search_text", sa.Text(), nullable=True),
+    sa.CheckConstraint(
+        "price_amount IS NULL OR price_amount >= 0",
+        name="ck_products_price_non_negative",
     ),
     sa.Index("ix_products_author_id", "author_id"),
     sa.Index("ix_products_type_status", "type", "status"),
@@ -208,7 +228,16 @@ def map_product_table() -> None:
             "created_at": products_table.c.created_at,
             "updated_at": products_table.c.updated_at,
             "cover_file_id": products_table.c.cover_file_id,
+            "price": composite(
+                ProductPriceAmount.of_optional,
+                products_table.c.price_amount,
+            ),
         },
+        # DB-managed columns — populated by triggers, never read from
+        # the domain entity. Excluded so every ``select(Product)``
+        # doesn't lug a tsvector + concatenated lower-cased text
+        # blob across the wire.
+        exclude_properties=["search_vector", "search_text"],
         column_prefix="_col_",
     )
     _product_mapped = True

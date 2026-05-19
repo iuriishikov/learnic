@@ -15,7 +15,7 @@ from learnic.application.commands.webinar_schedule.add import (
     AddWebinarScheduleCommand,
     AddWebinarScheduleCommandHandler,
 )
-from learnic.application.commands.webinar_enrollment.enroll import (
+from learnic.application.commands.enrollment.enroll_in_cohort import (
     EnrollStudentInCohortCommand,
     EnrollStudentInCohortCommandHandler,
 )
@@ -62,12 +62,12 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
 )
 from learnic.application.common.persistence.cohort import CohortView
-from learnic.application.common.persistence.webinar_enrollment import (
-    WebinarEnrollmentView,
-)
-from learnic.application.queries.webinar_enrollment.list_for_cohort import (
+from learnic.application.queries.enrollment.list_for_cohort import (
     GetCohortEnrollmentsQuery,
     GetCohortEnrollmentsQueryHandler,
+)
+from learnic.presentation.http.routes.enrollment import (
+    EnrollmentSchema,
 )
 from learnic.application.common.persistence.webinar_schedule import (
     WebinarScheduleView,
@@ -107,9 +107,6 @@ from learnic.entities.product.constants import (
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
-)
-from learnic.entities.webinar_enrollment.enums import (
-    WebinarEnrollmentStatus,
 )
 from learnic.presentation.http.common.errors.rules import (
     ALREADY_ENROLLED_RULE,
@@ -979,26 +976,6 @@ class CreatedWebinarEnrollmentSchema(BaseModel):
     )
 
 
-class WebinarEnrollmentListItemSchema(BaseModel):
-    """Webinar enrollment projection in ``GET /cohorts/{id}/enrollments``."""
-
-    oid: UUID
-    cohort_id: UUID
-    student_id: UUID
-    status: WebinarEnrollmentStatus
-    enrolled_at: datetime
-
-    @classmethod
-    def from_view(cls, view: WebinarEnrollmentView) -> Self:
-        return cls(
-            oid=view.oid,
-            cohort_id=view.cohort_id,
-            student_id=view.student_id,
-            status=view.status,
-            enrolled_at=view.enrolled_at,
-        )
-
-
 # ========================= Enrollment routes =========================== #
 
 
@@ -1063,7 +1040,7 @@ async def enroll(
     "/{cohort_id}/enrollments",
     summary="List a cohort's enrollments (host/author only)",
     operation_id="getCohortEnrollments",
-    response_model=list[WebinarEnrollmentListItemSchema],
+    response_model=list[EnrollmentSchema],
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
@@ -1072,8 +1049,11 @@ async def get_enrollments(
     interactor: FromDishka[GetCohortEnrollmentsQueryHandler],
     auth: FromDishka[Authenticator],
     cohort_id: UUID = _COHORT_ID_PATH,
-) -> list[WebinarEnrollmentListItemSchema]:
+) -> list[EnrollmentSchema]:
     """Return cohort enrollments. Caller must be host or product author.
+
+    Returns the unified :class:`EnrollmentSchema`; ``type`` is
+    always ``"webinar"`` for this endpoint.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -1087,4 +1067,4 @@ async def get_enrollments(
             cohort_id=CohortID(cohort_id),
         ),
     )
-    return [WebinarEnrollmentListItemSchema.from_view(v) for v in views]
+    return [EnrollmentSchema.from_view(v) for v in views]
