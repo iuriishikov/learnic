@@ -261,10 +261,15 @@ Concretely:
   the SPA can locate the lesson in its draft cache without a tree
   scan.
 - `block_added` → `{"lesson_id", "block": <LessonBlockSchema>}`.
-  The block snapshot is the discriminated union over `type`
-  (`html` / `katex` / `code` / `rutube_video`) — same field set
+  The block snapshot is the discriminated union over `type` —
+  `html` / `katex` / `code` / `rutube_video` /
+  `single_choice` / `multi_choice` / `text_input` /
+  `file` / `video_file` / `photo_collage` — same field set
   the REST draft endpoint returns for that block type. The SPA
-  appends `block` to the parent lesson's `blocks` array.
+  appends `block` to the parent lesson's `blocks` array. File-backed
+  variants carry `file_id` (UUID or `null` if the referenced file
+  was purged) plus an optional `title`; `photo_collage` additionally
+  carries an `items` array of `{file_id, caption}` entries.
 - `block_updated` → `{"block": <LessonBlockSchema>}`. Full
   post-mutation snapshot; the SPA replaces the block by `oid`.
 - `module_renamed`, `module_description_updated`,
@@ -546,6 +551,21 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "User profile reads and edits. `GET /users/{user_id}` is "
             "public; everything under `/users/me/...` requires the "
             "`accessCookie` security scheme."
+        ),
+    },
+    {
+        "name": "Billing",
+        "description": (
+            "Caller-scoped subscription read — current plan, plan "
+            "limits, and aggregate storage usage. Plans live in code "
+            "(`learnic/entities/billing/plan.py`); the DB carries "
+            "only `(user_id, plan_code, ...)` grant rows. Absence of an "
+            "active grant means the caller is on the in-code default "
+            "plan (`FREE`). Quota enforcement on file-backed block "
+            "creation surfaces as HTTP 413 `StorageQuotaExceeded` — "
+            "the response body carries `plan_code`, `used_bytes`, "
+            "`attempted_bytes`, and `limit_bytes` so the SPA can render "
+            "an actionable message."
         ),
     },
     {

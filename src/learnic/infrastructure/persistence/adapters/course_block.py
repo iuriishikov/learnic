@@ -13,13 +13,17 @@ from learnic.entities.course_block.models import (
     ChoiceOption,
     CodeBlock,
     CodeTab,
+    CollageItem,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
     MultiChoiceBlock,
+    PhotoCollageBlock,
     RutubeVideoBlock,
     SingleChoiceBlock,
     TextInputBlock,
+    VideoFileBlock,
 )
 from learnic.entities.course_block.value_objects import AcceptedAnswer
 from learnic.entities.course_lesson.ids import CourseLessonID
@@ -29,13 +33,16 @@ from learnic.infrastructure.persistence.blocks.registry import (
 )
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
+    file_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
     multi_choice_blocks_table,
+    photo_collage_blocks_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
+    video_file_blocks_table,
 )
 
 
@@ -59,6 +66,27 @@ def _options_to_jsonb(options: list[ChoiceOption]) -> list[dict[str, str]]:
 def _accepted_answers_to_jsonb(answers: list[AcceptedAnswer]) -> list[str]:
     """Serialize accepted answers into a JSONB string array."""
     return [a.value for a in answers]
+
+
+def _collage_items_to_jsonb(
+    items: list[CollageItem],
+) -> list[dict[str, Any]]:
+    """Serialize collage items into JSONB-friendly dicts.
+
+    Shape mirrors what ``_jsonb_to_collage_items`` reads back: per-item
+    ``file_id`` is stringified UUID (or ``None`` if the file was purged)
+    and ``caption`` is the raw VO value (or ``None`` for captionless
+    items).
+    """
+    return [
+        {
+            "file_id": str(item.file_id) if item.file_id is not None else None,
+            "caption": (
+                item.caption.value if item.caption is not None else None
+            ),
+        }
+        for item in items
+    ]
 
 
 def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
@@ -104,6 +132,12 @@ def _select_blocks() -> sa.Select[Any]:
         text_input_blocks_table.c.trim_whitespace.label(
             "text_input_trim_whitespace",
         ),
+        file_blocks_table.c.file_id.label("file_block_file_id"),
+        file_blocks_table.c.title.label("file_block_title"),
+        video_file_blocks_table.c.file_id.label("video_file_block_file_id"),
+        video_file_blocks_table.c.title.label("video_file_block_title"),
+        photo_collage_blocks_table.c["items"].label("photo_collage_items"),
+        photo_collage_blocks_table.c.title.label("photo_collage_title"),
     ).select_from(
         lesson_blocks_table.outerjoin(
             html_blocks_table,
@@ -132,6 +166,18 @@ def _select_blocks() -> sa.Select[Any]:
         .outerjoin(
             text_input_blocks_table,
             lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
+        )
+        .outerjoin(
+            file_blocks_table,
+            lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+        )
+        .outerjoin(
+            video_file_blocks_table,
+            lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
+        )
+        .outerjoin(
+            photo_collage_blocks_table,
+            lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
         ),
     )
 
@@ -409,6 +455,117 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
                 ),
                 case_sensitive=block.case_sensitive,
                 trim_whitespace=block.trim_whitespace,
+            ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_file(self, block: FileBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.FILE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(file_blocks_table).values(
+                oid=block.oid,
+                file_id=block.file_id,
+                title=block.title.value if block.title is not None else None,
+            ),
+        )
+
+    @override
+    async def update_file(self, block: FileBlock) -> None:
+        await self._session.execute(
+            sa.update(file_blocks_table)
+            .where(file_blocks_table.c.oid == block.oid)
+            .values(
+                file_id=block.file_id,
+                title=block.title.value if block.title is not None else None,
+            ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_video_file(self, block: VideoFileBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.VIDEO_FILE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(video_file_blocks_table).values(
+                oid=block.oid,
+                file_id=block.file_id,
+                title=block.title.value if block.title is not None else None,
+            ),
+        )
+
+    @override
+    async def update_video_file(self, block: VideoFileBlock) -> None:
+        await self._session.execute(
+            sa.update(video_file_blocks_table)
+            .where(video_file_blocks_table.c.oid == block.oid)
+            .values(
+                file_id=block.file_id,
+                title=block.title.value if block.title is not None else None,
+            ),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_photo_collage(self, block: PhotoCollageBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.PHOTO_COLLAGE.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(photo_collage_blocks_table).values(
+                oid=block.oid,
+                items=_collage_items_to_jsonb(block.items),
+                title=block.title.value if block.title is not None else None,
+            ),
+        )
+
+    @override
+    async def update_photo_collage(self, block: PhotoCollageBlock) -> None:
+        await self._session.execute(
+            sa.update(photo_collage_blocks_table)
+            .where(photo_collage_blocks_table.c.oid == block.oid)
+            .values(
+                items=_collage_items_to_jsonb(block.items),
+                title=block.title.value if block.title is not None else None,
             ),
         )
         await self._session.execute(

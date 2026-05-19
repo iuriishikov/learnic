@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Final, final
 
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user_experience import (
     UserExperienceReader,
 )
@@ -17,10 +18,12 @@ class ListUserExperiencesQuery:
 
 @dataclass(slots=True, frozen=True)
 class UserExperienceOutput:
-    """Single experience row with the icon URL resolved.
+    """Single experience row with the icon URL already resolved.
 
-    ``icon_url`` is a short-lived presigned URL; clients should
-    refetch the list to refresh it rather than caching the value.
+    ``icon`` carries a presigned :class:`FileView`; Pydantic schemas
+    auto-map it through ``from_attributes=True``. URLs are short-
+    lived — clients should refetch the list to refresh rather than
+    caching the value.
     """
 
     oid: UserExperienceID
@@ -30,7 +33,7 @@ class UserExperienceOutput:
     start_date: date
     end_date: date | None
     source_url: str | None
-    icon_url: str | None
+    icon: FileView | None
 
 
 @final
@@ -50,24 +53,16 @@ class ListUserExperiencesQueryHandler:
         data: ListUserExperiencesQuery,
     ) -> list[UserExperienceOutput]:
         views = await self._reader.for_user(data.user_id)
-        results: list[UserExperienceOutput] = []
-        for view in views:
-            icon_url: str | None = None
-            if view.icon is not None:
-                icon_url = await self._file_storage.presigned_get_url(
-                    view.icon.bucket,
-                    view.icon.storage_name,
-                )
-            results.append(
-                UserExperienceOutput(
-                    oid=view.oid,
-                    user_id=view.user_id,
-                    title=view.title,
-                    description=view.description,
-                    start_date=view.start_date,
-                    end_date=view.end_date,
-                    source_url=view.source_url,
-                    icon_url=icon_url,
-                ),
+        return [
+            UserExperienceOutput(
+                oid=view.oid,
+                user_id=view.user_id,
+                title=view.title,
+                description=view.description,
+                start_date=view.start_date,
+                end_date=view.end_date,
+                source_url=view.source_url,
+                icon=await FileView.of_optional(view.icon, self._file_storage),
             )
-        return results
+            for view in views
+        ]

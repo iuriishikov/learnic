@@ -3,14 +3,30 @@ from typing import Annotated, Any, Final, Literal, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Depends, Path, Request, status
+from fastapi import Depends, File, Form, Path, Request, UploadFile, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
+from learnic.application.commands.course_block._inputs import (
+    ChoiceOptionDraftInput,
+)
 from learnic.application.commands.course_block.add_code import (
     AddCodeBlockCommand,
     AddCodeBlockCommandHandler,
     CodeTabInput,
+)
+from learnic.application.commands.course_block.add_file import (
+    AddFileBlockCommand,
+    AddFileBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_photo_collage import (
+    AddPhotoCollageBlockCommand,
+    AddPhotoCollageBlockCommandHandler,
+    CollageItemUpload,
+)
+from learnic.application.commands.course_block.add_video_file import (
+    AddVideoFileBlockCommand,
+    AddVideoFileBlockCommandHandler,
 )
 from learnic.application.commands.course_block.add_html import (
     AddHtmlBlockCommand,
@@ -20,9 +36,21 @@ from learnic.application.commands.course_block.add_katex import (
     AddKatexBlockCommand,
     AddKatexBlockCommandHandler,
 )
+from learnic.application.commands.course_block.add_multi_choice import (
+    AddMultiChoiceBlockCommand,
+    AddMultiChoiceBlockCommandHandler,
+)
 from learnic.application.commands.course_block.add_rutube_video import (
     AddRutubeVideoBlockCommand,
     AddRutubeVideoBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_single_choice import (
+    AddSingleChoiceBlockCommand,
+    AddSingleChoiceBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_text_input import (
+    AddTextInputBlockCommand,
+    AddTextInputBlockCommandHandler,
 )
 from learnic.application.commands.course_block.delete import (
     DeleteLessonBlockCommand,
@@ -36,6 +64,18 @@ from learnic.application.commands.course_block.update_code import (
     UpdateCodeBlockCommand,
     UpdateCodeBlockCommandHandler,
 )
+from learnic.application.commands.course_block.update_file import (
+    UpdateFileBlockCommand,
+    UpdateFileBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage import (
+    UpdatePhotoCollageBlockCommand,
+    UpdatePhotoCollageBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_video_file import (
+    UpdateVideoFileBlockCommand,
+    UpdateVideoFileBlockCommandHandler,
+)
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommand,
     UpdateHtmlBlockCommandHandler,
@@ -44,9 +84,21 @@ from learnic.application.commands.course_block.update_katex import (
     UpdateKatexBlockCommand,
     UpdateKatexBlockCommandHandler,
 )
+from learnic.application.commands.course_block.update_multi_choice import (
+    UpdateMultiChoiceBlockCommand,
+    UpdateMultiChoiceBlockCommandHandler,
+)
 from learnic.application.commands.course_block.update_rutube_video import (
     UpdateRutubeVideoBlockCommand,
     UpdateRutubeVideoBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_single_choice import (
+    UpdateSingleChoiceBlockCommand,
+    UpdateSingleChoiceBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_text_input import (
+    UpdateTextInputBlockCommand,
+    UpdateTextInputBlockCommandHandler,
 )
 from learnic.application.commands.course_draft.reset import (
     ResetCourseDraftCommand,
@@ -95,27 +147,34 @@ from learnic.application.commands.course_module.update_description import (
 from learnic.application.common.errors import (
     CrossCourseLessonMoveError,
     InvalidReorderError,
+    StorageQuotaExceededError,
     WrongBlockTypeError,
+    WrongFileContentTypeError,
 )
 from learnic.application.common.persistence.course_content import (
     ChoiceOptionView,
     CodeBlockView,
+    CollageItemView,
     CourseDraftView,
     DraftLessonView,
     DraftModuleView,
+    FileBlockView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
     MultiChoiceBlockView,
+    PhotoCollageBlockView,
     RutubeVideoBlockView,
     SingleChoiceBlockView,
     TextInputBlockView,
+    VideoFileBlockView,
 )
 from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQuery,
     GetCourseDraftQueryHandler,
 )
 from learnic.entities.course_block.constants import (
+    BLOCK_TITLE_MAX_LEN,
     CHOICE_BLOCK_MAX_OPTIONS,
     CHOICE_BLOCK_MIN_OPTIONS,
     CHOICE_OPTION_LABEL_MAX_LEN,
@@ -124,6 +183,9 @@ from learnic.entities.course_block.constants import (
     CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    PHOTO_COLLAGE_CAPTION_MAX_LEN,
+    PHOTO_COLLAGE_MAX_ITEMS,
+    PHOTO_COLLAGE_MIN_ITEMS,
     TEXT_INPUT_ANSWER_MAX_LEN,
     TEXT_INPUT_MAX_ACCEPTED,
     TEXT_INPUT_MIN_ACCEPTED,
@@ -145,14 +207,23 @@ from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
 )
+from learnic.presentation.http.common.upload_limits import (
+    LESSON_COLLAGE_ITEM_MAX_BYTES,
+    LESSON_FILE_BLOCK_MAX_BYTES,
+    LESSON_VIDEO_BLOCK_MAX_BYTES,
+)
+from learnic.presentation.http.common.uploads import read_upload
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_OWNER_FIELD_MAP,
     CROSS_COURSE_LESSON_MOVE_RULE,
     INVALID_REORDER_RULE,
     PRODUCT_DOES_NOT_SUPPORT_RULE,
+    STORAGE_QUOTA_EXCEEDED_RULE,
     WRONG_BLOCK_TYPE_RULE,
+    WRONG_FILE_CONTENT_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.common.schemas import FileSchema
 
 router = ErrorAwareRouter(
     prefix="/courses",
@@ -599,13 +670,14 @@ class ChoiceOptionSchema(BaseModel):
     )
     label: str = Field(
         description=(
-            "Plain-text option caption. "
+            "Plain-text option caption. Empty string is valid: a "
+            "freshly created block ships with placeholder options "
+            "the author fills in afterwards (mirroring the VO). "
             f"Max {CHOICE_OPTION_LABEL_MAX_LEN} chars "
             "(`CHOICE_OPTION_LABEL_MAX_LEN`)."
         ),
-        min_length=1,
         max_length=CHOICE_OPTION_LABEL_MAX_LEN,
-        examples=["Paris"],
+        examples=["Paris", ""],
     )
 
     @classmethod
@@ -747,6 +819,144 @@ class TextInputBlockSchema(BaseModel):
         )
 
 
+class FileBlockSchema(BaseModel):
+    """Generic-file lesson-block projection (authoring-side, read-only).
+
+    ``file`` is nullable: the FK is ``ON DELETE SET NULL`` on both
+    draft and release tables, so a block whose backing file was
+    purged degrades to a "file missing" placeholder rather than
+    disappearing. When present, the nested :class:`FileSchema`
+    already carries a short-lived presigned URL — the SPA renders
+    download/preview affordance directly without a follow-up
+    file-fetch endpoint.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal[BlockType.FILE] = Field(
+        default=BlockType.FILE,
+        description="Discriminator — always `file` for this schema.",
+    )
+    oid: UUID
+    position: int
+    file: FileSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved backing file with a short-lived presigned URL, "
+            "or `null` if the file was deleted after the block was "
+            "created."
+        ),
+    )
+    title: str | None = Field(
+        default=None,
+        description=(
+            "Optional caption shown next to the file link. "
+            f"Max {BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
+        ),
+        max_length=BLOCK_TITLE_MAX_LEN,
+    )
+
+    @classmethod
+    def from_view(cls, view: FileBlockView) -> Self:
+        return cls.model_validate(view)
+
+
+class VideoFileBlockSchema(BaseModel):
+    """Uploaded-video lesson-block projection.
+
+    Sibling of :class:`RutubeVideoBlockSchema` — same playback
+    intent, different provider. The nested :class:`FileSchema`
+    carries a short-lived presigned URL the SPA's video player
+    can plug straight into ``<video src>`` (or our
+    :class:`VideoPlayer` wrapper).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal[BlockType.VIDEO_FILE] = Field(
+        default=BlockType.VIDEO_FILE,
+        description="Discriminator — always `video_file` for this schema.",
+    )
+    oid: UUID
+    position: int
+    file: FileSchema | None = Field(default=None)
+    title: str | None = Field(
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+    )
+
+    @classmethod
+    def from_view(cls, view: VideoFileBlockView) -> Self:
+        return cls.model_validate(view)
+
+
+class CollageItemSchema(BaseModel):
+    """One photo inside a :class:`PhotoCollageBlockSchema`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    file: FileSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved backing image with a short-lived presigned URL, "
+            "or `null` if the file was deleted."
+        ),
+    )
+    caption: str | None = Field(
+        default=None,
+        description=(
+            "Optional short caption under the photo. "
+            f"Max {PHOTO_COLLAGE_CAPTION_MAX_LEN} chars "
+            "(`PHOTO_COLLAGE_CAPTION_MAX_LEN`)."
+        ),
+        max_length=PHOTO_COLLAGE_CAPTION_MAX_LEN,
+    )
+
+    @classmethod
+    def from_view(cls, view: CollageItemView) -> Self:
+        return cls.model_validate(view)
+
+
+class PhotoCollageBlockSchema(BaseModel):
+    """Photo-collage lesson-block projection.
+
+    Holds a bounded list of ``(file_id, caption)`` items — between
+    ``PHOTO_COLLAGE_MIN_ITEMS`` and ``PHOTO_COLLAGE_MAX_ITEMS``. The
+    "each item is an image" content-type invariant is enforced at
+    the command-handler boundary on add/update, not at the schema
+    layer.
+    """
+
+    type: Literal[BlockType.PHOTO_COLLAGE] = Field(
+        default=BlockType.PHOTO_COLLAGE,
+        description="Discriminator — always `photo_collage`.",
+    )
+    oid: UUID
+    position: int
+    items: list[CollageItemSchema] = Field(
+        description=(
+            f"Between {PHOTO_COLLAGE_MIN_ITEMS} and "
+            f"{PHOTO_COLLAGE_MAX_ITEMS} photos."
+        ),
+        min_length=PHOTO_COLLAGE_MIN_ITEMS,
+        max_length=PHOTO_COLLAGE_MAX_ITEMS,
+    )
+    title: str | None = Field(
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+    )
+
+    @classmethod
+    def from_view(cls, view: PhotoCollageBlockView) -> Self:
+        return cls(
+            type=BlockType.PHOTO_COLLAGE,
+            oid=view.oid,
+            position=view.position,
+            items=[CollageItemSchema.from_view(it) for it in view.items],
+            title=view.title,
+        )
+
+
 _LessonBlockSchemaUnion = (
     HtmlBlockSchema
     | KatexBlockSchema
@@ -755,6 +965,9 @@ _LessonBlockSchemaUnion = (
     | SingleChoiceBlockSchema
     | MultiChoiceBlockSchema
     | TextInputBlockSchema
+    | FileBlockSchema
+    | VideoFileBlockSchema
+    | PhotoCollageBlockSchema
 )
 
 LessonBlockSchema = Annotated[_LessonBlockSchemaUnion, Discriminator("type")]
@@ -773,6 +986,12 @@ def _block_view_to_schema(view: LessonBlockView) -> _LessonBlockSchemaUnion:
         return MultiChoiceBlockSchema.from_view(view)
     if isinstance(view, TextInputBlockView):
         return TextInputBlockSchema.from_view(view)
+    if isinstance(view, FileBlockView):
+        return FileBlockSchema.from_view(view)
+    if isinstance(view, VideoFileBlockView):
+        return VideoFileBlockSchema.from_view(view)
+    if isinstance(view, PhotoCollageBlockView):
+        return PhotoCollageBlockSchema.from_view(view)
     return RutubeVideoBlockSchema.from_view(view)
 
 
@@ -1383,9 +1602,10 @@ class AddHtmlBlockSchema(BaseModel):
         description=(
             "Raw HTML body of the block. Sanitized server-side; "
             f"length limit is {HTML_BLOCK_MAX_LEN} chars "
-            "(`HTML_BLOCK_MAX_LEN`) measured **after** sanitization."
+            "(`HTML_BLOCK_MAX_LEN`) measured **after** sanitization. "
+            "Empty payload is accepted — the author fills the body "
+            "in the editor after creating the block."
         ),
-        min_length=1,
         max_length=HTML_BLOCK_MAX_LEN,
         examples=["<p>Hello</p>"],
     )
@@ -1401,9 +1621,9 @@ class UpdateHtmlBlockSchema(BaseModel):
     html: str = Field(
         description=(
             "New raw HTML body. Sanitized server-side; max length "
-            f"{HTML_BLOCK_MAX_LEN} chars after sanitization."
+            f"{HTML_BLOCK_MAX_LEN} chars after sanitization. Empty "
+            "payload is accepted (clears the body)."
         ),
-        min_length=1,
         max_length=HTML_BLOCK_MAX_LEN,
         examples=["<p>Updated</p>"],
     )
@@ -1425,9 +1645,10 @@ class AddKatexBlockSchema(BaseModel):
             "sanitized server-side — KaTeX renders it safely on the "
             "client. "
             f"Max length {KATEX_BLOCK_MAX_LEN} chars "
-            "(`KATEX_BLOCK_MAX_LEN`)."
+            "(`KATEX_BLOCK_MAX_LEN`). Empty payload is accepted — "
+            "the author fills the source in the editor after "
+            "creating the block."
         ),
-        min_length=1,
         max_length=KATEX_BLOCK_MAX_LEN,
         examples=[r"\int_0^1 x^2\, dx"],
     )
@@ -1443,8 +1664,10 @@ class UpdateKatexBlockSchema(BaseModel):
     )
 
     source: str = Field(
-        description=(f"New KaTeX source body. Max length {KATEX_BLOCK_MAX_LEN} chars."),
-        min_length=1,
+        description=(
+            f"New KaTeX source body. Max length {KATEX_BLOCK_MAX_LEN} "
+            "chars. Empty payload is accepted (clears the source)."
+        ),
         max_length=KATEX_BLOCK_MAX_LEN,
         examples=[r"E = mc^2"],
     )
@@ -1522,6 +1745,200 @@ class UpdateCodeBlockSchema(BaseModel):
         min_length=1,
         max_length=CODE_BLOCK_MAX_TABS,
     )
+
+
+class ChoiceOptionDraftPayload(BaseModel):
+    """One option entry submitted by the author.
+
+    ``label`` is plain text (max ``CHOICE_OPTION_LABEL_MAX_LEN``).
+    ``is_correct`` flags whether this option counts as a correct
+    answer — exactly one for single-choice blocks, at least one
+    for multi-choice. The server mints option ids; ids are not
+    accepted on input.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"label": "Paris", "is_correct": True}]},
+    )
+
+    label: str = Field(
+        description=(
+            "Plain-text option caption. "
+            f"Max {CHOICE_OPTION_LABEL_MAX_LEN} chars "
+            "(`CHOICE_OPTION_LABEL_MAX_LEN`). Empty / blank labels "
+            "are accepted as placeholders the author fills in after "
+            "creating the block — uniqueness only applies to labels "
+            "with actual text."
+        ),
+        max_length=CHOICE_OPTION_LABEL_MAX_LEN,
+        examples=["Paris"],
+    )
+    is_correct: bool = Field(
+        description=(
+            "If true, the student must pick this option for the "
+            "answer to count as correct."
+        ),
+        examples=[False],
+    )
+
+
+_CHOICE_OPTIONS_EXAMPLE: Final[Any] = [
+    {"label": "Paris", "is_correct": True},
+    {"label": "Berlin", "is_correct": False},
+    {"label": "Madrid", "is_correct": False},
+]
+_MULTI_CHOICE_OPTIONS_EXAMPLE: Final[Any] = [
+    {"label": "Python", "is_correct": True},
+    {"label": "Rust", "is_correct": True},
+    {"label": "PHP", "is_correct": False},
+]
+
+
+class AddSingleChoiceBlockSchema(BaseModel):
+    """Body for ``POST /courses/{course_id}/lessons/{lesson_id}/blocks/single-choice``.
+
+    Submit between ``CHOICE_BLOCK_MIN_OPTIONS`` and
+    ``CHOICE_BLOCK_MAX_OPTIONS`` options; exactly one must carry
+    ``is_correct: true``. Sending zero or more than one correct
+    option yields HTTP 422.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"options": _CHOICE_OPTIONS_EXAMPLE}]},
+    )
+
+    options: list[ChoiceOptionDraftPayload] = Field(
+        description=(
+            f"Between {CHOICE_BLOCK_MIN_OPTIONS} and "
+            f"{CHOICE_BLOCK_MAX_OPTIONS} options "
+            "(`CHOICE_BLOCK_MIN_OPTIONS` / `CHOICE_BLOCK_MAX_OPTIONS`). "
+            "Exactly one must have `is_correct=true`."
+        ),
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+
+
+class UpdateSingleChoiceBlockSchema(BaseModel):
+    """Body for ``PATCH /courses/{course_id}/blocks/{block_id}/single-choice``.
+
+    Replaces the entire option list. Per-option partial updates are
+    intentionally unsupported — see ``UpdateSingleChoiceBlockCommand``.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"options": _CHOICE_OPTIONS_EXAMPLE}]},
+    )
+
+    options: list[ChoiceOptionDraftPayload] = Field(
+        description="Full new option list — replaces the existing one.",
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+
+
+class AddMultiChoiceBlockSchema(BaseModel):
+    """Body for ``POST /courses/{course_id}/lessons/{lesson_id}/blocks/multi-choice``.
+
+    At least one option must have ``is_correct=true``. The student
+    must pick exactly the flagged set — order does not matter.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"options": _MULTI_CHOICE_OPTIONS_EXAMPLE}],
+        },
+    )
+
+    options: list[ChoiceOptionDraftPayload] = Field(
+        description=(
+            f"Between {CHOICE_BLOCK_MIN_OPTIONS} and "
+            f"{CHOICE_BLOCK_MAX_OPTIONS} options. At least one "
+            "must have `is_correct=true`."
+        ),
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+
+
+class UpdateMultiChoiceBlockSchema(BaseModel):
+    """Body for ``PATCH /courses/{course_id}/blocks/{block_id}/multi-choice``."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"options": _MULTI_CHOICE_OPTIONS_EXAMPLE}],
+        },
+    )
+
+    options: list[ChoiceOptionDraftPayload] = Field(
+        description="Full new option list — replaces the existing one.",
+        min_length=CHOICE_BLOCK_MIN_OPTIONS,
+        max_length=CHOICE_BLOCK_MAX_OPTIONS,
+    )
+
+
+_TEXT_INPUT_EXAMPLE: Final[Any] = {
+    "accepted_answers": ["Paris", "paris"],
+    "case_sensitive": False,
+    "trim_whitespace": True,
+}
+
+
+class AddTextInputBlockSchema(BaseModel):
+    """Body for ``POST /courses/{course_id}/lessons/{lesson_id}/blocks/text-input``.
+
+    Submit a non-empty list of accepted-answer strings plus the two
+    normalisation flags. Comparison at check-time normalises both
+    sides under those flags, so toggling them later can't silently
+    introduce duplicates (the entity validates uniqueness under the
+    active normalisation).
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [_TEXT_INPUT_EXAMPLE]},
+    )
+
+    accepted_answers: list[str] = Field(
+        description=(
+            f"Between {TEXT_INPUT_MIN_ACCEPTED} and "
+            f"{TEXT_INPUT_MAX_ACCEPTED} accepted answers "
+            "(`TEXT_INPUT_MIN_ACCEPTED` / `TEXT_INPUT_MAX_ACCEPTED`). "
+            f"Each up to {TEXT_INPUT_ANSWER_MAX_LEN} chars "
+            "(`TEXT_INPUT_ANSWER_MAX_LEN`)."
+        ),
+        min_length=TEXT_INPUT_MIN_ACCEPTED,
+        max_length=TEXT_INPUT_MAX_ACCEPTED,
+    )
+    case_sensitive: bool = Field(
+        description=(
+            "If true, comparison preserves casing; if false, both "
+            "sides are case-folded before matching."
+        ),
+        examples=[False],
+    )
+    trim_whitespace: bool = Field(
+        description=(
+            "If true, surrounding whitespace is stripped from both "
+            "sides before matching."
+        ),
+        examples=[True],
+    )
+
+
+class UpdateTextInputBlockSchema(BaseModel):
+    """Body for ``PATCH /courses/{course_id}/blocks/{block_id}/text-input``."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [_TEXT_INPUT_EXAMPLE]},
+    )
+
+    accepted_answers: list[str] = Field(
+        description="Full new accepted-answer list — replaces the existing one.",
+        min_length=TEXT_INPUT_MIN_ACCEPTED,
+        max_length=TEXT_INPUT_MAX_ACCEPTED,
+    )
+    case_sensitive: bool
+    trim_whitespace: bool
 
 
 class ReorderLessonBlocksSchema(BaseModel):
@@ -1854,6 +2271,270 @@ async def update_code_block(
     )
 
 
+def _to_choice_inputs(
+    options: list[ChoiceOptionDraftPayload],
+) -> tuple[ChoiceOptionDraftInput, ...]:
+    return tuple(
+        ChoiceOptionDraftInput(label=o.label, is_correct=o.is_correct)
+        for o in options
+    )
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/single-choice",
+    summary="Add a single-choice answer block to a lesson",
+    operation_id="addSingleChoiceBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def add_single_choice_block(
+    request: Request,
+    payload: AddSingleChoiceBlockSchema,
+    interactor: FromDishka[AddSingleChoiceBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> CreatedLessonBlockSchema:
+    """Append a single-choice answer block to the lesson. Author-only.
+
+    The block carries only the answer field — the question prompt
+    is authored as a preceding HTML block. Exactly one option must
+    have ``is_correct=true``; zero or more than one yields 422.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        FieldError: HTTP 422 — invalid options or correct-count.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        AddSingleChoiceBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            options=_to_choice_inputs(payload.options),
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/single-choice",
+    summary="Replace a single-choice block's options and correct answer",
+    operation_id="updateSingleChoiceBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE},
+)
+async def update_single_choice_block(
+    request: Request,
+    payload: UpdateSingleChoiceBlockSchema,
+    interactor: FromDishka[UpdateSingleChoiceBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> None:
+    """Replace the option list of an existing single-choice block.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't `single_choice`.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdateSingleChoiceBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            options=_to_choice_inputs(payload.options),
+        ),
+    )
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/multi-choice",
+    summary="Add a multi-choice answer block to a lesson",
+    operation_id="addMultiChoiceBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def add_multi_choice_block(
+    request: Request,
+    payload: AddMultiChoiceBlockSchema,
+    interactor: FromDishka[AddMultiChoiceBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> CreatedLessonBlockSchema:
+    """Append a multi-choice answer block to the lesson. Author-only.
+
+    At least one option must have ``is_correct=true``. The student
+    must pick exactly the flagged set — order does not matter.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        AddMultiChoiceBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            options=_to_choice_inputs(payload.options),
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/multi-choice",
+    summary="Replace a multi-choice block's options and correct-answer set",
+    operation_id="updateMultiChoiceBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE},
+)
+async def update_multi_choice_block(
+    request: Request,
+    payload: UpdateMultiChoiceBlockSchema,
+    interactor: FromDishka[UpdateMultiChoiceBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> None:
+    """Replace the option list of an existing multi-choice block.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't `multi_choice`.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdateMultiChoiceBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            options=_to_choice_inputs(payload.options),
+        ),
+    )
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/text-input",
+    summary="Add a free-text answer block to a lesson",
+    operation_id="addTextInputBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def add_text_input_block(
+    request: Request,
+    payload: AddTextInputBlockSchema,
+    interactor: FromDishka[AddTextInputBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> CreatedLessonBlockSchema:
+    """Append a free-text answer block to the lesson. Author-only.
+
+    The student types an answer into a single-line input; the
+    server compares against ``accepted_answers`` under the
+    configured normalisation flags.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        FieldError: HTTP 422 — empty / too-long / duplicate answer.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        AddTextInputBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            accepted_answers=tuple(payload.accepted_answers),
+            case_sensitive=payload.case_sensitive,
+            trim_whitespace=payload.trim_whitespace,
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/text-input",
+    summary="Replace a text-input block's accepted answers and flags",
+    operation_id="updateTextInputBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE},
+)
+async def update_text_input_block(
+    request: Request,
+    payload: UpdateTextInputBlockSchema,
+    interactor: FromDishka[UpdateTextInputBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> None:
+    """Replace the accepted answers and normalisation flags.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't `text_input`.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdateTextInputBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            accepted_answers=tuple(payload.accepted_answers),
+            case_sensitive=payload.case_sensitive,
+            trim_whitespace=payload.trim_whitespace,
+        ),
+    )
+
+
 @router.put(
     "/{course_id}/lessons/{lesson_id}/blocks/order",
     summary="Replace block ordering inside a lesson atomically",
@@ -2099,6 +2780,447 @@ async def update_rutube_video_block(
             block_id=LessonBlockID(block_id),
             rutube_url=payload.rutube_url,
             title=payload.title,
+        ),
+    )
+
+
+# ============================== routes — File / VideoFile / PhotoCollage ============================== #
+# Multipart endpoints: the file IS the request body. No Pydantic body
+# schema — fields come in as ``UploadFile`` (the binary part) plus
+# ``Form(...)`` companions (title, captions). Bounds (max-length on
+# title, max-length on caption, item count for collage) ride on the
+# ``Form(...)`` defaults; the corresponding entity-side invariants
+# in ``BlockTitle`` / ``CollageCaption`` / ``PhotoCollageBlock`` are
+# the source of truth and re-validate server-side anyway.
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/file",
+    summary="Upload a file and append a generic-file block to a lesson",
+    operation_id="addFileBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE},
+)
+async def add_file_block(
+    request: Request,
+    interactor: FromDishka[AddFileBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+    file: UploadFile = File(  # noqa: B008
+        description="The file bytes; any content type is accepted.",
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description=(
+            "Optional caption shown above the file. Max "
+            f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
+        ),
+    ),
+) -> CreatedLessonBlockSchema:
+    """Upload bytes, append a generic-file block to the lesson. Author-only.
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected add-file-block handler.
+        auth: Injected authenticator.
+        course_id: Course product UUID (framing only — handler authorises
+            on the lesson's denormalised product id).
+        lesson_id: Target lesson UUID.
+        file: ``multipart/form-data`` field ``file`` carrying the
+            bytes. Capped at ``LESSON_FILE_BLOCK_MAX_BYTES``.
+        title: ``multipart/form-data`` field ``title``; optional.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        StorageQuotaExceededError: HTTP 413 — upload would exceed plan cap.
+        FieldError: HTTP 422 — title VO violation or file too large.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_upload(
+        file, max_bytes=LESSON_FILE_BLOCK_MAX_BYTES,
+    )
+    oid = await interactor.run(
+        AddFileBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            data=data,
+            content_type=content_type,
+            title=title,
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/file",
+    summary="Replace the file and/or title of a file block",
+    operation_id="updateFileBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+        StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE,
+    },
+)
+async def update_file_block(
+    request: Request,
+    interactor: FromDishka[UpdateFileBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+    file: UploadFile | None = File(  # noqa: B008
+        default=None,
+        description=(
+            "New file bytes. Omit to update only the title."
+        ),
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description="New caption, or omit to clear the existing one.",
+    ),
+) -> None:
+    """Update the file-block: replace the file, the title, or both.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't of type `file`.
+        StorageQuotaExceededError: HTTP 413 — new file would exceed plan cap.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    if file is not None:
+        data, content_type = await read_upload(
+            file, max_bytes=LESSON_FILE_BLOCK_MAX_BYTES,
+        )
+    else:
+        data, content_type = None, None
+    await interactor.run(
+        UpdateFileBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            data=data,
+            content_type=content_type,
+            title=title,
+        ),
+    )
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/video-file",
+    summary="Upload a video and append a video-file block to a lesson",
+    operation_id="addVideoFileBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
+        StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE,
+    },
+)
+async def add_video_file_block(
+    request: Request,
+    interactor: FromDishka[AddVideoFileBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+    file: UploadFile = File(  # noqa: B008
+        description=(
+            "Video file bytes. Must have a `video/*` content type "
+            "(HTTP 415 `WrongFileContentType` otherwise)."
+        ),
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description=(
+            "Optional caption. Max "
+            f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
+        ),
+    ),
+) -> CreatedLessonBlockSchema:
+    """Upload a video and append a video-file block. Author-only.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        StorageQuotaExceededError: HTTP 413.
+        WrongFileContentTypeError: HTTP 415 — file is not a video.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_upload(
+        file, max_bytes=LESSON_VIDEO_BLOCK_MAX_BYTES,
+    )
+    oid = await interactor.run(
+        AddVideoFileBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            data=data,
+            content_type=content_type,
+            title=title,
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/video-file",
+    summary="Replace the video and/or title of a video-file block",
+    operation_id="updateVideoFileBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+        WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
+        StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE,
+    },
+)
+async def update_video_file_block(
+    request: Request,
+    interactor: FromDishka[UpdateVideoFileBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+    file: UploadFile | None = File(  # noqa: B008
+        default=None,
+        description="New video bytes. Omit to update only the title.",
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description="New caption, or omit to clear.",
+    ),
+) -> None:
+    """Update video-file block: new video, new title, or both.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409.
+        StorageQuotaExceededError: HTTP 413.
+        WrongFileContentTypeError: HTTP 415.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    if file is not None:
+        data, content_type = await read_upload(
+            file, max_bytes=LESSON_VIDEO_BLOCK_MAX_BYTES,
+        )
+    else:
+        data, content_type = None, None
+    await interactor.run(
+        UpdateVideoFileBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            data=data,
+            content_type=content_type,
+            title=title,
+        ),
+    )
+
+
+def _zip_collage_uploads(
+    files: list[UploadFile],
+    captions: list[str] | None,
+) -> list[tuple[UploadFile, str | None]]:
+    """Pair multipart ``files[i]`` with ``captions[i]``.
+
+    A missing ``captions`` array means "no captions at all"; a present
+    array must match ``files`` in length — anything else is ambiguous
+    and surfaces as ``InvalidCollageCaptionsLengthError`` at HTTP 422
+    via the existing FieldError rule.
+    """
+    if captions is None:
+        return [(f, None) for f in files]
+    if len(captions) != len(files):
+        raise ValueError(
+            "collage `captions` length must equal `files` length",
+        )
+    # Empty string means "no caption" (clients can't omit individual
+    # entries in a multipart list — they always send all positions).
+    return [(f, c or None) for f, c in zip(files, captions, strict=True)]
+
+
+async def _read_collage_items(
+    files: list[UploadFile],
+    captions: list[str] | None,
+) -> tuple[CollageItemUpload, ...]:
+    pairs = _zip_collage_uploads(files, captions)
+    out: list[CollageItemUpload] = []
+    for f, c in pairs:
+        data, content_type = await read_upload(
+            f, max_bytes=LESSON_COLLAGE_ITEM_MAX_BYTES,
+        )
+        out.append(
+            CollageItemUpload(data=data, content_type=content_type, caption=c),
+        )
+    return tuple(out)
+
+
+@router.post(
+    "/{course_id}/lessons/{lesson_id}/blocks/photo-collage",
+    summary="Upload photos and append a photo-collage block to a lesson",
+    operation_id="addPhotoCollageBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
+        StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE,
+    },
+)
+async def add_photo_collage_block(
+    request: Request,
+    interactor: FromDishka[AddPhotoCollageBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+    files: list[UploadFile] = File(  # noqa: B008
+        description=(
+            "Ordered list of photo bytes. Order in the multipart body "
+            "becomes the persisted collage order. Each item must have "
+            "an `image/*` content type. Min "
+            f"`PHOTO_COLLAGE_MIN_ITEMS` ({PHOTO_COLLAGE_MIN_ITEMS}), "
+            f"max `PHOTO_COLLAGE_MAX_ITEMS` ({PHOTO_COLLAGE_MAX_ITEMS})."
+        ),
+    ),
+    captions: list[str] | None = Form(  # noqa: B008
+        default=None,
+        description=(
+            "Optional per-photo captions. If present, length must match "
+            "`files`. Empty string at a position means no caption for "
+            "that photo. Max length per caption: "
+            f"`PHOTO_COLLAGE_CAPTION_MAX_LEN` "
+            f"({PHOTO_COLLAGE_CAPTION_MAX_LEN}) chars."
+        ),
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description=(
+            "Optional collage title. Max "
+            f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
+        ),
+    ),
+) -> CreatedLessonBlockSchema:
+    """Upload all photos and append a photo-collage block. Author-only.
+
+    Every uploaded file must have an `image/*` content type.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        StorageQuotaExceededError: HTTP 413.
+        WrongFileContentTypeError: HTTP 415.
+        FieldError: HTTP 422 — title / caption VO violation, item
+            count violation, or file too large.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    items = await _read_collage_items(files, captions)
+    oid = await interactor.run(
+        AddPhotoCollageBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=CourseLessonID(lesson_id),
+            items=items,
+            title=title,
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/photo-collage",
+    summary="Replace the items and title of a photo-collage block",
+    operation_id="updatePhotoCollageBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+        WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
+    },
+)
+async def update_photo_collage_block(
+    request: Request,
+    interactor: FromDishka[UpdatePhotoCollageBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+    files: list[UploadFile] = File(  # noqa: B008
+        description=(
+            "New ordered list of photo bytes — full replace; the new "
+            "set is the complete new state."
+        ),
+    ),
+    captions: list[str] | None = Form(  # noqa: B008
+        default=None,
+        description="New optional per-photo captions; same rules as add.",
+    ),
+    title: str | None = Form(  # noqa: B008
+        default=None,
+        max_length=BLOCK_TITLE_MAX_LEN,
+        description="New title, or omit to clear.",
+    ),
+) -> None:
+    """Replace items and title of a photo-collage block.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409.
+        WrongFileContentTypeError: HTTP 415.
+        FieldError: HTTP 422.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    items = await _read_collage_items(files, captions)
+    await interactor.run(
+        UpdatePhotoCollageBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            items=items,
+            title=title,
         ),
     )
 

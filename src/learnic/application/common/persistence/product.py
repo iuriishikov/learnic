@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
+from learnic.application.common.persistence.tag import TagView
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.enums import (
     ProductStatus,
@@ -16,7 +17,14 @@ from learnic.entities.user.models import UserID
 
 @dataclass(slots=True, frozen=True)
 class ProductView:
-    """Read-side projection of :class:`Product` returned by the Reader."""
+    """Read-side projection of :class:`Product` returned by the Reader.
+
+    ``tags`` mirrors the product's ``product_tags`` slice in
+    author-defined order (``position ASC``). The adapter batch-
+    resolves them in one extra query against ``product_tags`` JOIN
+    ``tags`` after the main SELECT, so a list of N products costs
+    one round-trip for tags total — not N.
+    """
 
     oid: ProductID
     type: ProductType
@@ -25,7 +33,8 @@ class ProductView:
     description: str | None
     total_duration_in_hours: int | None
     author: UserRefView
-    cover: FileView | None
+    cover: FileMeta | None
+    tags: list[TagView]
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime

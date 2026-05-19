@@ -6,6 +6,7 @@ from learnic.application.common.errors import (
     NotResourceOwnerError,
     ProductNotInDraftError,
 )
+from learnic.application.common.persistence.file import FilesReader
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
@@ -13,6 +14,7 @@ from learnic.application.common.product_events import (
     ProductEventBus,
     publish_product_event,
 )
+from learnic.application.common.storage.file_uploads import FileUploadService
 from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -39,10 +41,14 @@ class DeleteProductCommandHandler:
         self,
         transaction: Transaction,
         product_gateway: ProductGateway,
+        files_reader: FilesReader,
+        file_uploads: FileUploadService,
         event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._product_gateway: Final = product_gateway
+        self._files_reader: Final = files_reader
+        self._file_uploads: Final = file_uploads
         self._event_bus: Final = event_bus
 
     async def run(self, data: DeleteProductCommand) -> None:
@@ -57,7 +63,16 @@ class DeleteProductCommandHandler:
                 product.status.value,
             )
         product_id = product.oid
+        # Snapshot every file the product currently references
+        # (cover + file/video/collage block contents) BEFORE the
+        # cascade — afterwards the block rows are gone and the
+        # union-walk would return nothing.
+        file_ids = await self._files_reader.file_ids_for_product(
+            product_id,
+        )
         await self._product_gateway.delete(product)
+        for file_id in file_ids:
+            await self._file_uploads.soft_delete_previous(file_id)
         await self._transaction.commit()
         await publish_product_event(
             self._event_bus,

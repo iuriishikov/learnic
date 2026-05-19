@@ -374,9 +374,14 @@ infrastructure ───────┘   (implements application protocols)
       `MAX_LIMIT = 100`). The first list endpoint that ships with a
       paginated response is the trigger for a `## Pagination` section.
     - File uploads — the multipart flow in
-      `presentation/http/common/uploads.py` plus the `MAX_FILE_SIZE_BYTES`
-      cap. A `## File uploads` section should land alongside the first
-      route that accepts user uploads.
+      `presentation/http/common/uploads.py` plus the per-call-site
+      caps in `presentation/http/common/upload_limits.py`. The
+      `read_upload(file, *, max_bytes=...)` helper has no global
+      default — every route picks an explicit constant
+      (`USER_AVATAR_MAX_BYTES`, `LESSON_VIDEO_BLOCK_MAX_BYTES`, …)
+      so "how big can this particular upload be" is visible at the
+      call site. A `## File uploads` section should land alongside
+      the first route that accepts user uploads.
     - Datetime serialization — ISO 8601 with timezone, server emits
       UTC. Document explicitly so SPAs do not parse naive strings.
     - Money / decimals, idempotency keys, rate limits, file formats,

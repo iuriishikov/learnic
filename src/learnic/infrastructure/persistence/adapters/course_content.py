@@ -1,4 +1,4 @@
-from typing import Any, Final
+from typing import Final
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,19 +11,27 @@ from learnic.application.common.persistence.course_content import (
     DraftModuleView,
     LessonBlockView,
 )
+from learnic.application.common.storage.file_storage import FileStorage
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.product.ids import ProductID
+from learnic.infrastructure.persistence.blocks.file_resolver import (
+    collect_file_ids,
+    resolve_file_views,
+)
 from learnic.infrastructure.persistence.blocks.registry import spec_for_row
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
+    file_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
     multi_choice_blocks_table,
+    photo_collage_blocks_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
+    video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_lesson import (
     course_lessons_table,
@@ -33,14 +41,14 @@ from learnic.infrastructure.persistence.models.course_module import (
 )
 
 
-def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
-    """Hydrate a block row into its read-side view via the registry."""
-    return spec_for_row(row).row_to_view(row)
-
-
 class CourseContentReaderAlchemy(CourseContentReader):
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        file_storage: FileStorage,
+    ) -> None:
         self._session: Final = session
+        self._file_storage: Final = file_storage
 
     @override
     async def get_draft(self, product_id: ProductID) -> CourseDraftView:
@@ -105,6 +113,16 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 text_input_blocks_table.c.trim_whitespace.label(
                     "text_input_trim_whitespace",
                 ),
+                file_blocks_table.c.file_id.label("file_block_file_id"),
+                file_blocks_table.c.title.label("file_block_title"),
+                video_file_blocks_table.c.file_id.label(
+                    "video_file_block_file_id",
+                ),
+                video_file_blocks_table.c.title.label(
+                    "video_file_block_title",
+                ),
+                photo_collage_blocks_table.c["items"].label("photo_collage_items"),
+                photo_collage_blocks_table.c.title.label("photo_collage_title"),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -134,6 +152,18 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 .outerjoin(
                     text_input_blocks_table,
                     lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    file_blocks_table,
+                    lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    video_file_blocks_table,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    photo_collage_blocks_table,
+                    lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == product_id)
@@ -142,14 +172,26 @@ class CourseContentReaderAlchemy(CourseContentReader):
                 lesson_blocks_table.c.position.asc(),
             )
         )
-        blocks_rows = (await self._session.execute(blocks_stmt)).all()
+        blocks_rows = list(
+            (await self._session.execute(blocks_stmt)).all(),
+        )
+        # Pre-resolve every file referenced by the draft so the
+        # registry's row_to_view dispatchers can pick up presigned
+        # URLs without needing async themselves. Photo-collage items
+        # contribute additional file_ids via the JSONB column — see
+        # `collect_file_ids` for the union.
+        files_by_id = await resolve_file_views(
+            self._session,
+            self._file_storage,
+            collect_file_ids(blocks_rows),
+        )
 
         blocks_by_lesson: dict[CourseLessonID, list[LessonBlockView]] = {}
         for row in blocks_rows:
             blocks_by_lesson.setdefault(
                 CourseLessonID(row.lesson_id),
                 [],
-            ).append(_row_to_block_view(row))
+            ).append(spec_for_row(row).row_to_view(row, files_by_id))
 
         lessons_by_module: dict[CourseModuleID, list[DraftLessonView]] = {}
         for row in lessons_rows:

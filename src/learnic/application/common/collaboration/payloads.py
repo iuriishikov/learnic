@@ -23,13 +23,16 @@ from typing import Any, ClassVar, Literal, assert_never
 
 from learnic.entities.course_block.models import (
     CodeBlock,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
     MultiChoiceBlock,
+    PhotoCollageBlock,
     RutubeVideoBlock,
     SingleChoiceBlock,
     TextInputBlock,
+    VideoFileBlock,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_lesson.models import CourseLesson
@@ -135,6 +138,39 @@ class TextInputBlockSnapshot:
     trim_whitespace: bool
 
 
+@dataclass(slots=True, frozen=True)
+class FileBlockSnapshot:
+    type: Literal["file"]
+    oid: str
+    position: int
+    file_id: str | None
+    title: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class VideoFileBlockSnapshot:
+    type: Literal["video_file"]
+    oid: str
+    position: int
+    file_id: str | None
+    title: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class CollageItemSnapshot:
+    file_id: str | None
+    caption: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class PhotoCollageBlockSnapshot:
+    type: Literal["photo_collage"]
+    oid: str
+    position: int
+    items: list[CollageItemSnapshot]
+    title: str | None
+
+
 BlockSnapshot = (
     HtmlBlockSnapshot
     | KatexBlockSnapshot
@@ -143,6 +179,9 @@ BlockSnapshot = (
     | SingleChoiceBlockSnapshot
     | MultiChoiceBlockSnapshot
     | TextInputBlockSnapshot
+    | FileBlockSnapshot
+    | VideoFileBlockSnapshot
+    | PhotoCollageBlockSnapshot
 )
 
 
@@ -217,6 +256,36 @@ def _block_snapshot(block: LessonBlock) -> BlockSnapshot:
             accepted_answers=[a.value for a in block.accepted_answers],
             case_sensitive=block.case_sensitive,
             trim_whitespace=block.trim_whitespace,
+        )
+    if isinstance(block, FileBlock):
+        return FileBlockSnapshot(
+            type="file",
+            oid=str(block.oid),
+            position=block.position,
+            file_id=str(block.file_id) if block.file_id is not None else None,
+            title=block.title.value if block.title is not None else None,
+        )
+    if isinstance(block, VideoFileBlock):
+        return VideoFileBlockSnapshot(
+            type="video_file",
+            oid=str(block.oid),
+            position=block.position,
+            file_id=str(block.file_id) if block.file_id is not None else None,
+            title=block.title.value if block.title is not None else None,
+        )
+    if isinstance(block, PhotoCollageBlock):
+        return PhotoCollageBlockSnapshot(
+            type="photo_collage",
+            oid=str(block.oid),
+            position=block.position,
+            items=[
+                CollageItemSnapshot(
+                    file_id=str(it.file_id) if it.file_id is not None else None,
+                    caption=it.caption.value if it.caption is not None else None,
+                )
+                for it in block.items
+            ],
+            title=block.title.value if block.title is not None else None,
         )
     assert_never(block)
 
@@ -632,6 +701,36 @@ def _block_snapshot_from_wire(data: dict[str, Any]) -> BlockSnapshot:
             accepted_answers=list(data["accepted_answers"]),
             case_sensitive=data["case_sensitive"],
             trim_whitespace=data["trim_whitespace"],
+        )
+    if block_type == "file":
+        return FileBlockSnapshot(
+            type="file",
+            oid=data["oid"],
+            position=data["position"],
+            file_id=data.get("file_id"),
+            title=data.get("title"),
+        )
+    if block_type == "video_file":
+        return VideoFileBlockSnapshot(
+            type="video_file",
+            oid=data["oid"],
+            position=data["position"],
+            file_id=data.get("file_id"),
+            title=data.get("title"),
+        )
+    if block_type == "photo_collage":
+        return PhotoCollageBlockSnapshot(
+            type="photo_collage",
+            oid=data["oid"],
+            position=data["position"],
+            items=[
+                CollageItemSnapshot(
+                    file_id=it.get("file_id"),
+                    caption=it.get("caption"),
+                )
+                for it in data["items"]
+            ],
+            title=data.get("title"),
         )
     msg = f"unknown block snapshot type: {block_type!r}"
     raise ValueError(msg)

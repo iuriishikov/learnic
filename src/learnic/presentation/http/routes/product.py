@@ -153,8 +153,16 @@ from learnic.presentation.http.common.errors.rules import (
     PRODUCT_NOT_IN_DRAFT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
-from learnic.presentation.http.common.schemas import FileSchema, UserRefSchema
-from learnic.presentation.http.common.uploads import read_image_upload
+from learnic.presentation.http.routes.tag import TagSchema
+from learnic.presentation.http.common.schemas import (
+    FileSchema,
+    UploadedFileSchema,
+    UserRefSchema,
+)
+from learnic.presentation.http.common.upload_limits import (
+    PRODUCT_COVER_MAX_BYTES,
+)
+from learnic.presentation.http.common.uploads import read_upload
 
 router = ErrorAwareRouter(
     prefix="/products",
@@ -280,10 +288,22 @@ class ProductSchema(BaseModel):
                         "full_name": "Lovelace Ada",
                         "email": "a*****a@example.com",
                     },
-                    "cover_url": (
-                        "https://s3.example.com/products/cover.png"
-                        "?X-Amz-Signature=..."
-                    ),
+                    "cover": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 184_320,
+                        "url": (
+                            "https://s3.example.com/products/cover.png"
+                            "?X-Amz-Signature=..."
+                        ),
+                    },
+                    "tags": [
+                        {
+                            "oid": "f0a1b2c3-d4e5-46f7-8a9b-0c1d2e3f4a5b",
+                            "name": "Python",
+                            "color": "#3776ab",
+                        },
+                    ],
                     "published_at": "2026-04-01T10:00:00+00:00",
                     "created_at": "2026-03-25T09:00:00+00:00",
                     "updated_at": "2026-04-01T10:00:00+00:00",
@@ -299,17 +319,22 @@ class ProductSchema(BaseModel):
     description: str | None
     total_duration_in_hours: int | None
     author: UserRefSchema
-    cover_url: str | None = Field(
+    cover: FileSchema | None = Field(
         default=None,
         description=(
-            "Short-lived presigned URL for the product's cover image, "
+            "Resolved cover file with a short-lived presigned URL, "
             "or `null` when no cover is attached. The URL expires; "
             "re-fetch the product resource to get a fresh one."
         ),
-        examples=[
-            None,
-            "https://s3.example.com/products/cover.png?X-Amz-Signature=...",
-        ],
+    )
+    tags: list[TagSchema] = Field(
+        default_factory=list,
+        description=(
+            "Product tags in author-defined order. Embedded inline so "
+            "every list/detail/recommendation endpoint already carries "
+            "what the chip row needs — no follow-up "
+            "`GET /products/{id}/tags` round-trip required."
+        ),
     )
     published_at: datetime | None
     created_at: datetime
@@ -325,7 +350,12 @@ class ProductSchema(BaseModel):
             description=view.description,
             total_duration_in_hours=view.total_duration_in_hours,
             author=UserRefSchema.from_view(view.author),
-            cover_url=view.cover_url,
+            cover=(
+                FileSchema.model_validate(view.cover)
+                if view.cover is not None
+                else None
+            ),
+            tags=[TagSchema.model_validate(t) for t in view.tags],
             published_at=view.published_at,
             created_at=view.created_at,
             updated_at=view.updated_at,
@@ -455,8 +485,8 @@ async def add_course(
         total_duration_in_hours: Optional form field — total duration
             in hours. Omit to leave unset.
         cover: Optional ``multipart/form-data`` file part. Capped at
-            ``MAX_FILE_SIZE_BYTES``; the server reads ``Content-Type``
-            from the upload.
+            ``PRODUCT_COVER_MAX_BYTES``; the server reads
+            ``Content-Type`` from the upload.
 
     Returns:
         ``201 Created`` with the new product's UUID.
@@ -466,8 +496,8 @@ async def add_course(
         ProductNameAlreadyTakenError: The current author already has
             a product with this name; HTTP 409.
         FieldError: Value-object invariants violated; HTTP 422.
-        FileTooLargeError: Cover payload over ``MAX_FILE_SIZE_BYTES``;
-            HTTP 422.
+        FileTooLargeError: Cover payload over
+            ``PRODUCT_COVER_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
     cover_data, cover_content_type = await _read_optional_cover(cover)
@@ -490,11 +520,15 @@ async def _read_optional_cover(
     """Read an optional cover ``UploadFile`` to ``(bytes, content_type)``.
 
     Returns ``(None, None)`` when nothing was uploaded so the
-    handler can skip the file-creation branch entirely.
+    handler can skip the file-creation branch entirely. Uses
+    ``PRODUCT_COVER_MAX_BYTES`` to match the dedicated set-cover
+    endpoint — keep the two in lockstep.
     """
     if upload is None:
         return None, None
-    data, content_type = await read_image_upload(upload)
+    data, content_type = await read_upload(
+        upload, max_bytes=PRODUCT_COVER_MAX_BYTES,
+    )
     return data, content_type
 
 
@@ -641,7 +675,7 @@ async def change_duration(
     operation_id="setProductCover",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=FileSchema,
+    response_model=UploadedFileSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
 async def set_cover(
@@ -650,7 +684,7 @@ async def set_cover(
     interactor: FromDishka[SetProductCoverCommandHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
-) -> FileSchema:
+) -> UploadedFileSchema:
     """Upload (or replace) a product's cover image.
 
     The previous cover (if any) is soft-deleted in the same
@@ -660,8 +694,8 @@ async def set_cover(
     Args:
         request: Source of the access-token cookie.
         file: ``multipart/form-data`` field ``file`` carrying the
-            image bytes. Capped at ``MAX_FILE_SIZE_BYTES``; the server
-            reads ``Content-Type`` from the upload and rejects
+            image bytes. Capped at ``PRODUCT_COVER_MAX_BYTES``; the
+            server reads ``Content-Type`` from the upload and rejects
             payloads above the limit with a 422 ``FileTooLargeError``.
         interactor: Injected set-cover command handler.
         auth: Injected authenticator that validates the access cookie.
@@ -677,11 +711,13 @@ async def set_cover(
             HTTP 403.
         EntityNotFoundError: No product with the given id; HTTP 404.
         FieldError: Cover VO invariants violated; HTTP 422.
-        FileTooLargeError: Payload over ``MAX_FILE_SIZE_BYTES``;
+        FileTooLargeError: Payload over ``PRODUCT_COVER_MAX_BYTES``;
             HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_image_upload(file)
+    data, content_type = await read_upload(
+        file, max_bytes=PRODUCT_COVER_MAX_BYTES,
+    )
     file_id = await interactor.run(
         SetProductCoverCommand(
             actor_id=ctx.user_id,
@@ -690,7 +726,7 @@ async def set_cover(
             content_type=content_type,
         ),
     )
-    return FileSchema(oid=file_id)
+    return UploadedFileSchema(oid=file_id)
 
 
 @router.delete(

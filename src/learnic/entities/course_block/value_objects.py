@@ -3,11 +3,13 @@ from typing import ClassVar, Self
 
 from learnic.entities.common.value_object import ValueObject
 from learnic.entities.course_block.constants import (
+    BLOCK_TITLE_MAX_LEN,
     CHOICE_OPTION_LABEL_MAX_LEN,
     CODE_BLOCK_MAX_LEN,
     CODE_TAB_LABEL_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    PHOTO_COLLAGE_CAPTION_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
     TEXT_INPUT_ANSWER_MAX_LEN,
     VIDEO_TITLE_MAX_LEN,
@@ -24,17 +26,16 @@ from learnic.entities.course_block.errors import (
 class HtmlContent(ValueObject):
     """Sanitized HTML body of an :class:`HtmlBlock`.
 
-    The VO enforces only emptiness/length invariants — sanitization
-    is performed in the command handler via the ``HtmlSanitizer``
-    Protocol BEFORE the VO is constructed. Length is measured after
-    sanitization.
+    The VO enforces only the length invariant — sanitization is
+    performed in the command handler via the ``HtmlSanitizer``
+    Protocol BEFORE the VO is constructed. Length is measured
+    after sanitization. Empty values are accepted: authors create
+    blocks first and fill the body in the editor afterwards.
     """
 
     value: str
 
     def __post_init__(self) -> None:
-        if not self.value:
-            raise EmptyBlockContentError("html")
         if len(self.value) > HTML_BLOCK_MAX_LEN:
             raise BlockContentTooLongError("html", HTML_BLOCK_MAX_LEN)
 
@@ -46,14 +47,14 @@ class KatexSource(ValueObject):
     full set of supported commands is at
     https://katex.org/docs/support_table.html. No server-side
     sanitization — KaTeX renders the body safely on the client.
-    Length is capped to avoid pathological payloads.
+    Length is capped to avoid pathological payloads. Empty / blank
+    values are accepted: authors create blocks first and fill the
+    source in the editor afterwards.
     """
 
     value: str
 
     def __post_init__(self) -> None:
-        if not self.value.strip():
-            raise EmptyBlockContentError("source")
         if len(self.value) > KATEX_BLOCK_MAX_LEN:
             raise BlockContentTooLongError("source", KATEX_BLOCK_MAX_LEN)
 
@@ -163,18 +164,55 @@ class ChoiceOptionLabel(ValueObject):
     preceding HTML block, the option itself is just a radio /
     checkbox caption. Stored verbatim; newlines are tolerated but
     discouraged (the frontend renders the label single-line by
-    default). Cross-option uniqueness lives on the parent block.
+    default). Empty / blank labels are accepted: a freshly created
+    block ships with placeholder options the author fills in
+    afterwards. Cross-option uniqueness lives on the parent block
+    and tolerates empty placeholders.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) > CHOICE_OPTION_LABEL_MAX_LEN:
+            raise BlockContentTooLongError(
+                "option_label",
+                CHOICE_OPTION_LABEL_MAX_LEN,
+            )
+
+
+class BlockTitle(ValueObject):
+    """Optional human-readable title for a file / video-file / collage block.
+
+    Shared across the three file-backed block types — they all expose the
+    same "small caption above the asset" affordance and there is no
+    block-type-specific invariant on a title.
     """
 
     value: str
 
     def __post_init__(self) -> None:
         if not self.value.strip():
-            raise EmptyBlockContentError("option_label")
-        if len(self.value) > CHOICE_OPTION_LABEL_MAX_LEN:
+            raise EmptyBlockContentError("title")
+        if len(self.value) > BLOCK_TITLE_MAX_LEN:
+            raise BlockContentTooLongError("title", BLOCK_TITLE_MAX_LEN)
+
+
+class CollageCaption(ValueObject):
+    """Optional caption attached to one photo inside a collage.
+
+    Captions are short by design — anything longer belongs in an HTML
+    block placed adjacent to the collage.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value.strip():
+            raise EmptyBlockContentError("caption")
+        if len(self.value) > PHOTO_COLLAGE_CAPTION_MAX_LEN:
             raise BlockContentTooLongError(
-                "option_label",
-                CHOICE_OPTION_LABEL_MAX_LEN,
+                "caption",
+                PHOTO_COLLAGE_CAPTION_MAX_LEN,
             )
 
 
@@ -184,16 +222,15 @@ class AcceptedAnswer(ValueObject):
     Normalisation (case folding, whitespace trimming) is applied at
     check-time per the parent block's flags — the VO stores raw
     author input so an author can later flip a flag without losing
-    fidelity. Empty / blank values are rejected: an answer the
-    student can submit by leaving the field untouched is almost
-    certainly an authoring mistake.
+    fidelity. Empty / blank values are accepted: a freshly created
+    block ships with a placeholder answer the author fills in
+    afterwards. Cross-answer uniqueness lives on the parent block
+    and tolerates empty placeholders.
     """
 
     value: str
 
     def __post_init__(self) -> None:
-        if not self.value.strip():
-            raise EmptyBlockContentError("accepted_answer")
         if len(self.value) > TEXT_INPUT_ANSWER_MAX_LEN:
             raise BlockContentTooLongError(
                 "accepted_answer",

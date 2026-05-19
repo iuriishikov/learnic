@@ -6,13 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
 from learnic.application.common.persistence.product import (
     ProductGateway,
     ProductReader,
     ProductView,
     RecommendationCandidate,
 )
+from learnic.application.common.persistence.tag import TagView
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.enrollment.enums import EnrollmentStatus
 from learnic.entities.file.ids import FileID
@@ -22,6 +23,7 @@ from learnic.entities.product.models import Product
 from learnic.entities.product_collaboration.enums import (
     CollaborationStatus,
 )
+from learnic.entities.tag.ids import TagID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.enrollment import (
     enrollments_table,
@@ -33,7 +35,10 @@ from learnic.infrastructure.persistence.models.product import (
 from learnic.infrastructure.persistence.models.product_collaboration import (
     product_collaborations_table,
 )
-from learnic.infrastructure.persistence.models.tag import product_tags_table
+from learnic.infrastructure.persistence.models.tag import (
+    product_tags_table,
+    tags_table,
+)
 from learnic.infrastructure.persistence.models.user import users_table
 
 
@@ -52,7 +57,10 @@ class ProductMapperAlchemy(ProductGateway):
         await self._session.delete(product)
 
 
-def _row_to_view(row: sa.Row[Any]) -> ProductView:
+def _row_to_view(
+    row: sa.Row[Any],
+    tags: list[TagView],
+) -> ProductView:
     return ProductView(
         oid=ProductID(row.oid),
         type=row.type,
@@ -68,15 +76,17 @@ def _row_to_view(row: sa.Row[Any]) -> ProductView:
             patronymic=row.author_patronymic,
         ),
         cover=(
-            FileView(
+            FileMeta(
                 oid=FileID(row.cover_oid),
                 storage_name=row.cover_storage_name,
                 bucket=row.cover_bucket,
                 content_type=row.cover_content_type,
+                size_bytes=row.cover_size_bytes,
             )
             if row.cover_oid is not None
             else None
         ),
+        tags=tags,
         published_at=row.published_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -99,6 +109,7 @@ def _select_with_joins() -> sa.Select[Any]:
         cover.c.storage_name.label("cover_storage_name"),
         cover.c.bucket.label("cover_bucket"),
         cover.c.content_type.label("cover_content_type"),
+        cover.c.size_bytes.label("cover_size_bytes"),
         users_table.c.oid.label("author_oid"),
         users_table.c.email.label("author_email"),
         users_table.c.first_name.label("author_first_name"),
@@ -123,13 +134,74 @@ class ProductReaderAlchemy(ProductReader):
     def __init__(self, session: AsyncSession) -> None:
         self._session: Final = session
 
+    async def _tags_by_product(
+        self,
+        product_ids: list[ProductID],
+    ) -> dict[ProductID, list[TagView]]:
+        """Batch-fetch the ``product_tags`` slice for every product.
+
+        One SQL round-trip (``IN`` query + JOIN onto ``tags``)
+        regardless of how many products the caller is listing —
+        callers (`accessible_to`, `published`, `search_published`,
+        `published_by_author`, `recommendation_candidates`, …) avoid
+        the N+1 they would hit if each row queried tags on its own.
+
+        Ordering preserves ``product_tags.position`` per product so
+        author-defined order survives end-to-end.
+        """
+        if not product_ids:
+            return {}
+        stmt = (
+            sa.select(
+                product_tags_table.c.product_id,
+                tags_table.c.oid,
+                tags_table.c.name,
+                tags_table.c.color,
+            )
+            .select_from(
+                product_tags_table.join(
+                    tags_table,
+                    product_tags_table.c.tag_id == tags_table.c.oid,
+                ),
+            )
+            .where(product_tags_table.c.product_id.in_(product_ids))
+            .order_by(
+                product_tags_table.c.product_id.asc(),
+                product_tags_table.c.position.asc(),
+            )
+        )
+        rows = (await self._session.execute(stmt)).all()
+        result: dict[ProductID, list[TagView]] = {}
+        for row in rows:
+            result.setdefault(ProductID(row.product_id), []).append(
+                TagView(
+                    oid=TagID(row.oid),
+                    name=row.name,
+                    color=row.color,
+                ),
+            )
+        return result
+
+    async def _rows_to_views(
+        self,
+        rows: list[sa.Row[Any]],
+    ) -> list[ProductView]:
+        tags_by_id = await self._tags_by_product(
+            [ProductID(r.oid) for r in rows],
+        )
+        return [
+            _row_to_view(r, tags_by_id.get(ProductID(r.oid), []))
+            for r in rows
+        ]
+
     @override
     async def with_id(self, oid: ProductID) -> ProductView | None:
         stmt = _select_with_joins().where(products_table.c.oid == oid)
         row = (await self._session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        return _row_to_view(row)
+        tags_by_id = await self._tags_by_product([ProductID(row.oid)])
+        return _row_to_view(row, tags_by_id.get(ProductID(row.oid), []))
 
     @override
     async def accessible_to(
@@ -164,8 +236,8 @@ class ProductReaderAlchemy(ProductReader):
             .limit(pagination.limit)
             .offset(pagination.offset)
         )
-        rows = (await self._session.execute(stmt)).all()
-        return [_row_to_view(row) for row in rows]
+        rows = list((await self._session.execute(stmt)).all())
+        return await self._rows_to_views(rows)
 
     @override
     async def published(
@@ -185,8 +257,8 @@ class ProductReaderAlchemy(ProductReader):
             .limit(pagination.limit)
             .offset(pagination.offset)
         )
-        rows = (await self._session.execute(stmt)).all()
-        return [_row_to_view(row) for row in rows]
+        rows = list((await self._session.execute(stmt)).all())
+        return await self._rows_to_views(rows)
 
     @override
     async def published_count(self) -> int:
@@ -310,8 +382,8 @@ class ProductReaderAlchemy(ProductReader):
             .limit(pagination.limit)
             .offset(pagination.offset)
         )
-        rows = (await self._session.execute(stmt)).all()
-        return [_row_to_view(row) for row in rows]
+        rows = list((await self._session.execute(stmt)).all())
+        return await self._rows_to_views(rows)
 
     @override
     async def search_published_count(self, query: str) -> int:
@@ -352,8 +424,8 @@ class ProductReaderAlchemy(ProductReader):
             .limit(pagination.limit)
             .offset(pagination.offset)
         )
-        rows = (await self._session.execute(stmt)).all()
-        return [_row_to_view(row) for row in rows]
+        rows = list((await self._session.execute(stmt)).all())
+        return await self._rows_to_views(rows)
 
     @override
     async def name_exists(
@@ -569,10 +641,15 @@ class ProductReaderAlchemy(ProductReader):
             .limit(limit)
         )
 
-        rows = (await self._session.execute(stmt)).all()
+        rows = list((await self._session.execute(stmt)).all())
+        tags_by_id = await self._tags_by_product(
+            [ProductID(r.oid) for r in rows],
+        )
         return [
             RecommendationCandidate(
-                view=_row_to_view(row),
+                view=_row_to_view(
+                    row, tags_by_id.get(ProductID(row.oid), []),
+                ),
                 tag_affinity_raw=float(row.tag_affinity_raw),
                 author_affinity_raw=float(row.author_affinity_raw),
                 popularity_raw=float(row.popularity_raw),

@@ -1,12 +1,9 @@
 import pytest
 
-from learnic.entities.file.constants import (
-    CONTENT_TYPE_MAX_LEN,
-    MAX_FILE_SIZE_BYTES,
-)
+from learnic.entities.file.constants import CONTENT_TYPE_MAX_LEN
 from learnic.entities.file.errors import (
-    FileTooLargeError,
     InvalidContentTypeError,
+    InvalidFileSizeError,
     InvalidStorageBucketError,
     InvalidStorageNameError,
 )
@@ -43,13 +40,13 @@ class TestContentType:
 
 
 class TestFileSize:
-    def test_accepts_within_limit(self) -> None:
+    def test_accepts_positive(self) -> None:
         assert FileSize(1).value == 1
-        assert FileSize(MAX_FILE_SIZE_BYTES).value == MAX_FILE_SIZE_BYTES
+        assert FileSize(10 * 1024 * 1024 * 1024).value == 10 * 1024 * 1024 * 1024
 
-    @pytest.mark.parametrize("value", [0, -1, MAX_FILE_SIZE_BYTES + 1])
-    def test_rejects_out_of_range(self, value: int) -> None:
-        with pytest.raises(FileTooLargeError):
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_rejects_non_positive(self, value: int) -> None:
+        with pytest.raises(InvalidFileSizeError):
             FileSize(value)
 
 

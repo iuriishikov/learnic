@@ -94,6 +94,17 @@ class CorrectOptionNotInOptionsError(FieldError):
     option_id: str
 
 
+class MultipleCorrectOptionsInSingleChoiceError(FieldError):
+    """Raised when a single-choice payload marks more than one option correct.
+
+    Single-choice is a closed-set invariant: exactly one option is
+    correct. The author either picks one (single-choice) or several
+    (multi-choice block type). Two correct options would be ambiguous.
+    """
+
+    count: int
+
+
 class EmptyCorrectOptionsError(FieldError):
     """Raised when a multi-choice block has no correct options.
 
@@ -129,3 +140,15 @@ class DuplicateAcceptedAnswerError(FieldError):
     """
 
     value: str
+
+
+class TooFewCollageItemsError(FieldError):
+    """Raised when a photo collage has fewer items than the lower bound."""
+
+    limit: int
+
+
+class TooManyCollageItemsError(FieldError):
+    """Raised when a photo collage exceeds ``PHOTO_COLLAGE_MAX_ITEMS``."""
+
+    limit: int

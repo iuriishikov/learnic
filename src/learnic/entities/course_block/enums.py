@@ -24,6 +24,14 @@ class BlockType(StrEnum):
     SINGLE_CHOICE = "single_choice"
     MULTI_CHOICE = "multi_choice"
     TEXT_INPUT = "text_input"
+    # File-backed blocks. The actual bytes live in S3 via the ``files``
+    # table; the block carries the FK plus an optional author-facing
+    # title. ``VIDEO_FILE`` is the uploaded-video counterpart to
+    # ``RUTUBE_VIDEO`` (provider-hosted) — both kept as separate types
+    # since their playback contracts diverge.
+    FILE = "file"
+    VIDEO_FILE = "video_file"
+    PHOTO_COLLAGE = "photo_collage"
 
 
 class CodeBlockLanguage(StrEnum):

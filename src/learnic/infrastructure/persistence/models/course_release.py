@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import composite
 
 from learnic.entities.course_block.constants import (
+    BLOCK_TITLE_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
@@ -313,6 +314,74 @@ course_release_text_input_blocks_table = sa.Table(
         sa.Boolean(),
         nullable=False,
         server_default=sa.text("true"),
+    ),
+)
+
+
+# Snapshot mirrors of the file-backed draft subtype tables. ``file_id``
+# stays ``ON DELETE SET NULL`` on the release side too: a published
+# release that referenced a now-deleted file degrades to a missing-file
+# placeholder on read rather than failing to load.
+course_release_file_blocks_table = sa.Table(
+    "course_release_file_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
+    ),
+)
+
+
+course_release_video_file_blocks_table = sa.Table(
+    "course_release_video_file_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
+    ),
+)
+
+
+course_release_photo_collage_blocks_table = sa.Table(
+    "course_release_photo_collage_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("course_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("items", JSONB, nullable=False),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
     ),
 )
 

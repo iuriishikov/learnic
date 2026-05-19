@@ -3,13 +3,16 @@ from typing import Protocol
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import (
     CodeBlock,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
     MultiChoiceBlock,
+    PhotoCollageBlock,
     RutubeVideoBlock,
     SingleChoiceBlock,
     TextInputBlock,
+    VideoFileBlock,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
 
@@ -63,6 +66,18 @@ class LessonBlockGateway(Protocol):
     async def add_text_input(self, block: TextInputBlock) -> None: ...
 
     async def update_text_input(self, block: TextInputBlock) -> None: ...
+
+    async def add_file(self, block: FileBlock) -> None: ...
+
+    async def update_file(self, block: FileBlock) -> None: ...
+
+    async def add_video_file(self, block: VideoFileBlock) -> None: ...
+
+    async def update_video_file(self, block: VideoFileBlock) -> None: ...
+
+    async def add_photo_collage(self, block: PhotoCollageBlock) -> None: ...
+
+    async def update_photo_collage(self, block: PhotoCollageBlock) -> None: ...
 
     async def delete(self, oid: LessonBlockID) -> None: ...
 

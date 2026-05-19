@@ -44,3 +44,19 @@ TEXT_INPUT_MIN_ACCEPTED: Final = 1
 # Hard cap on accepted-answer list — 10 synonyms covers realistic
 # variants (case/spelling) without becoming an unmaintainable list.
 TEXT_INPUT_MAX_ACCEPTED: Final = 10
+
+# Shared title cap for file / video-file / photo-collage blocks. Kept
+# separate from VIDEO_TITLE_MAX_LEN so the Rutube path stays untouched
+# and the three new block types share one knob.
+BLOCK_TITLE_MAX_LEN: Final = 200
+# Caption shown under one photo inside a collage. Bounded to avoid a
+# photo collage devolving into a long-form text wall — that's what an
+# HTML block is for.
+PHOTO_COLLAGE_CAPTION_MAX_LEN: Final = 280
+# Photo collage must carry at least one item — a zero-photo collage
+# is meaningless.
+PHOTO_COLLAGE_MIN_ITEMS: Final = 1
+# Hard cap on photos per collage. 12 covers realistic gallery sizes
+# (a 3x4 grid) without producing a layout the editor can't render
+# legibly.
+PHOTO_COLLAGE_MAX_ITEMS: Final = 12

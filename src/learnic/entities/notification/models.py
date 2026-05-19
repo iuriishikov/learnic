@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Self
 
 from learnic.entities.common.base_entity import BaseEntity
+from learnic.entities.billing.ids import PlanCode
 from learnic.entities.notification.details import (
     AccessRevokedDetails,
     InviteAcceptedDetails,
@@ -11,6 +12,8 @@ from learnic.entities.notification.details import (
     InviteSentDetails,
     NewLoginDetails,
     NotificationDetails,
+    StorageQuotaEnforcedDetails,
+    StorageQuotaWarningDetails,
 )
 from learnic.entities.notification.enums import (
     NotificationCategory,
@@ -158,6 +161,60 @@ class Notification(BaseEntity[NotificationID]):
                 collaboration_id=collaboration_id,
                 product_id=product_id,
                 revoker_id=revoker_id,
+            ),
+        )
+
+    @classmethod
+    def for_storage_quota_warning(
+        cls,
+        *,
+        recipient_id: UserID,
+        plan_code: PlanCode,
+        over_bytes: int,
+        plan_limit_bytes: int,
+        grace_until: datetime,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.STORAGE_QUOTA_WARNING,
+            category=NotificationCategory.FILES,
+            actor_id=None,
+            created_at=moment,
+            read_at=None,
+            details=StorageQuotaWarningDetails(
+                plan_code=plan_code,
+                over_bytes=over_bytes,
+                plan_limit_bytes=plan_limit_bytes,
+                grace_until=grace_until,
+            ),
+        )
+
+    @classmethod
+    def for_storage_quota_enforced(
+        cls,
+        *,
+        recipient_id: UserID,
+        plan_code: PlanCode,
+        deleted_files_count: int,
+        freed_bytes: int,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.STORAGE_QUOTA_ENFORCED,
+            category=NotificationCategory.FILES,
+            actor_id=None,
+            created_at=moment,
+            read_at=None,
+            details=StorageQuotaEnforcedDetails(
+                plan_code=plan_code,
+                deleted_files_count=deleted_files_count,
+                freed_bytes=freed_bytes,
             ),
         )
 

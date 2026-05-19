@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from learnic.application.common.email.components import EmailComponent
+from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
 
 
@@ -14,6 +15,46 @@ class TaskScheduler(Protocol):
     """
 
     async def schedule_example(self, payload: str) -> None: ...
+
+    async def schedule_purge_file_from_storage(
+        self,
+        file_id: FileID,
+    ) -> None:
+        """Enqueue physical removal of a soft-deleted file's S3 object.
+
+        Called right after :meth:`File.mark_deleted` flips
+        ``deleted_at``. The task itself re-reads the file inside
+        the worker and aborts if the row is not actually
+        soft-deleted (e.g. the producer's transaction rolled back
+        between ``mark_deleted`` and the task running) — so the
+        sequence "schedule then rollback" is safe.
+
+        The DB row is preserved with ``deleted_at != NULL`` as an
+        audit trail; only the S3 blob is removed by the worker.
+        Blocks referencing the file have ``ON DELETE SET NULL``
+        FKs, so even an eventual row purge would not break them
+        — that's a separate concern from this task.
+
+        Args:
+            file_id: Target file's ``FileID``.
+        """
+        ...
+
+    async def schedule_reconcile_storage_quotas(self) -> None:
+        """Enqueue the periodic over-quota reconciliation pass.
+
+        Triggered by an external scheduler (Kubernetes CronJob,
+        host cron, etc.) — TaskIQ has no built-in cron and we keep
+        the scheduling concern outside the application code on
+        purpose. The worker runs
+        :class:`ReconcileStorageQuotasCommandHandler` end-to-end.
+
+        Cadence is a deployment knob (typically daily). The handler
+        itself is idempotent and side-effect-bounded: it never
+        re-notifies inside the cooldown and never re-enforces a
+        breach that no longer exists.
+        """
+        ...
 
     async def schedule_send_email(
         self,

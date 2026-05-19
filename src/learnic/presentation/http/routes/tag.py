@@ -35,6 +35,10 @@ from learnic.application.queries.tag.list import (
     ListProductTagsQuery,
     ListProductTagsQueryHandler,
 )
+from learnic.application.queries.tag.popular import (
+    GetPopularTagsQuery,
+    GetPopularTagsQueryHandler,
+)
 from learnic.application.queries.tag.search import (
     SearchTagsQuery,
     SearchTagsQueryHandler,
@@ -197,6 +201,7 @@ class TagSchema(BaseModel):
     """Tag response projection — the same shape on every tag-emitting endpoint."""
 
     model_config = ConfigDict(
+        from_attributes=True,
         json_schema_extra={
             "examples": [
                 {
@@ -302,6 +307,66 @@ async def search_tags(
             pagination=Pagination(limit=limit, offset=offset),
         ),
     )
+    return TagListSchema(items=[TagSchema.from_view(v) for v in views])
+
+
+_POPULAR_LIMIT_DEFAULT: Final = 20
+_POPULAR_LIMIT_MAX: Final = 50
+
+
+@tag_router.get(
+    "/popular",
+    summary="Return the most-used tags across published products",
+    operation_id="getPopularTags",
+    response_model=TagListSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def get_popular_tags(
+    request: Request,
+    interactor: FromDishka[GetPopularTagsQueryHandler],
+    auth: FromDishka[Authenticator],
+    limit: Annotated[
+        int,
+        Query(
+            description=(
+                "Top-N cap. Defaults to "
+                f"`{_POPULAR_LIMIT_DEFAULT}` (size of the marketplace "
+                "filter row); capped at "
+                f"`{_POPULAR_LIMIT_MAX}`."
+            ),
+            ge=1,
+            le=_POPULAR_LIMIT_MAX,
+        ),
+    ] = _POPULAR_LIMIT_DEFAULT,
+) -> TagListSchema:
+    """Return top-``limit`` tags ordered by usage count.
+
+    Backs the marketplace filter chip row — replaces the previous
+    "sample 500 products + aggregate in the SPA" workaround with a
+    single SQL aggregate against ``product_tags`` joined to
+    ``products`` (only ``PUBLISHED`` rows are counted; drafts and
+    archives are invisible to the marketplace anyway). Tagged tags
+    that no published product carries are omitted; ties on usage
+    count are broken by name ascending so the chip order is stable.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected popular-tags query handler.
+        auth: Injected authenticator.
+        limit: Cap on the returned slice. Validated against
+            ``_POPULAR_LIMIT_MAX`` so a misbehaving client cannot
+            ask for the entire tag pool through this endpoint.
+
+    Returns:
+        :class:`TagListSchema` of at most ``limit`` :class:`TagSchema`
+        items, ordered by usage count descending.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+    """
+    await auth.authenticate(request)
+    views = await interactor.run(GetPopularTagsQuery(limit=limit))
     return TagListSchema(items=[TagSchema.from_view(v) for v in views])
 
 

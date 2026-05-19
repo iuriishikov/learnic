@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from learnic.application.common.persistence.file import FileView
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_lesson.ids import CourseLessonID
@@ -118,6 +119,63 @@ class TextInputBlockView:
     trim_whitespace: bool
 
 
+@dataclass(slots=True, frozen=True)
+class FileBlockView:
+    """Read-side projection of a generic-file lesson block.
+
+    ``file`` is nullable so a block that outlived its backing file
+    degrades to a missing-file placeholder rather than disappearing.
+    Same nullability rationale on the entity side. When present, the
+    nested :class:`FileView` already carries a short-lived presigned
+    URL — the SPA renders it directly with no follow-up endpoint.
+    """
+
+    type: Literal[BlockType.FILE]
+    oid: LessonBlockID
+    position: int
+    file: FileView | None
+    title: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class VideoFileBlockView:
+    """Read-side projection of an uploaded-video lesson block.
+
+    Sibling of :class:`RutubeVideoBlockView` — same playback intent,
+    different provider (project-hosted bytes vs Rutube embed).
+    ``file`` carries a resolved :class:`FileView` with presigned URL.
+    """
+
+    type: Literal[BlockType.VIDEO_FILE]
+    oid: LessonBlockID
+    position: int
+    file: FileView | None
+    title: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class CollageItemView:
+    """One photo inside a :class:`PhotoCollageBlockView`.
+
+    ``file`` is nullable for the same reason as the block-level FK:
+    a deleted backing file leaves the item as a placeholder.
+    """
+
+    file: FileView | None
+    caption: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class PhotoCollageBlockView:
+    """Read-side projection of a photo-collage lesson block."""
+
+    type: Literal[BlockType.PHOTO_COLLAGE]
+    oid: LessonBlockID
+    position: int
+    items: list[CollageItemView]
+    title: str | None
+
+
 LessonBlockView = (
     HtmlBlockView
     | KatexBlockView
@@ -126,6 +184,9 @@ LessonBlockView = (
     | SingleChoiceBlockView
     | MultiChoiceBlockView
     | TextInputBlockView
+    | FileBlockView
+    | VideoFileBlockView
+    | PhotoCollageBlockView
 )
 
 

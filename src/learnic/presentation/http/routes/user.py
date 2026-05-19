@@ -3,7 +3,6 @@ from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
 from fastapi import Depends, Path, Query, Request, UploadFile, status
-from fastapi.responses import RedirectResponse
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,11 +50,7 @@ from learnic.application.commands.user.cover.set import (
     SetUserCoverCommand,
     SetUserCoverCommandHandler,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    UserAvatarNotFoundError,
-    UserCoverNotFoundError,
-)
+from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.pagination import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
@@ -72,14 +67,6 @@ from learnic.application.queries.product.get_by_user import (
 from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
-)
-from learnic.application.queries.user.get_avatar import (
-    GetUserAvatarQuery,
-    GetUserAvatarQueryHandler,
-)
-from learnic.application.queries.user.get_cover import (
-    GetUserCoverQuery,
-    GetUserCoverQueryHandler,
 )
 from learnic.application.queries.user.search import (
     SearchUsersQuery,
@@ -103,12 +90,10 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
-    USER_AVATAR_NOT_FOUND_RULE,
-    USER_COVER_NOT_FOUND_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
-    FileSchema,
+    UploadedFileSchema,
     UserSchema,
     UserSummarySchema,
 )
@@ -117,7 +102,11 @@ from learnic.presentation.http.common.schemas import (
 # rail returns it from a user-prefixed URL (per the URL-hierarchy rule).
 # Cross-importing the schema is cheaper than duplicating it.
 from learnic.presentation.http.routes.product import ProductSchema
-from learnic.presentation.http.common.uploads import read_image_upload
+from learnic.presentation.http.common.upload_limits import (
+    USER_AVATAR_MAX_BYTES,
+    USER_COVER_MAX_BYTES,
+)
+from learnic.presentation.http.common.uploads import read_upload
 
 router = ErrorAwareRouter(
     prefix="/users",
@@ -424,116 +413,6 @@ async def get(
     return UserSchema.from_view(view)
 
 
-@router.get(
-    "/{user_id}/avatar",
-    summary="Get a user's avatar (redirect)",
-    operation_id="getUserAvatar",
-    status_code=status.HTTP_302_FOUND,
-    response_class=RedirectResponse,
-    responses={
-        status.HTTP_302_FOUND: {
-            "description": (
-                "Redirect to a short-lived presigned storage URL for "
-                "the avatar image. Browser clients will follow the "
-                "redirect transparently; non-browser clients should "
-                "either follow redirects or read the `Location` "
-                "header without following."
-            ),
-            "headers": {
-                "Location": {
-                    "description": ("Presigned URL pointing at the avatar object."),
-                    "schema": {"type": "string", "format": "uri"},
-                },
-            },
-        },
-    },
-    error_map={
-        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
-        UserAvatarNotFoundError: USER_AVATAR_NOT_FOUND_RULE,
-    },
-)
-async def get_avatar(
-    interactor: FromDishka[GetUserAvatarQueryHandler],
-    user_id: UUID = _USER_ID_PATH,
-) -> RedirectResponse:
-    """Return the user's avatar as a redirect to presigned storage.
-
-    Args:
-        user_id: Target user's UUID, parsed from the URL path.
-        interactor: Injected get-avatar query handler.
-
-    Returns:
-        ``302 Found`` ``RedirectResponse`` to the short-lived presigned
-        storage URL for the avatar image.
-
-    Raises:
-        EntityNotFoundError: No user with the given id; HTTP 404 via
-            ``ENTITY_NOT_FOUND_RULE``.
-        UserAvatarNotFoundError: The user exists but has no avatar
-            attached; HTTP 404 via ``USER_AVATAR_NOT_FOUND_RULE``.
-    """
-    output = await interactor.run(GetUserAvatarQuery(oid=UserID(user_id)))
-    return RedirectResponse(
-        url=output.url,
-        status_code=status.HTTP_302_FOUND,
-    )
-
-
-@router.get(
-    "/{user_id}/cover",
-    summary="Get a user's cover (redirect)",
-    operation_id="getUserCover",
-    status_code=status.HTTP_302_FOUND,
-    response_class=RedirectResponse,
-    responses={
-        status.HTTP_302_FOUND: {
-            "description": (
-                "Redirect to a short-lived presigned storage URL for "
-                "the cover image. Browser clients will follow the "
-                "redirect transparently; non-browser clients should "
-                "either follow redirects or read the `Location` "
-                "header without following."
-            ),
-            "headers": {
-                "Location": {
-                    "description": ("Presigned URL pointing at the cover object."),
-                    "schema": {"type": "string", "format": "uri"},
-                },
-            },
-        },
-    },
-    error_map={
-        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
-        UserCoverNotFoundError: USER_COVER_NOT_FOUND_RULE,
-    },
-)
-async def get_cover(
-    interactor: FromDishka[GetUserCoverQueryHandler],
-    user_id: UUID = _USER_ID_PATH,
-) -> RedirectResponse:
-    """Return the user's cover as a redirect to presigned storage.
-
-    Args:
-        user_id: Target user's UUID, parsed from the URL path.
-        interactor: Injected get-cover query handler.
-
-    Returns:
-        ``302 Found`` ``RedirectResponse`` to the short-lived presigned
-        storage URL for the cover image.
-
-    Raises:
-        EntityNotFoundError: No user with the given id; HTTP 404 via
-            ``ENTITY_NOT_FOUND_RULE``.
-        UserCoverNotFoundError: The user exists but has no cover
-            attached; HTTP 404 via ``USER_COVER_NOT_FOUND_RULE``.
-    """
-    output = await interactor.run(GetUserCoverQuery(oid=UserID(user_id)))
-    return RedirectResponse(
-        url=output.url,
-        status_code=status.HTTP_302_FOUND,
-    )
-
-
 @router.put(
     "/me/first-name",
     summary="Change the current user's first name",
@@ -697,7 +576,7 @@ async def change_description(
     operation_id="uploadMyAvatar",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=FileSchema,
+    response_model=UploadedFileSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def upload_avatar(
@@ -705,29 +584,30 @@ async def upload_avatar(
     file: UploadFile,
     interactor: FromDishka[SetUserAvatarCommandHandler],
     auth: FromDishka[Authenticator],
-) -> FileSchema:
+) -> UploadedFileSchema:
     """Upload (or replace) the current user's avatar.
 
     Args:
         request: Source of the access-token cookie.
         file: ``multipart/form-data`` field ``file`` carrying the image
-            bytes. Capped at ``MAX_FILE_SIZE_BYTES``
-            (``5 MB``); the server reads `Content-Type` from the
-            upload and rejects payloads above the limit with a 422
-            ``FileTooLargeError``.
+            bytes. Capped at ``USER_AVATAR_MAX_BYTES``; the server
+            reads `Content-Type` from the upload and rejects payloads
+            above the limit with a 422 ``FileTooLargeError``.
         interactor: Injected set-avatar command handler.
         auth: Injected authenticator that validates the access cookie.
 
     Returns:
-        :class:`FileSchema` with the new file's id.
+        :class:`UploadedFileSchema` with the new file's id.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: Authenticated user vanished; HTTP 404.
-        FileTooLargeError: Payload over ``MAX_FILE_SIZE_BYTES``; HTTP 422.
+        FileTooLargeError: Payload over ``USER_AVATAR_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_image_upload(file)
+    data, content_type = await read_upload(
+        file, max_bytes=USER_AVATAR_MAX_BYTES,
+    )
     file_id = await interactor.run(
         SetUserAvatarCommand(
             user_id=ctx.user_id,
@@ -735,7 +615,7 @@ async def upload_avatar(
             content_type=content_type,
         )
     )
-    return FileSchema(oid=file_id)
+    return UploadedFileSchema(oid=file_id)
 
 
 @router.delete(
@@ -775,7 +655,7 @@ async def delete_avatar(
     operation_id="uploadMyCover",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=FileSchema,
+    response_model=UploadedFileSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def upload_cover(
@@ -783,29 +663,30 @@ async def upload_cover(
     file: UploadFile,
     interactor: FromDishka[SetUserCoverCommandHandler],
     auth: FromDishka[Authenticator],
-) -> FileSchema:
+) -> UploadedFileSchema:
     """Upload (or replace) the current user's cover.
 
     Args:
         request: Source of the access-token cookie.
         file: ``multipart/form-data`` field ``file`` carrying the image
-            bytes. Capped at ``MAX_FILE_SIZE_BYTES``
-            (``5 MB``); the server reads `Content-Type` from the
-            upload and rejects payloads above the limit with a 422
-            ``FileTooLargeError``.
+            bytes. Capped at ``USER_COVER_MAX_BYTES``; the server
+            reads `Content-Type` from the upload and rejects payloads
+            above the limit with a 422 ``FileTooLargeError``.
         interactor: Injected set-cover command handler.
         auth: Injected authenticator that validates the access cookie.
 
     Returns:
-        :class:`FileSchema` with the new file's id.
+        :class:`UploadedFileSchema` with the new file's id.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         EntityNotFoundError: Authenticated user vanished; HTTP 404.
-        FileTooLargeError: Payload over ``MAX_FILE_SIZE_BYTES``; HTTP 422.
+        FileTooLargeError: Payload over ``USER_COVER_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_image_upload(file)
+    data, content_type = await read_upload(
+        file, max_bytes=USER_COVER_MAX_BYTES,
+    )
     file_id = await interactor.run(
         SetUserCoverCommand(
             user_id=ctx.user_id,
@@ -813,7 +694,7 @@ async def upload_cover(
             content_type=content_type,
         )
     )
-    return FileSchema(oid=file_id)
+    return UploadedFileSchema(oid=file_id)
 
 
 @router.delete(

@@ -3,6 +3,7 @@ from typing import Final, final
 
 from learnic.application.common.formatting import build_full_name
 from learnic.application.common.pagination import Pagination
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user import UserReader
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.entities.user.models import UserID
@@ -32,14 +33,15 @@ class UserSummaryOutput:
     ``full_name`` collapses the user's name fields into the
     canonical Russian-style display name (``Last First Patronymic``)
     so callers can render a result row without re-joining the parts
-    themselves. The avatar URL is resolved by the handler to a
-    short-lived presigned URL; clients render it directly.
+    themselves. ``avatar`` carries a resolved :class:`FileView` with
+    a short-lived presigned URL; Pydantic schemas auto-map it
+    through ``from_attributes=True``.
     """
 
     oid: UserID
     full_name: str
     is_verified: bool
-    avatar_url: str | None
+    avatar: FileView | None
 
 
 @final
@@ -61,26 +63,19 @@ class SearchUsersQueryHandler:
             tokens=tokens,
             pagination=data.pagination,
         )
-
-        results: list[UserSummaryOutput] = []
-        for view in views:
-            avatar_url: str | None = None
-            if view.avatar is not None:
-                avatar_url = await self._file_storage.presigned_get_url(
-                    view.avatar.bucket,
-                    view.avatar.storage_name,
-                )
-            results.append(
-                UserSummaryOutput(
-                    oid=view.oid,
-                    full_name=build_full_name(
-                        view.first_name, view.last_name, view.patronymic
-                    ),
-                    is_verified=view.is_verified,
-                    avatar_url=avatar_url,
-                )
+        return [
+            UserSummaryOutput(
+                oid=view.oid,
+                full_name=build_full_name(
+                    view.first_name, view.last_name, view.patronymic
+                ),
+                is_verified=view.is_verified,
+                avatar=await FileView.of_optional(
+                    view.avatar, self._file_storage,
+                ),
             )
-        return results
+            for view in views
+        ]
 
     @staticmethod
     def _tokenize(query: str) -> tuple[str, ...]:

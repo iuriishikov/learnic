@@ -23,6 +23,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 from learnic.entities.course_block.constants import (
+    BLOCK_TITLE_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
@@ -226,5 +227,81 @@ text_input_blocks_table = sa.Table(
         sa.Boolean(),
         nullable=False,
         server_default=sa.text("true"),
+    ),
+)
+
+
+# File-backed block tables. ``file_id`` is ``ON DELETE SET NULL`` so a
+# block survives the deletion of its backing file (read-side renders
+# the block as a missing-file placeholder) — same shape as
+# ``products.cover_file_id``. Two separate tables for ``file_blocks``
+# and ``video_file_blocks`` keep the discriminator-to-table mapping
+# 1:1 with ``BlockType`` (matching the Rutube vs hosted-video split).
+file_blocks_table = sa.Table(
+    "file_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
+    ),
+)
+
+
+video_file_blocks_table = sa.Table(
+    "video_file_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
+    ),
+)
+
+
+# Photo-collage ``items`` is a JSONB array of ``{"file_id": "<uuid>|
+# null", "caption": "<str>|null"}`` entries — same denormalised
+# rationale as ``code_blocks.tabs`` (opaque to SQL, invariants
+# enforced upstream by the entity). Per-item file FKs cannot be
+# expressed inside a JSONB array; referential integrity for items
+# is intentionally managed at the application boundary.
+photo_collage_blocks_table = sa.Table(
+    "photo_collage_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("items", JSONB, nullable=False),
+    sa.Column(
+        "title",
+        sa.String(BLOCK_TITLE_MAX_LEN),
+        nullable=True,
     ),
 )

@@ -5,6 +5,7 @@ from learnic.application.common.formatting import (
     build_full_name,
     mask_email,
 )
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user import UserReader
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
@@ -26,7 +27,9 @@ class UserOutput:
     projection never leaks a plain address. ``public_email`` is the
     optional, user-supplied contact email distinct from the login
     address — surfaced un-masked because the user explicitly
-    chose to publish it.
+    chose to publish it. ``avatar`` / ``cover`` carry presigned-URL
+    file views — Pydantic schemas auto-map them through
+    ``from_attributes=True``.
     """
 
     oid: UserID
@@ -34,8 +37,8 @@ class UserOutput:
     email: str
     is_verified: bool
     description: str | None
-    avatar_url: str | None
-    cover_url: str | None
+    avatar: FileView | None
+    cover: FileView | None
     website_url: str | None
     portfolio_url: str | None
     public_email: str | None
@@ -53,27 +56,14 @@ class GetUserQueryHandler:
 
     async def run(self, data: GetUserQuery) -> UserOutput:
         view = validate_empty(await self._reader.with_id(data.oid), data.oid)
-
-        avatar_url: str | None = None
-        if view.avatar is not None:
-            avatar_url = await self._file_storage.presigned_get_url(
-                view.avatar.bucket, view.avatar.storage_name
-            )
-
-        cover_url: str | None = None
-        if view.cover is not None:
-            cover_url = await self._file_storage.presigned_get_url(
-                view.cover.bucket, view.cover.storage_name
-            )
-
         return UserOutput(
             oid=view.oid,
             full_name=build_full_name(view.first_name, view.last_name, view.patronymic),
             email=mask_email(view.email),
             is_verified=view.is_verified,
             description=view.description,
-            avatar_url=avatar_url,
-            cover_url=cover_url,
+            avatar=await FileView.of_optional(view.avatar, self._file_storage),
+            cover=await FileView.of_optional(view.cover, self._file_storage),
             website_url=view.website_url,
             portfolio_url=view.portfolio_url,
             public_email=view.public_email,

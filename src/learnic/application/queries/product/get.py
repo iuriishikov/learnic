@@ -2,10 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, final
 
+from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.product import (
     ProductReader,
     ProductView,
 )
+from learnic.application.common.persistence.tag import TagView
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
@@ -22,11 +24,12 @@ class GetProductQuery:
 class ProductOutput:
     """Product projection with the cover URL already resolved.
 
-    Mirrors :class:`ProductView` field-for-field except the cover —
-    instead of leaking the persistence-layer ``FileView``, the handler
-    presigns a short-lived storage URL via :class:`FileStorage` and
-    surfaces it as ``cover_url`` so HTTP routes / SPAs can render the
-    image directly. ``None`` means the product has no cover attached.
+    Mirrors :class:`ProductView` field-for-field. ``cover`` carries
+    a presigned-URL :class:`FileView`; Pydantic schemas auto-map it
+    through ``from_attributes=True``. ``None`` means the product has
+    no cover attached. ``tags`` arrives in author-defined position
+    order — the SPA renders the chips directly without an extra
+    `GET /products/{id}/tags` round-trip.
     """
 
     oid: ProductID
@@ -36,7 +39,8 @@ class ProductOutput:
     description: str | None
     total_duration_in_hours: int | None
     author: UserRefView
-    cover_url: str | None
+    cover: FileView | None
+    tags: list[TagView]
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -68,12 +72,6 @@ async def resolve_product_output(
     single-product and list-product query handlers so they share
     the same conversion logic.
     """
-    cover_url: str | None = None
-    if view.cover is not None:
-        cover_url = await file_storage.presigned_get_url(
-            view.cover.bucket,
-            view.cover.storage_name,
-        )
     return ProductOutput(
         oid=view.oid,
         type=view.type,
@@ -82,7 +80,8 @@ async def resolve_product_output(
         description=view.description,
         total_duration_in_hours=view.total_duration_in_hours,
         author=view.author,
-        cover_url=cover_url,
+        cover=await FileView.of_optional(view.cover, file_storage),
+        tags=view.tags,
         published_at=view.published_at,
         created_at=view.created_at,
         updated_at=view.updated_at,

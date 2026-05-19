@@ -6,6 +6,7 @@ from learnic.application.common.persistence.transaction import (
     Transaction,
 )
 from learnic.application.common.storage.file_storage import FileStorage
+from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
 from learnic.entities.file.value_objects import (
@@ -57,12 +58,14 @@ class FileUploadService:
         entity_saver: EntitySaver,
         file_storage: FileStorage,
         files_gateway: FilesGateway,
+        task_scheduler: TaskScheduler,
         default_bucket: DefaultStorageBucket,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
         self._file_storage: Final = file_storage
         self._files_gateway: Final = files_gateway
+        self._task_scheduler: Final = task_scheduler
         self._default_bucket: Final = default_bucket
 
     async def upload(
@@ -105,15 +108,26 @@ class FileUploadService:
         self,
         previous_file_id: FileID | None,
     ) -> None:
-        """Mark the file being replaced as deleted.
+        """Mark the file being replaced as deleted and queue S3 purge.
 
-        Idempotent: no-ops when ``previous_file_id`` is ``None``, when
-        the row is missing, or when it is already soft-deleted. The S3
-        blob is left in place — the file-lifecycle worker reaps it
-        asynchronously, same as before.
+        Idempotent: no-ops when ``previous_file_id`` is ``None``,
+        when the row is missing, or when it is already soft-deleted.
+
+        Side effect: enqueues
+        :func:`purge_file_from_storage_task` so the worker physically
+        removes the S3 blob shortly after the caller's transaction
+        commits — that's how the user's plan quota actually frees up
+        space on the cloud provider, not just inside the DB
+        aggregate. The task re-checks ``deleted_at`` before touching
+        storage, so a producer that rolls back after this call does
+        not leak a deletion to S3.
         """
         if previous_file_id is None:
             return
         previous_file = await self._files_gateway.with_id(previous_file_id)
-        if previous_file is not None and not previous_file.is_deleted:
-            previous_file.mark_deleted()
+        if previous_file is None or previous_file.is_deleted:
+            return
+        previous_file.mark_deleted()
+        await self._task_scheduler.schedule_purge_file_from_storage(
+            previous_file_id,
+        )

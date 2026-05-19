@@ -316,6 +316,15 @@ class TestSingleChoiceBlock:
         with pytest.raises(DuplicateChoiceOptionLabelError):
             _make_single([a, b], a.oid)
 
+    def test_accepts_empty_placeholder_labels(self) -> None:
+        # Freshly created blocks ship with empty placeholder
+        # options — dedup must skip them so two unfilled rows can
+        # coexist until the author types real labels.
+        a = ChoiceOption.create(ChoiceOptionLabel(""))
+        b = ChoiceOption.create(ChoiceOptionLabel(""))
+        block = _make_single([a, b], a.oid)
+        assert [o.label.value for o in block.options] == ["", ""]
+
     def test_rejects_correct_not_in_options(self) -> None:
         a, b = _option("A"), _option("B")
         with pytest.raises(CorrectOptionNotInOptionsError):
@@ -450,6 +459,13 @@ class TestTextInputBlock:
         # author doesn't ship a phantom "alternative".
         with pytest.raises(DuplicateAcceptedAnswerError):
             _make_text(["Paris", " paris "])
+
+    def test_accepts_empty_placeholder_answers(self) -> None:
+        # Freshly created blocks ship with placeholder answers —
+        # dedup must skip empty/blank rows so the author can leave
+        # them unfilled until they type real values.
+        block = _make_text(["", "   ", "Paris"])
+        assert [a.value for a in block.accepted_answers] == ["", "   ", "Paris"]
 
     def test_allows_distinct_under_case_sensitive(self) -> None:
         # Same strings with different case are distinct when

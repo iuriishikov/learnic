@@ -4,13 +4,19 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from learnic.entities.course_block.models import (
+    ChoiceOption,
     CodeBlock,
     CodeTab,
     HtmlBlock,
     KatexBlock,
+    MultiChoiceBlock,
     RutubeVideoBlock,
+    SingleChoiceBlock,
+    TextInputBlock,
 )
 from learnic.entities.course_block.value_objects import (
+    AcceptedAnswer,
+    ChoiceOptionLabel,
     CodeLanguage,
     CodeSource,
     CodeTabLabel,
@@ -72,6 +78,12 @@ def fake_block_gateway() -> AsyncMock:
     gw.update_rutube_video = AsyncMock()
     gw.add_code = AsyncMock()
     gw.update_code = AsyncMock()
+    gw.add_single_choice = AsyncMock()
+    gw.update_single_choice = AsyncMock()
+    gw.add_multi_choice = AsyncMock()
+    gw.update_multi_choice = AsyncMock()
+    gw.add_text_input = AsyncMock()
+    gw.update_text_input = AsyncMock()
     gw.delete = AsyncMock()
     gw.reorder = AsyncMock()
     return gw
@@ -165,4 +177,47 @@ def code_block(course_lesson: CourseLesson) -> CodeBlock:
             ),
         ],
         position=3,
+    )
+
+
+def _options_pair() -> list[ChoiceOption]:
+    return [
+        ChoiceOption.create(ChoiceOptionLabel("Yes")),
+        ChoiceOption.create(ChoiceOptionLabel("No")),
+    ]
+
+
+@pytest.fixture
+def single_choice_block(course_lesson: CourseLesson) -> SingleChoiceBlock:
+    options = _options_pair()
+    return SingleChoiceBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        options=options,
+        correct_option_id=options[0].oid,
+        position=4,
+    )
+
+
+@pytest.fixture
+def multi_choice_block(course_lesson: CourseLesson) -> MultiChoiceBlock:
+    options = _options_pair()
+    return MultiChoiceBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        options=options,
+        correct_option_ids=frozenset({options[0].oid}),
+        position=5,
+    )
+
+
+@pytest.fixture
+def text_input_block(course_lesson: CourseLesson) -> TextInputBlock:
+    return TextInputBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        accepted_answers=[AcceptedAnswer("Paris")],
+        case_sensitive=False,
+        trim_whitespace=True,
+        position=6,
     )

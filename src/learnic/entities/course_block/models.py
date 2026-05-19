@@ -8,6 +8,8 @@ from learnic.entities.course_block.constants import (
     CHOICE_BLOCK_MAX_OPTIONS,
     CHOICE_BLOCK_MIN_OPTIONS,
     CODE_BLOCK_MAX_TABS,
+    PHOTO_COLLAGE_MAX_ITEMS,
+    PHOTO_COLLAGE_MIN_ITEMS,
     TEXT_INPUT_MAX_ACCEPTED,
     TEXT_INPUT_MIN_ACCEPTED,
 )
@@ -26,20 +28,25 @@ from learnic.entities.course_block.errors import (
     TooManyAcceptedAnswersError,
     TooManyChoiceOptionsError,
     TooManyCodeTabsError,
+    TooFewCollageItemsError,
+    TooManyCollageItemsError,
 )
 from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
 from learnic.entities.course_block.value_objects import (
     AcceptedAnswer,
+    BlockTitle,
     ChoiceOptionLabel,
     CodeLanguage,
     CodeSource,
     CodeTabLabel,
+    CollageCaption,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
     VideoTitle,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
+from learnic.entities.file.ids import FileID
 from learnic.entities.product.ids import ProductID
 
 
@@ -304,7 +311,13 @@ class ChoiceOption:
 
 
 def _validate_options(options: list[ChoiceOption]) -> None:
-    """Apply the cross-option invariants: count + label / id uniqueness."""
+    """Apply the cross-option invariants: count + label / id uniqueness.
+
+    Empty / blank labels are not deduplicated — a freshly created
+    block legitimately ships with multiple empty placeholder rows
+    the author fills in afterwards. Uniqueness still applies to
+    every label the author has actually typed something into.
+    """
     if len(options) < CHOICE_BLOCK_MIN_OPTIONS:
         raise TooFewChoiceOptionsError(CHOICE_BLOCK_MIN_OPTIONS)
     if len(options) > CHOICE_BLOCK_MAX_OPTIONS:
@@ -315,6 +328,8 @@ def _validate_options(options: list[ChoiceOption]) -> None:
         if opt.oid in seen_ids:
             raise DuplicateChoiceOptionIdError(str(opt.oid))
         seen_ids.add(opt.oid)
+        if not opt.label.value.strip():
+            continue
         if opt.label.value in seen_labels:
             raise DuplicateChoiceOptionLabelError(opt.label.value)
         seen_labels.add(opt.label.value)
@@ -493,12 +508,16 @@ def _validate_accepted_answers(
     for a in accepted_answers:
         # Uniqueness is checked under the block's own normalisation —
         # otherwise toggling ``trim_whitespace`` on later would silently
-        # introduce collisions the author can't see.
+        # introduce collisions the author can't see. Empty / blank
+        # placeholders are skipped — a freshly created block ships
+        # with one (or more) empty rows the author hasn't filled in.
         norm = _normalise_text_answer(
             a.value,
             case_sensitive=case_sensitive,
             trim_whitespace=trim_whitespace,
         )
+        if not norm:
+            continue
         if norm in seen:
             raise DuplicateAcceptedAnswerError(a.value)
         seen.add(norm)
@@ -593,6 +612,206 @@ class TextInputBlock(BaseEntity[LessonBlockID]):
         )
 
 
+@dataclass
+class FileBlock(BaseEntity[LessonBlockID]):
+    """A draft generic-file block inside a lesson.
+
+    Carries a single ``file_id`` pointing at the ``files`` table —
+    actual bytes live in S3. ``file_id`` is nullable on the entity
+    (mirroring the ``ON DELETE SET NULL`` FK at the persistence
+    boundary): if the backing file is purged later, the block
+    survives as a "file missing" placeholder rather than vanishing
+    with the file. No content-type whitelist at the domain layer —
+    enforcement of "this is an arbitrary file" vs ``video/*`` vs
+    ``image/*`` lives in the command handler that constructs the
+    block (the handler reads the file's stored ``content_type``).
+    """
+
+    lesson_id: CourseLessonID
+    product_id: ProductID
+    file_id: FileID | None
+    position: int
+    created_at: datetime
+    updated_at: datetime
+    title: BlockTitle | None = None
+
+    @property
+    def type(self) -> BlockType:
+        return BlockType.FILE
+
+    def update_file(self, new_file_id: FileID) -> None:
+        self.file_id = new_file_id
+
+    def update_title(self, new_title: BlockTitle | None) -> None:
+        self.title = new_title
+
+    def change_position(self, new_position: int) -> None:
+        self.position = new_position
+
+    @classmethod
+    def create(
+        cls,
+        lesson_id: CourseLessonID,
+        product_id: ProductID,
+        file_id: FileID,
+        position: int,
+        title: BlockTitle | None = None,
+    ) -> Self:
+        now = datetime.now(timezone.utc)
+        return cls(
+            oid=LessonBlockID(uuid.uuid4()),
+            lesson_id=lesson_id,
+            product_id=product_id,
+            file_id=file_id,
+            position=position,
+            created_at=now,
+            updated_at=now,
+            title=title,
+        )
+
+
+@dataclass
+class VideoFileBlock(BaseEntity[LessonBlockID]):
+    """A draft uploaded-video block inside a lesson.
+
+    Sibling of :class:`RutubeVideoBlock` — same playback affordance,
+    different provider contract. Rutube blocks embed by external id;
+    this block plays the bytes uploaded into the project's own
+    storage. The two are deliberately separate types: their playback
+    URLs, controls, and analytics flows diverge enough that a
+    unified ``video`` type would be a fake abstraction.
+
+    The "this file is actually a video" check (content-type prefix
+    ``video/``) is enforced by the command handler at construction
+    time, not at the VO/entity layer — the same ``file_id`` machinery
+    is reused across all file-backed blocks.
+    """
+
+    lesson_id: CourseLessonID
+    product_id: ProductID
+    file_id: FileID | None
+    position: int
+    created_at: datetime
+    updated_at: datetime
+    title: BlockTitle | None = None
+
+    @property
+    def type(self) -> BlockType:
+        return BlockType.VIDEO_FILE
+
+    def update_file(self, new_file_id: FileID) -> None:
+        self.file_id = new_file_id
+
+    def update_title(self, new_title: BlockTitle | None) -> None:
+        self.title = new_title
+
+    def change_position(self, new_position: int) -> None:
+        self.position = new_position
+
+    @classmethod
+    def create(
+        cls,
+        lesson_id: CourseLessonID,
+        product_id: ProductID,
+        file_id: FileID,
+        position: int,
+        title: BlockTitle | None = None,
+    ) -> Self:
+        now = datetime.now(timezone.utc)
+        return cls(
+            oid=LessonBlockID(uuid.uuid4()),
+            lesson_id=lesson_id,
+            product_id=product_id,
+            file_id=file_id,
+            position=position,
+            created_at=now,
+            updated_at=now,
+            title=title,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CollageItem:
+    """One photo inside a :class:`PhotoCollageBlock`.
+
+    ``file_id`` is nullable to survive backing-file deletion (same
+    rationale as the parent block). ``caption`` is optional — a
+    short hand-written note shown under the photo; anything longer
+    belongs in an adjacent HTML block.
+    """
+
+    file_id: FileID | None
+    caption: CollageCaption | None = None
+
+
+def _validate_collage_items(items: list[CollageItem]) -> None:
+    """Apply collage-level invariants: bounded count."""
+    if len(items) < PHOTO_COLLAGE_MIN_ITEMS:
+        raise TooFewCollageItemsError(PHOTO_COLLAGE_MIN_ITEMS)
+    if len(items) > PHOTO_COLLAGE_MAX_ITEMS:
+        raise TooManyCollageItemsError(PHOTO_COLLAGE_MAX_ITEMS)
+
+
+@dataclass
+class PhotoCollageBlock(BaseEntity[LessonBlockID]):
+    """A draft photo-collage block inside a lesson.
+
+    A non-empty ordered list of :class:`CollageItem` (file + optional
+    caption). Items are stored verbatim in a JSONB column at the
+    persistence boundary — same denormalised rationale as
+    :class:`CodeBlock`'s ``tabs`` — so the application layer never
+    queries inside the array. The "each item is an image" invariant
+    (content-type prefix ``image/``) is enforced by the command
+    handler at construction time.
+    """
+
+    lesson_id: CourseLessonID
+    product_id: ProductID
+    items: list[CollageItem]
+    position: int
+    created_at: datetime
+    updated_at: datetime
+    title: BlockTitle | None = None
+
+    def __post_init__(self) -> None:
+        _validate_collage_items(self.items)
+
+    @property
+    def type(self) -> BlockType:
+        return BlockType.PHOTO_COLLAGE
+
+    def replace_items(self, new_items: list[CollageItem]) -> None:
+        _validate_collage_items(new_items)
+        self.items = new_items
+
+    def update_title(self, new_title: BlockTitle | None) -> None:
+        self.title = new_title
+
+    def change_position(self, new_position: int) -> None:
+        self.position = new_position
+
+    @classmethod
+    def create(
+        cls,
+        lesson_id: CourseLessonID,
+        product_id: ProductID,
+        items: list[CollageItem],
+        position: int,
+        title: BlockTitle | None = None,
+    ) -> Self:
+        now = datetime.now(timezone.utc)
+        return cls(
+            oid=LessonBlockID(uuid.uuid4()),
+            lesson_id=lesson_id,
+            product_id=product_id,
+            items=items,
+            position=position,
+            created_at=now,
+            updated_at=now,
+            title=title,
+        )
+
+
 LessonBlock = (
     HtmlBlock
     | KatexBlock
@@ -601,4 +820,7 @@ LessonBlock = (
     | SingleChoiceBlock
     | MultiChoiceBlock
     | TextInputBlock
+    | FileBlock
+    | VideoFileBlock
+    | PhotoCollageBlock
 )

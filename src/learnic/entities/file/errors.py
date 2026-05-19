@@ -6,9 +6,26 @@ class InvalidContentTypeError(FieldError):
 
 
 class FileTooLargeError(FieldError):
-    """Raised when the uploaded file exceeds the configured size limit."""
+    """Raised when an uploaded file exceeds the per-call-site cap.
+
+    The ``limit`` is the cap chosen by the route reading the upload
+    (see ``learnic.presentation.http.common.upload_limits``). There is
+    no longer a global cap — this error always carries the
+    context-specific value the caller passed to
+    ``read_upload(..., max_bytes=...)``.
+    """
 
     limit: int
+
+
+class InvalidFileSizeError(FieldError):
+    """Raised when a persisted file size is not a positive integer.
+
+    A defensive invariant on the :class:`FileSize` VO — applied when
+    constructing a ``File`` entity, after the call-site cap has
+    already passed at the HTTP boundary. Hitting this in production
+    means a corrupted upload or a malformed direct DB insert.
+    """
 
 
 class InvalidStorageNameError(FieldError):

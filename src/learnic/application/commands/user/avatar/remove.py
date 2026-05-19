@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from typing import Final, final
 
 from learnic.application.common.errors import EntityNotFoundError
-from learnic.application.common.persistence.file import FilesGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
+from learnic.application.common.storage.file_uploads import FileUploadService
 from learnic.entities.user.models import UserID
 
 
@@ -21,11 +21,11 @@ class RemoveUserAvatarCommandHandler:
         self,
         transaction: Transaction,
         user_gateway: UserGateway,
-        files_gateway: FilesGateway,
+        file_uploads: FileUploadService,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
-        self._files_gateway: Final = files_gateway
+        self._file_uploads: Final = file_uploads
 
     async def run(self, data: RemoveUserAvatarCommand) -> None:
         user = await self._user_gateway.with_id(data.user_id)
@@ -33,8 +33,5 @@ class RemoveUserAvatarCommandHandler:
             raise EntityNotFoundError(data.user_id)
 
         previous_file_id = user.remove_avatar()
-        if previous_file_id is not None:
-            previous_file = await self._files_gateway.with_id(previous_file_id)
-            if previous_file is not None and not previous_file.is_deleted:
-                previous_file.mark_deleted()
+        await self._file_uploads.soft_delete_previous(previous_file_id)
         await self._transaction.commit()

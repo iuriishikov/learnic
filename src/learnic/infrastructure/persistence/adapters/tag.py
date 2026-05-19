@@ -11,10 +11,12 @@ from learnic.application.common.persistence.tag import (
     TagReader,
     TagView,
 )
+from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.tag.ids import TagID
 from learnic.entities.tag.models import Tag
 from learnic.entities.tag.value_objects import TagSlug
+from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.tag import (
     product_tags_table,
     tags_table,
@@ -90,6 +92,54 @@ class TagReaderAlchemy(TagReader):
             )
             .where(product_tags_table.c.product_id == product_id)
             .order_by(product_tags_table.c.position.asc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [_row_to_view(row) for row in rows]
+
+    @override
+    async def popular(self, limit: int) -> list[TagView]:
+        # Count usages only across PUBLISHED products — draft /
+        # archived / banned slices are not part of what a marketplace
+        # visitor can see, so a tag whose only carriers are drafts
+        # should not surface in the public popular row.
+        usage_count = sa.func.count(product_tags_table.c.product_id).label(
+            "usage_count",
+        )
+        stmt = (
+            sa.select(
+                tags_table.c.oid,
+                tags_table.c.name,
+                tags_table.c.color,
+                usage_count,
+            )
+            .select_from(
+                tags_table.join(
+                    product_tags_table,
+                    product_tags_table.c.tag_id == tags_table.c.oid,
+                ).join(
+                    products_table,
+                    sa.and_(
+                        products_table.c.oid
+                        == product_tags_table.c.product_id,
+                        products_table.c.status
+                        == ProductStatus.PUBLISHED.value,
+                    ),
+                ),
+            )
+            .group_by(
+                tags_table.c.oid,
+                tags_table.c.name,
+                tags_table.c.color,
+            )
+            # `usage_count` first so the SPA's chip row is sorted by
+            # raw popularity; `name` is the deterministic tiebreaker
+            # so two equally-popular tags keep a stable order across
+            # page refreshes.
+            .order_by(
+                usage_count.desc(),
+                tags_table.c.name.asc(),
+            )
+            .limit(limit)
         )
         rows = (await self._session.execute(stmt)).all()
         return [_row_to_view(row) for row in rows]

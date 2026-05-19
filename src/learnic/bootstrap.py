@@ -36,6 +36,10 @@ from learnic.infrastructure.persistence.models.statistic import (
     map_statistic_table,
 )
 from learnic.infrastructure.persistence.models.tag import map_tag_table
+from learnic.infrastructure.persistence.models.subscription import (
+    map_storage_quota_breach_table,
+    map_subscription_table,
+)
 from learnic.infrastructure.persistence.models.user import map_user_table
 from learnic.infrastructure.persistence.models.user_experience import (
     map_user_experience_table,
@@ -73,6 +77,10 @@ from learnic.presentation.http.routes.notification import (
 )
 from learnic.presentation.http.routes.notification_preferences import (
     router as notification_preferences_router,
+)
+from learnic.presentation.http.routes.subscription import (
+    course_router as course_storage_router,
+    router as subscription_router,
 )
 from learnic.presentation.http.routes.push import (
     me_router as push_me_router,
@@ -148,6 +156,8 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(notification_preferences_router)
     app.include_router(push_public_router)
     app.include_router(push_me_router)
+    app.include_router(subscription_router)
+    app.include_router(course_storage_router)
     app.include_router(auth_ws_router)
     if configs.app.environment == "development":
         # Dev-only router — physically absent from prod builds.
@@ -178,3 +188,5 @@ def setup_map_tables() -> None:
     map_notification_table()
     map_push_subscription_table()
     map_statistic_table()
+    map_subscription_table()
+    map_storage_quota_breach_table()

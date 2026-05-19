@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
 from learnic.application.common.persistence.user_experience import (
     UserExperienceGateway,
     UserExperienceReader,
@@ -79,6 +79,7 @@ class UserExperienceReaderAlchemy(UserExperienceReader):
                 icon.c.storage_name.label("icon_storage_name"),
                 icon.c.bucket.label("icon_bucket"),
                 icon.c.content_type.label("icon_content_type"),
+                icon.c.size_bytes.label("icon_size_bytes"),
             )
             .select_from(
                 user_experiences_table.outerjoin(
@@ -106,11 +107,12 @@ class UserExperienceReaderAlchemy(UserExperienceReader):
                 end_date=row.end_date,
                 source_url=row.source_url,
                 icon=(
-                    FileView(
+                    FileMeta(
                         oid=FileID(row.icon_oid),
                         storage_name=row.icon_storage_name,
                         bucket=row.icon_bucket,
                         content_type=row.icon_content_type,
+                        size_bytes=row.icon_size_bytes,
                     )
                     if row.icon_oid is not None
                     else None

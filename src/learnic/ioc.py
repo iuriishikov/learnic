@@ -53,14 +53,38 @@ from learnic.application.queries.auth.token_status import (
 from learnic.application.commands.course_block.add_code import (
     AddCodeBlockCommandHandler,
 )
+from learnic.application.commands.course_block.check_answer import (
+    CheckBlockAnswerCommandHandler,
+)
+from learnic.application.commands.course_block.reveal_answer import (
+    RevealBlockAnswerCommandHandler,
+)
 from learnic.application.commands.course_block.add_html import (
     AddHtmlBlockCommandHandler,
 )
 from learnic.application.commands.course_block.add_katex import (
     AddKatexBlockCommandHandler,
 )
+from learnic.application.commands.course_block.add_file import (
+    AddFileBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_multi_choice import (
+    AddMultiChoiceBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_photo_collage import (
+    AddPhotoCollageBlockCommandHandler,
+)
 from learnic.application.commands.course_block.add_rutube_video import (
     AddRutubeVideoBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_video_file import (
+    AddVideoFileBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_single_choice import (
+    AddSingleChoiceBlockCommandHandler,
+)
+from learnic.application.commands.course_block.add_text_input import (
+    AddTextInputBlockCommandHandler,
 )
 from learnic.application.commands.course_block.delete import (
     DeleteLessonBlockCommandHandler,
@@ -71,14 +95,32 @@ from learnic.application.commands.course_block.reorder import (
 from learnic.application.commands.course_block.update_code import (
     UpdateCodeBlockCommandHandler,
 )
+from learnic.application.commands.course_block.update_file import (
+    UpdateFileBlockCommandHandler,
+)
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage import (
+    UpdatePhotoCollageBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_video_file import (
+    UpdateVideoFileBlockCommandHandler,
 )
 from learnic.application.commands.course_block.update_katex import (
     UpdateKatexBlockCommandHandler,
 )
+from learnic.application.commands.course_block.update_multi_choice import (
+    UpdateMultiChoiceBlockCommandHandler,
+)
 from learnic.application.commands.course_block.update_rutube_video import (
     UpdateRutubeVideoBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_single_choice import (
+    UpdateSingleChoiceBlockCommandHandler,
+)
+from learnic.application.commands.course_block.update_text_input import (
+    UpdateTextInputBlockCommandHandler,
 )
 from learnic.application.commands.course_draft.reset import (
     ResetCourseDraftCommandHandler,
@@ -228,6 +270,9 @@ from learnic.application.queries.role.list import (
 from learnic.application.queries.tag.list import (
     ListProductTagsQueryHandler,
 )
+from learnic.application.queries.tag.popular import (
+    GetPopularTagsQueryHandler,
+)
 from learnic.application.queries.tag.search import (
     SearchTagsQueryHandler,
 )
@@ -341,13 +386,35 @@ from learnic.application.common.persistence.course_module import (
     CourseModuleGateway,
 )
 from learnic.application.common.persistence.course_release import (
+    CourseReleaseBlockGateway,
     CourseReleaseGateway,
     CourseReleaseReader,
     CourseReleaseSnapshotter,
 )
+from learnic.application.billing.entitlement import EntitlementService
+from learnic.application.common.persistence.billing import (
+    AuthorActiveFilesReader,
+    FileUsageReader,
+    StorageQuotaBreachGateway,
+    StorageQuotaLock,
+    SubscriptionGateway,
+    SubscriptionReader,
+)
 from learnic.application.common.persistence.file import (
     FilesGateway,
     FilesReader,
+)
+from learnic.application.commands.billing.reconcile_storage_quotas import (
+    ReconcileStorageQuotasCommandHandler,
+)
+from learnic.application.commands.file.purge_from_storage import (
+    PurgeFileFromStorageCommandHandler,
+)
+from learnic.application.queries.billing.get_course_storage_remaining import (
+    GetCourseStorageRemainingQueryHandler,
+)
+from learnic.application.queries.billing.get_my_subscription import (
+    GetMySubscriptionQueryHandler,
 )
 from learnic.application.common.persistence.product import (
     ProductGateway,
@@ -465,9 +532,6 @@ from learnic.application.queries.session.list_my import (
     ListMySessionsQueryHandler,
 )
 from learnic.application.queries.user.get import GetUserQueryHandler
-from learnic.application.queries.user.get_avatar import (
-    GetUserAvatarQueryHandler,
-)
 from learnic.application.queries.user.search import (
     SearchUsersQueryHandler,
 )
@@ -514,9 +578,6 @@ from learnic.application.queries.enrollment.list_for_student import (
 )
 from learnic.application.queries.product_qa.list import (
     GetProductQAListQueryHandler,
-)
-from learnic.application.queries.user.get_cover import (
-    GetUserCoverQueryHandler,
 )
 from learnic.application.commands.notification_preferences.update import (
     UpdateNotificationPreferencesCommandHandler,
@@ -576,9 +637,18 @@ from learnic.infrastructure.persistence.adapters.course_module import (
     CourseModuleMapperAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.course_release import (
+    CourseReleaseBlockGatewayAlchemy,
     CourseReleaseMapperAlchemy,
     CourseReleaseReaderAlchemy,
     CourseReleaseSnapshotterAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.billing import (
+    AuthorActiveFilesReaderAlchemy,
+    FileUsageReaderAlchemy,
+    StorageQuotaBreachMapperAlchemy,
+    StorageQuotaLockAlchemy,
+    SubscriptionMapperAlchemy,
+    SubscriptionReaderAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.file import (
     FilesMapperAlchemy,
@@ -820,6 +890,30 @@ class GatewaysProvider(Provider):
     user_reader = provide(UserReaderAlchemy, provides=UserReader)
     files_gateway = provide(FilesMapperAlchemy, provides=FilesGateway)
     files_reader = provide(FilesReaderAlchemy, provides=FilesReader)
+    subscription_gateway = provide(
+        SubscriptionMapperAlchemy,
+        provides=SubscriptionGateway,
+    )
+    subscription_reader = provide(
+        SubscriptionReaderAlchemy,
+        provides=SubscriptionReader,
+    )
+    file_usage_reader = provide(
+        FileUsageReaderAlchemy,
+        provides=FileUsageReader,
+    )
+    storage_quota_lock = provide(
+        StorageQuotaLockAlchemy,
+        provides=StorageQuotaLock,
+    )
+    storage_quota_breach_gateway = provide(
+        StorageQuotaBreachMapperAlchemy,
+        provides=StorageQuotaBreachGateway,
+    )
+    author_active_files_reader = provide(
+        AuthorActiveFilesReaderAlchemy,
+        provides=AuthorActiveFilesReader,
+    )
     product_gateway = provide(
         ProductMapperAlchemy,
         provides=ProductGateway,
@@ -887,6 +981,10 @@ class GatewaysProvider(Provider):
     course_release_reader = provide(
         CourseReleaseReaderAlchemy,
         provides=CourseReleaseReader,
+    )
+    course_release_block_gateway = provide(
+        CourseReleaseBlockGatewayAlchemy,
+        provides=CourseReleaseBlockGateway,
     )
     course_draft_resetter = provide(
         CourseDraftResetterAlchemy,
@@ -1221,8 +1319,6 @@ class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
     get_user = provide(GetUserQueryHandler)
-    get_user_avatar = provide(GetUserAvatarQueryHandler)
-    get_user_cover = provide(GetUserCoverQueryHandler)
     search_users = provide(SearchUsersQueryHandler)
 
     get_user_presence = provide(GetUserPresenceQueryHandler)
@@ -1329,10 +1425,35 @@ class InteractorsProvider(Provider):
     add_katex_block = provide(AddKatexBlockCommandHandler)
     add_rutube_video_block = provide(AddRutubeVideoBlockCommandHandler)
     add_code_block = provide(AddCodeBlockCommandHandler)
+    add_single_choice_block = provide(AddSingleChoiceBlockCommandHandler)
+    add_multi_choice_block = provide(AddMultiChoiceBlockCommandHandler)
+    add_text_input_block = provide(AddTextInputBlockCommandHandler)
+    add_file_block = provide(AddFileBlockCommandHandler)
+    add_video_file_block = provide(AddVideoFileBlockCommandHandler)
+    add_photo_collage_block = provide(AddPhotoCollageBlockCommandHandler)
     update_html_block = provide(UpdateHtmlBlockCommandHandler)
     update_katex_block = provide(UpdateKatexBlockCommandHandler)
     update_rutube_video_block = provide(UpdateRutubeVideoBlockCommandHandler)
     update_code_block = provide(UpdateCodeBlockCommandHandler)
+    update_single_choice_block = provide(UpdateSingleChoiceBlockCommandHandler)
+    update_multi_choice_block = provide(UpdateMultiChoiceBlockCommandHandler)
+    update_text_input_block = provide(UpdateTextInputBlockCommandHandler)
+    update_file_block = provide(UpdateFileBlockCommandHandler)
+    update_video_file_block = provide(UpdateVideoFileBlockCommandHandler)
+    update_photo_collage_block = provide(UpdatePhotoCollageBlockCommandHandler)
+    entitlement_service = provide(EntitlementService)
+    get_my_subscription = provide(GetMySubscriptionQueryHandler)
+    get_course_storage_remaining = provide(
+        GetCourseStorageRemainingQueryHandler,
+    )
+    reconcile_storage_quotas = provide(
+        ReconcileStorageQuotasCommandHandler,
+    )
+    purge_file_from_storage = provide(
+        PurgeFileFromStorageCommandHandler,
+    )
+    check_block_answer = provide(CheckBlockAnswerCommandHandler)
+    reveal_block_answer = provide(RevealBlockAnswerCommandHandler)
     reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
     delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
     get_course_draft = provide(GetCourseDraftQueryHandler)
@@ -1352,6 +1473,7 @@ class InteractorsProvider(Provider):
 
     search_tags = provide(SearchTagsQueryHandler)
     list_product_tags = provide(ListProductTagsQueryHandler)
+    get_popular_tags = provide(GetPopularTagsQueryHandler)
     update_product_tags = provide(UpdateProductTagsCommandHandler)
 
     invite_collaborator_by_user = provide(

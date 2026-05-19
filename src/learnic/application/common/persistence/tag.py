@@ -64,6 +64,19 @@ class TagReader(Protocol):
         """
         ...
 
+    async def popular(self, limit: int) -> list[TagView]:
+        """Return the most-used tags across published products.
+
+        Powers the marketplace "popular tags" filter row: one SQL
+        aggregate (``COUNT(product_tags.product_id) GROUP BY tag_id``)
+        ordered by usage descending, name ascending as the tiebreaker
+        — replaces the legacy wide-sample loop on the SPA that used
+        to fetch ~500 products just to compute this list. ``limit``
+        is enforced at the SQL level so the catalog can grow without
+        slowing this endpoint down.
+        """
+        ...
+
 
 class ProductTagsSaver(Protocol):
     """Rewrite the ordered set of tag associations for a product.

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
 from learnic.application.common.persistence.user import (
     UserGateway,
     UserReader,
@@ -60,10 +60,12 @@ class UserReaderAlchemy(UserReader):
                 avatar.c.storage_name.label("avatar_storage_name"),
                 avatar.c.bucket.label("avatar_bucket"),
                 avatar.c.content_type.label("avatar_content_type"),
+                avatar.c.size_bytes.label("avatar_size_bytes"),
                 cover.c.oid.label("cover_oid"),
                 cover.c.storage_name.label("cover_storage_name"),
                 cover.c.bucket.label("cover_bucket"),
                 cover.c.content_type.label("cover_content_type"),
+                cover.c.size_bytes.label("cover_size_bytes"),
             )
             .select_from(
                 users_table.outerjoin(
@@ -98,21 +100,23 @@ class UserReaderAlchemy(UserReader):
             portfolio_url=row.portfolio_url,
             public_email=row.public_email,
             avatar=(
-                FileView(
+                FileMeta(
                     oid=FileID(row.avatar_oid),
                     storage_name=row.avatar_storage_name,
                     bucket=row.avatar_bucket,
                     content_type=row.avatar_content_type,
+                    size_bytes=row.avatar_size_bytes,
                 )
                 if row.avatar_oid is not None
                 else None
             ),
             cover=(
-                FileView(
+                FileMeta(
                     oid=FileID(row.cover_oid),
                     storage_name=row.cover_storage_name,
                     bucket=row.cover_bucket,
                     content_type=row.cover_content_type,
+                    size_bytes=row.cover_size_bytes,
                 )
                 if row.cover_oid is not None
                 else None
@@ -140,6 +144,7 @@ class UserReaderAlchemy(UserReader):
             avatar.c.storage_name.label("avatar_storage_name"),
             avatar.c.bucket.label("avatar_bucket"),
             avatar.c.content_type.label("avatar_content_type"),
+            avatar.c.size_bytes.label("avatar_size_bytes"),
         ).select_from(
             users_table.outerjoin(
                 avatar,
@@ -185,11 +190,12 @@ class UserReaderAlchemy(UserReader):
                 patronymic=row.patronymic,
                 is_verified=row.is_verified,
                 avatar=(
-                    FileView(
+                    FileMeta(
                         oid=FileID(row.avatar_oid),
                         storage_name=row.avatar_storage_name,
                         bucket=row.avatar_bucket,
                         content_type=row.avatar_content_type,
+                        size_bytes=row.avatar_size_bytes,
                     )
                     if row.avatar_oid is not None
                     else None

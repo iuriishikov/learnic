@@ -16,6 +16,8 @@ class NotificationKind(StrEnum):
     INVITE_DECLINED = "invite_declined"
     ACCESS_REVOKED = "access_revoked"
     NEW_LOGIN = "new_login"
+    STORAGE_QUOTA_WARNING = "storage_quota_warning"
+    STORAGE_QUOTA_ENFORCED = "storage_quota_enforced"
 
 
 class NotificationCategory(StrEnum):

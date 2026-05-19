@@ -24,6 +24,7 @@ from learnic.application.common.persistence.course_content import (
     LessonBlockView,
 )
 from learnic.application.common.persistence.course_release import (
+    CourseReleaseBlockGateway,
     CourseReleaseContentView,
     CourseReleaseGateway,
     CourseReleaseReader,
@@ -32,6 +33,9 @@ from learnic.application.common.persistence.course_release import (
     ReleaseLessonView,
     ReleaseModuleView,
 )
+from learnic.application.common.storage.file_storage import FileStorage
+from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.models import LessonBlock
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.course_release.enums import CourseReleaseKind
@@ -39,19 +43,27 @@ from learnic.entities.course_release.ids import CourseReleaseID
 from learnic.entities.course_release.models import CourseRelease
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.blocks.file_resolver import (
+    collect_file_ids,
+    resolve_file_views,
+)
 from learnic.infrastructure.persistence.blocks.registry import (
     BLOCK_SPECS,
+    _CommonBlockAttrs,
     spec_for_row,
 )
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
+    file_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
     multi_choice_blocks_table,
+    photo_collage_blocks_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
+    video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_lesson import (
     course_lessons_table,
@@ -62,14 +74,17 @@ from learnic.infrastructure.persistence.models.course_module import (
 from learnic.infrastructure.persistence.models.course_release import (
     course_release_blocks_table,
     course_release_code_blocks_table,
+    course_release_file_blocks_table,
     course_release_html_blocks_table,
     course_release_katex_blocks_table,
     course_release_lessons_table,
     course_release_modules_table,
     course_release_multi_choice_blocks_table,
+    course_release_photo_collage_blocks_table,
     course_release_rutube_video_blocks_table,
     course_release_single_choice_blocks_table,
     course_release_text_input_blocks_table,
+    course_release_video_file_blocks_table,
     course_releases_table,
 )
 
@@ -310,6 +325,20 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 text_input_blocks_table.c.trim_whitespace.label(
                     "text_input_trim_whitespace",
                 ),
+                file_blocks_table.c.file_id.label("file_block_file_id"),
+                file_blocks_table.c.title.label("file_block_title"),
+                video_file_blocks_table.c.file_id.label(
+                    "video_file_block_file_id",
+                ),
+                video_file_blocks_table.c.title.label(
+                    "video_file_block_title",
+                ),
+                photo_collage_blocks_table.c["items"].label(
+                    "photo_collage_items",
+                ),
+                photo_collage_blocks_table.c.title.label(
+                    "photo_collage_title",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -339,6 +368,18 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 .outerjoin(
                     text_input_blocks_table,
                     lesson_blocks_table.c.oid == text_input_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    file_blocks_table,
+                    lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    video_file_blocks_table,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    photo_collage_blocks_table,
+                    lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == release.product_id)
@@ -416,14 +457,14 @@ class CourseReleaseSnapshotterAlchemy(CourseReleaseSnapshotter):
 # ============================== reader ============================== #
 
 
-def _row_to_block_view(row: sa.Row[Any]) -> LessonBlockView:
-    """Hydrate a release block row into its view via the shared registry."""
-    return spec_for_row(row).row_to_view(row)
-
-
 class CourseReleaseReaderAlchemy(CourseReleaseReader):
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        file_storage: FileStorage,
+    ) -> None:
         self._session: Final = session
+        self._file_storage: Final = file_storage
 
     @override
     async def list_for_product(
@@ -552,6 +593,24 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                     course_release_text_input_blocks_table.c.trim_whitespace.label(  # noqa: E501
                         "text_input_trim_whitespace",
                     ),
+                    course_release_file_blocks_table.c.file_id.label(
+                        "file_block_file_id",
+                    ),
+                    course_release_file_blocks_table.c.title.label(
+                        "file_block_title",
+                    ),
+                    course_release_video_file_blocks_table.c.file_id.label(
+                        "video_file_block_file_id",
+                    ),
+                    course_release_video_file_blocks_table.c.title.label(
+                        "video_file_block_title",
+                    ),
+                    course_release_photo_collage_blocks_table.c["items"].label(
+                        "photo_collage_items",
+                    ),
+                    course_release_photo_collage_blocks_table.c.title.label(
+                        "photo_collage_title",
+                    ),
                 )
                 .select_from(
                     course_release_blocks_table.outerjoin(
@@ -588,6 +647,21 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
                         course_release_text_input_blocks_table,
                         course_release_blocks_table.c.oid
                         == course_release_text_input_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_file_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_file_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_video_file_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_video_file_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        course_release_photo_collage_blocks_table,
+                        course_release_blocks_table.c.oid
+                        == course_release_photo_collage_blocks_table.c.oid,
                     ),
                 )
                 .where(course_release_blocks_table.c.release_id == release_id)
@@ -598,12 +672,18 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
             )
         ).all()
 
+        files_by_id = await resolve_file_views(
+            self._session,
+            self._file_storage,
+            collect_file_ids(list(blocks_rows)),
+        )
+
         blocks_by_lesson: dict[uuid.UUID, list[LessonBlockView]] = {}
         for row in blocks_rows:
             blocks_by_lesson.setdefault(
                 row.release_lesson_id,
                 [],
-            ).append(_row_to_block_view(row))
+            ).append(spec_for_row(row).row_to_view(row, files_by_id))
 
         lessons_by_module: dict[uuid.UUID, list[ReleaseLessonView]] = {}
         for row in lessons_rows:
@@ -642,3 +722,167 @@ class CourseReleaseReaderAlchemy(CourseReleaseReader):
             released_at=meta_row.released_at,
             modules=modules,
         )
+
+
+# ============================== release block gateway ============================== #
+
+
+def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
+    """SELECT one release block + its subtype columns + product id.
+
+    Same shape as :meth:`CourseReleaseReaderAlchemy.get_content`'s
+    blocks select, but narrowed to a single ``oid`` and joined with
+    ``course_releases`` to surface ``product_id`` (consumed by the
+    check/reveal handlers for enrollment lookup).
+    """
+    return (
+        sa.select(
+            course_release_blocks_table.c.oid,
+            course_release_blocks_table.c.release_lesson_id.label("lesson_id"),
+            course_releases_table.c.product_id,
+            course_release_blocks_table.c.type,
+            course_release_blocks_table.c.position,
+            course_releases_table.c.released_at.label("created_at"),
+            course_releases_table.c.released_at.label("updated_at"),
+            course_release_html_blocks_table.c.html,
+            course_release_katex_blocks_table.c.source,
+            course_release_rutube_video_blocks_table.c.external_id.label(
+                "rutube_external_id",
+            ),
+            course_release_rutube_video_blocks_table.c.title.label(
+                "rutube_title",
+            ),
+            course_release_code_blocks_table.c.tabs.label("code_tabs"),
+            course_release_single_choice_blocks_table.c.options.label(
+                "single_choice_options",
+            ),
+            course_release_single_choice_blocks_table.c.correct_option_id.label(
+                "single_choice_correct_option_id",
+            ),
+            course_release_multi_choice_blocks_table.c.options.label(
+                "multi_choice_options",
+            ),
+            course_release_multi_choice_blocks_table.c.correct_option_ids.label(
+                "multi_choice_correct_option_ids",
+            ),
+            course_release_text_input_blocks_table.c.accepted_answers.label(
+                "text_input_accepted_answers",
+            ),
+            course_release_text_input_blocks_table.c.case_sensitive.label(
+                "text_input_case_sensitive",
+            ),
+            course_release_text_input_blocks_table.c.trim_whitespace.label(
+                "text_input_trim_whitespace",
+            ),
+            course_release_file_blocks_table.c.file_id.label(
+                "file_block_file_id",
+            ),
+            course_release_file_blocks_table.c.title.label("file_block_title"),
+            course_release_video_file_blocks_table.c.file_id.label(
+                "video_file_block_file_id",
+            ),
+            course_release_video_file_blocks_table.c.title.label(
+                "video_file_block_title",
+            ),
+            course_release_photo_collage_blocks_table.c["items"].label(
+                "photo_collage_items",
+            ),
+            course_release_photo_collage_blocks_table.c.title.label(
+                "photo_collage_title",
+            ),
+        )
+        .select_from(
+            course_release_blocks_table.join(
+                course_releases_table,
+                course_release_blocks_table.c.release_id
+                == course_releases_table.c.oid,
+            )
+            .outerjoin(
+                course_release_html_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_html_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_katex_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_katex_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_rutube_video_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_rutube_video_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_code_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_code_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_single_choice_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_single_choice_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_multi_choice_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_multi_choice_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_text_input_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_text_input_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_file_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_file_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_video_file_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_video_file_blocks_table.c.oid,
+            )
+            .outerjoin(
+                course_release_photo_collage_blocks_table,
+                course_release_blocks_table.c.oid
+                == course_release_photo_collage_blocks_table.c.oid,
+            ),
+        )
+        .where(course_release_blocks_table.c.oid == oid)
+    )
+
+
+class CourseReleaseBlockGatewayAlchemy(CourseReleaseBlockGateway):
+    """Hydrate one release block by id into its domain entity.
+
+    The block carries the release-side ``release_lesson_id`` in
+    its ``lesson_id`` field (not the original draft id) and the
+    release's ``released_at`` in both timestamp fields — neither
+    is consumed by check / reveal flows. The important fields are
+    ``oid`` (caller's reference), ``product_id`` (used for the
+    enrollment check), and the subtype payload (used by
+    ``block.check(...)``).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session: Final = session
+
+    @override
+    async def with_id(
+        self,
+        oid: LessonBlockID,
+    ) -> LessonBlock | None:
+        row = (
+            await self._session.execute(_select_release_block_with_id(oid))
+        ).one_or_none()
+        if row is None:
+            return None
+        common = _CommonBlockAttrs(
+            oid=LessonBlockID(row.oid),
+            lesson_id=CourseLessonID(row.lesson_id),
+            product_id=ProductID(row.product_id),
+            position=row.position,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        return spec_for_row(row).row_to_entity(row, common)

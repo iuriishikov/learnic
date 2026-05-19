@@ -49,8 +49,14 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_WITH_FIELD_MAP,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
-from learnic.presentation.http.common.schemas import FileSchema
-from learnic.presentation.http.common.uploads import read_image_upload
+from learnic.presentation.http.common.schemas import (
+    FileSchema,
+    UploadedFileSchema,
+)
+from learnic.presentation.http.common.upload_limits import (
+    USER_EXPERIENCE_ICON_MAX_BYTES,
+)
+from learnic.presentation.http.common.uploads import read_upload
 
 router = ErrorAwareRouter(
     prefix="/users/{user_id}/experiences",
@@ -214,6 +220,7 @@ class UserExperienceSchema(BaseModel):
     """
 
     model_config = ConfigDict(
+        from_attributes=True,
         json_schema_extra={
             "examples": [
                 {
@@ -224,7 +231,12 @@ class UserExperienceSchema(BaseModel):
                     "start_date": "2018-01-01",
                     "end_date": "2020-05-01",
                     "source_url": ("https://spherule.example.com/projects/editor"),
-                    "icon_url": "https://s3.example.com/icons/exp.png",
+                    "icon": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/png",
+                        "size_bytes": 32_768,
+                        "url": "https://s3.example.com/icons/exp.png",
+                    },
                 },
             ],
         },
@@ -277,30 +289,18 @@ class UserExperienceSchema(BaseModel):
             None,
         ],
     )
-    icon_url: str | None = Field(
+    icon: FileSchema | None = Field(
+        default=None,
         description=(
-            "Short-lived presigned URL for the entry's icon image, or "
-            "`null` when no icon is attached. The URL expires; re-fetch "
-            "the list to get a fresh one."
+            "Resolved icon file with a short-lived presigned URL, or "
+            "`null` when no icon is attached. The URL expires; "
+            "re-fetch the list to get a fresh one."
         ),
-        examples=[
-            "https://s3.example.com/icons/exp.png?X-Amz-Signature=...",
-            None,
-        ],
     )
 
     @classmethod
     def from_view(cls, view: UserExperienceOutput) -> Self:
-        return cls(
-            oid=view.oid,
-            user_id=view.user_id,
-            title=view.title,
-            description=view.description,
-            start_date=view.start_date,
-            end_date=view.end_date,
-            source_url=view.source_url,
-            icon_url=view.icon_url,
-        )
+        return cls.model_validate(view)
 
 
 class CreatedUserExperienceSchema(BaseModel):
@@ -495,7 +495,7 @@ async def delete_experience(
     operation_id="uploadMyUserExperienceIcon",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=FileSchema,
+    response_model=UploadedFileSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
 async def upload_icon(
@@ -504,21 +504,21 @@ async def upload_icon(
     interactor: FromDishka[SetUserExperienceIconCommandHandler],
     auth: FromDishka[Authenticator],
     experience_id: UUID = _EXPERIENCE_ID_PATH,
-) -> FileSchema:
+) -> UploadedFileSchema:
     """Upload (or replace) the icon image attached to an experience.
 
     Args:
         request: Source of the access-token cookie.
         file: ``multipart/form-data`` field ``file`` carrying the
-            image bytes. Capped at ``MAX_FILE_SIZE_BYTES``; the
-            server rejects payloads above the limit with HTTP 422
+            image bytes. Capped at ``USER_EXPERIENCE_ICON_MAX_BYTES``;
+            the server rejects payloads above the limit with HTTP 422
             ``FileTooLarge``.
         interactor: Injected set-icon command handler.
         auth: Injected authenticator that validates the access cookie.
         experience_id: Target entry's UUID, parsed from the URL path.
 
     Returns:
-        :class:`FileSchema` with the new file's id.
+        :class:`UploadedFileSchema` with the new file's id.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
@@ -527,7 +527,9 @@ async def upload_icon(
         FileTooLargeError: Payload exceeds the upload cap; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_image_upload(file)
+    data, content_type = await read_upload(
+        file, max_bytes=USER_EXPERIENCE_ICON_MAX_BYTES,
+    )
     file_id = await interactor.run(
         SetUserExperienceIconCommand(
             actor_id=ctx.user_id,
@@ -536,7 +538,7 @@ async def upload_icon(
             content_type=content_type,
         ),
     )
-    return FileSchema(oid=file_id)
+    return UploadedFileSchema(oid=file_id)
 
 
 @me_router.delete(

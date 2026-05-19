@@ -19,7 +19,7 @@ growing a fifth branch each.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -29,58 +29,76 @@ from learnic.application.common.persistence.course_content import (
     ChoiceOptionView,
     CodeBlockView,
     CodeTabView,
+    CollageItemView,
+    FileBlockView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
     MultiChoiceBlockView,
+    PhotoCollageBlockView,
     RutubeVideoBlockView,
     SingleChoiceBlockView,
     TextInputBlockView,
+    VideoFileBlockView,
 )
+from learnic.application.common.persistence.file import FileView
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
 from learnic.entities.course_block.models import (
     ChoiceOption,
     CodeBlock,
     CodeTab,
+    CollageItem,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
     MultiChoiceBlock,
+    PhotoCollageBlock,
     RutubeVideoBlock,
     SingleChoiceBlock,
     TextInputBlock,
+    VideoFileBlock,
 )
 from learnic.entities.course_block.value_objects import (
     AcceptedAnswer,
+    BlockTitle,
     ChoiceOptionLabel,
     CodeLanguage,
     CodeSource,
     CodeTabLabel,
+    CollageCaption,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
     VideoTitle,
 )
 from learnic.entities.course_lesson.ids import CourseLessonID
+from learnic.entities.file.ids import FileID
 from learnic.entities.product.ids import ProductID
 from learnic.infrastructure.persistence.models.course_block import (
     code_blocks_table,
+    file_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     multi_choice_blocks_table,
+    photo_collage_blocks_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
+    video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.course_release import (
     course_release_code_blocks_table,
+    course_release_file_blocks_table,
     course_release_html_blocks_table,
     course_release_katex_blocks_table,
     course_release_multi_choice_blocks_table,
+    course_release_photo_collage_blocks_table,
     course_release_rutube_video_blocks_table,
     course_release_single_choice_blocks_table,
     course_release_text_input_blocks_table,
+    course_release_video_file_blocks_table,
 )
 
 
@@ -178,7 +196,10 @@ class BlockSpec:
     draft_subtype_table: sa.Table
     release_subtype_table: sa.Table
     row_to_entity: Callable[[sa.Row[Any], _CommonBlockAttrs], LessonBlock]
-    row_to_view: Callable[[sa.Row[Any]], LessonBlockView]
+    row_to_view: Callable[
+        [sa.Row[Any], Mapping[FileID, FileView]],
+        LessonBlockView,
+    ]
     release_insert_value: Callable[[sa.Row[Any], Any], dict[str, Any]]
 
 
@@ -200,7 +221,10 @@ def _html_row_to_entity(
     )
 
 
-def _html_row_to_view(row: sa.Row[Any]) -> HtmlBlockView:
+def _html_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> HtmlBlockView:
     return HtmlBlockView(
         type=BlockType.HTML,
         oid=LessonBlockID(row.oid),
@@ -234,7 +258,10 @@ def _katex_row_to_entity(
     )
 
 
-def _katex_row_to_view(row: sa.Row[Any]) -> KatexBlockView:
+def _katex_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> KatexBlockView:
     return KatexBlockView(
         type=BlockType.KATEX,
         oid=LessonBlockID(row.oid),
@@ -269,7 +296,10 @@ def _rutube_row_to_entity(
     )
 
 
-def _rutube_row_to_view(row: sa.Row[Any]) -> RutubeVideoBlockView:
+def _rutube_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> RutubeVideoBlockView:
     return RutubeVideoBlockView(
         type=BlockType.RUTUBE_VIDEO,
         oid=LessonBlockID(row.oid),
@@ -308,7 +338,10 @@ def _code_row_to_entity(
     )
 
 
-def _code_row_to_view(row: sa.Row[Any]) -> CodeBlockView:
+def _code_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> CodeBlockView:
     return CodeBlockView(
         type=BlockType.CODE,
         oid=LessonBlockID(row.oid),
@@ -346,7 +379,10 @@ def _single_choice_row_to_entity(
     )
 
 
-def _single_choice_row_to_view(row: sa.Row[Any]) -> SingleChoiceBlockView:
+def _single_choice_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> SingleChoiceBlockView:
     return SingleChoiceBlockView(
         type=BlockType.SINGLE_CHOICE,
         oid=LessonBlockID(row.oid),
@@ -388,7 +424,10 @@ def _multi_choice_row_to_entity(
     )
 
 
-def _multi_choice_row_to_view(row: sa.Row[Any]) -> MultiChoiceBlockView:
+def _multi_choice_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> MultiChoiceBlockView:
     return MultiChoiceBlockView(
         type=BlockType.MULTI_CHOICE,
         oid=LessonBlockID(row.oid),
@@ -431,7 +470,10 @@ def _text_input_row_to_entity(
     )
 
 
-def _text_input_row_to_view(row: sa.Row[Any]) -> TextInputBlockView:
+def _text_input_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> TextInputBlockView:
     return TextInputBlockView(
         type=BlockType.TEXT_INPUT,
         oid=LessonBlockID(row.oid),
@@ -451,6 +493,191 @@ def _text_input_release_insert_value(
         "accepted_answers": row.text_input_accepted_answers,
         "case_sensitive": row.text_input_case_sensitive,
         "trim_whitespace": row.text_input_trim_whitespace,
+    }
+
+
+# ============================== File ============================== #
+
+
+def _file_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> FileBlock:
+    return FileBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        file_id=(
+            FileID(row.file_block_file_id)
+            if row.file_block_file_id is not None
+            else None
+        ),
+        title=(
+            BlockTitle(row.file_block_title)
+            if row.file_block_title is not None
+            else None
+        ),
+    )
+
+
+def _file_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],
+) -> FileBlockView:
+    fid = row.file_block_file_id
+    return FileBlockView(
+        type=BlockType.FILE,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        file=files.get(FileID(fid)) if fid is not None else None,
+        title=row.file_block_title,
+    )
+
+
+def _file_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "file_id": row.file_block_file_id,
+        "title": row.file_block_title,
+    }
+
+
+# ============================== Video File ============================== #
+
+
+def _video_file_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> VideoFileBlock:
+    return VideoFileBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        file_id=(
+            FileID(row.video_file_block_file_id)
+            if row.video_file_block_file_id is not None
+            else None
+        ),
+        title=(
+            BlockTitle(row.video_file_block_title)
+            if row.video_file_block_title is not None
+            else None
+        ),
+    )
+
+
+def _video_file_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],
+) -> VideoFileBlockView:
+    fid = row.video_file_block_file_id
+    return VideoFileBlockView(
+        type=BlockType.VIDEO_FILE,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        file=files.get(FileID(fid)) if fid is not None else None,
+        title=row.video_file_block_title,
+    )
+
+
+def _video_file_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "file_id": row.video_file_block_file_id,
+        "title": row.video_file_block_title,
+    }
+
+
+# ============================== Photo Collage ============================== #
+
+
+def _jsonb_to_collage_items(raw: Any) -> list[CollageItem]:
+    return [
+        CollageItem(
+            file_id=FileID(uuid.UUID(item["file_id"]))
+            if item.get("file_id") is not None
+            else None,
+            caption=CollageCaption(item["caption"])
+            if item.get("caption") is not None
+            else None,
+        )
+        for item in raw
+    ]
+
+
+def _jsonb_to_collage_item_views(
+    raw: Any,
+    files: Mapping[FileID, FileView],
+) -> list[CollageItemView]:
+    items: list[CollageItemView] = []
+    for item in raw:
+        raw_fid = item.get("file_id")
+        if raw_fid is not None:
+            file_view = files.get(FileID(uuid.UUID(raw_fid)))
+        else:
+            file_view = None
+        items.append(
+            CollageItemView(
+                file=file_view,
+                caption=item.get("caption"),
+            ),
+        )
+    return items
+
+
+def _photo_collage_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> PhotoCollageBlock:
+    return PhotoCollageBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        items=_jsonb_to_collage_items(row.photo_collage_items),
+        title=(
+            BlockTitle(row.photo_collage_title)
+            if row.photo_collage_title is not None
+            else None
+        ),
+    )
+
+
+def _photo_collage_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],
+) -> PhotoCollageBlockView:
+    return PhotoCollageBlockView(
+        type=BlockType.PHOTO_COLLAGE,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        items=_jsonb_to_collage_item_views(row.photo_collage_items, files),
+        title=row.photo_collage_title,
+    )
+
+
+def _photo_collage_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {
+        "oid": new_oid,
+        "items": row.photo_collage_items,
+        "title": row.photo_collage_title,
     }
 
 
@@ -513,6 +740,30 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
         row_to_entity=_text_input_row_to_entity,
         row_to_view=_text_input_row_to_view,
         release_insert_value=_text_input_release_insert_value,
+    ),
+    BlockType.FILE: BlockSpec(
+        kind=BlockType.FILE,
+        draft_subtype_table=file_blocks_table,
+        release_subtype_table=course_release_file_blocks_table,
+        row_to_entity=_file_row_to_entity,
+        row_to_view=_file_row_to_view,
+        release_insert_value=_file_release_insert_value,
+    ),
+    BlockType.VIDEO_FILE: BlockSpec(
+        kind=BlockType.VIDEO_FILE,
+        draft_subtype_table=video_file_blocks_table,
+        release_subtype_table=course_release_video_file_blocks_table,
+        row_to_entity=_video_file_row_to_entity,
+        row_to_view=_video_file_row_to_view,
+        release_insert_value=_video_file_release_insert_value,
+    ),
+    BlockType.PHOTO_COLLAGE: BlockSpec(
+        kind=BlockType.PHOTO_COLLAGE,
+        draft_subtype_table=photo_collage_blocks_table,
+        release_subtype_table=course_release_photo_collage_blocks_table,
+        row_to_entity=_photo_collage_row_to_entity,
+        row_to_view=_photo_collage_row_to_view,
+        release_insert_value=_photo_collage_release_insert_value,
     ),
 }
 

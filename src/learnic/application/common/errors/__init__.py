@@ -23,9 +23,9 @@ from learnic.application.common.errors.errors import (
     ProductNotInDraftError,
     RoleInUseError,
     RoleNameAlreadyTakenError,
-    UserAvatarNotFoundError,
-    UserCoverNotFoundError,
+    StorageQuotaExceededError,
     WrongBlockTypeError,
+    WrongFileContentTypeError,
 )
 
 __all__ = [
@@ -53,7 +53,7 @@ __all__ = [
     "ProductNotInDraftError",
     "RoleInUseError",
     "RoleNameAlreadyTakenError",
-    "UserAvatarNotFoundError",
-    "UserCoverNotFoundError",
+    "StorageQuotaExceededError",
     "WrongBlockTypeError",
+    "WrongFileContentTypeError",
 ]

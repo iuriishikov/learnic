@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
 from learnic.entities.user.models import UserID
 from learnic.entities.user_experience.ids import UserExperienceID
 from learnic.entities.user_experience.models import UserExperience
@@ -24,7 +24,7 @@ class UserExperienceView:
     start_date: date
     end_date: date | None
     source_url: str | None
-    icon: FileView | None
+    icon: FileMeta | None
 
 
 class UserExperienceGateway(Protocol):

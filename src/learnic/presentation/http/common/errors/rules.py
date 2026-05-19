@@ -26,6 +26,8 @@ from learnic.application.common.errors import (
     NotResourceOwnerError,
     RoleInUseError,
     RoleNameAlreadyTakenError,
+    StorageQuotaExceededError,
+    WrongFileContentTypeError,
 )
 from learnic.entities.common.errors import FieldError
 from learnic.entities.product_collaboration.errors import (
@@ -77,16 +79,6 @@ EMAIL_NOT_VERIFIED_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
-USER_AVATAR_NOT_FOUND_RULE: Final[Rule] = rule(
-    status=HTTPStatus.NOT_FOUND,
-    translator=_named,
-)
-
-USER_COVER_NOT_FOUND_RULE: Final[Rule] = rule(
-    status=HTTPStatus.NOT_FOUND,
-    translator=_named,
-)
-
 NOT_RESOURCE_OWNER_RULE: Final[Rule] = rule(
     status=HTTPStatus.FORBIDDEN,
     translator=_named,
@@ -121,6 +113,24 @@ WRONG_BLOCK_TYPE_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_named,
 )
+
+WRONG_FILE_CONTENT_TYPE_RULE: Final[Rule] = rule(
+    status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+    translator=_field,
+)
+"""Body shape: ``{"error": "WrongFileContentType", "file_id": ...,
+"expected_prefix": "video/"|"image/", "actual": "<mime>"}`` — the SPA
+can render a precise "this file isn't a video/image" message and offer
+a re-upload with the right type."""
+
+STORAGE_QUOTA_EXCEEDED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+    translator=_field,
+)
+"""Body shape: ``{"error": "StorageQuotaExceeded", "plan_code": "FREE",
+"used_bytes": ..., "attempted_bytes": ..., "limit_bytes": ...}`` —
+enough for the SPA to render "0.4 GB attempted on a 2 GB FREE plan,
+1.7 GB already used" and a clear upgrade CTA."""
 
 CANNOT_PUBLISH_COURSE_DIRECTLY_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,

@@ -104,9 +104,12 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
     # Periodic scheduler — emits cron-labeled tasks (e.g.
-    # release_ripe_freezes_task every minute) onto the broker.
-    # Worker side consumes them.
-    command: ["taskiq", "scheduler", "learnic.worker:broker"]
+    # reconcile_storage_quotas_task daily at 03:00 UTC) onto the
+    # broker. Worker side consumes them. MUST be single-replica:
+    # extra instances put the same tick into the queue N times.
+    command: ["taskiq", "scheduler", "learnic.worker:scheduler"]
+    deploy:
+      replicas: 1
     depends_on:
       postgres:
         condition: service_healthy

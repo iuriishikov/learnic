@@ -36,9 +36,10 @@ class TestHtmlContent:
     def test_accepts_valid(self) -> None:
         assert HtmlContent("<p>hi</p>").value == "<p>hi</p>"
 
-    def test_rejects_empty(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            HtmlContent("")
+    def test_accepts_empty_for_freshly_created_block(self) -> None:
+        # Authors create the block first and fill the body in the
+        # editor afterwards — empty payload must round-trip.
+        assert HtmlContent("").value == ""
 
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):
@@ -49,9 +50,10 @@ class TestKatexSource:
     def test_accepts_valid(self) -> None:
         assert KatexSource("E = mc^2").value == "E = mc^2"
 
-    def test_rejects_blank(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            KatexSource("   ")
+    def test_accepts_blank_for_freshly_created_block(self) -> None:
+        # Same pattern as HtmlContent — authors fill in the source
+        # after creating the block.
+        assert KatexSource("   ").value == "   "
 
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):
@@ -186,13 +188,13 @@ class TestChoiceOptionLabel:
     def test_accepts_typical(self) -> None:
         assert ChoiceOptionLabel("Yes").value == "Yes"
 
-    def test_rejects_empty(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            ChoiceOptionLabel("")
+    def test_accepts_empty_placeholder(self) -> None:
+        # Freshly created choice blocks ship with empty placeholder
+        # options the author fills in afterwards.
+        assert ChoiceOptionLabel("").value == ""
 
-    def test_rejects_blank(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            ChoiceOptionLabel("   ")
+    def test_accepts_blank_placeholder(self) -> None:
+        assert ChoiceOptionLabel("   ").value == "   "
 
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):
@@ -208,13 +210,13 @@ class TestAcceptedAnswer:
         # decides what to do with surrounding whitespace.
         assert AcceptedAnswer(" Paris ").value == " Paris "
 
-    def test_rejects_empty(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            AcceptedAnswer("")
+    def test_accepts_empty_placeholder(self) -> None:
+        # Freshly created text-input blocks ship with one empty
+        # placeholder answer the author fills in afterwards.
+        assert AcceptedAnswer("").value == ""
 
-    def test_rejects_blank(self) -> None:
-        with pytest.raises(EmptyBlockContentError):
-            AcceptedAnswer("   ")
+    def test_accepts_blank_placeholder(self) -> None:
+        assert AcceptedAnswer("   ").value == "   "
 
     def test_rejects_too_long(self) -> None:
         with pytest.raises(BlockContentTooLongError):

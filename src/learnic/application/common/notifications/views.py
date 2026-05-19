@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from learnic.application.common.persistence.user_ref import UserRefView
+from learnic.entities.billing.ids import PlanCode
 from learnic.entities.notification.enums import (
     NotificationCategory,
     NotificationKind,
@@ -132,12 +133,46 @@ class NewLoginView:
     session_revoked: bool
 
 
+@dataclass(slots=True, frozen=True)
+class StorageQuotaWarningView:
+    """Read-side projection of ``storage_quota_warning`` notifications.
+
+    Carries the snapshot of the user's quota state at the moment
+    the breach was detected. Numbers may drift before the panel is
+    opened — the SPA renders them as historical ("at the time of
+    detection") and re-fetches live state from
+    ``GET /users/me/subscription`` if it needs the current value.
+    """
+
+    plan_code: PlanCode
+    over_bytes: int
+    plan_limit_bytes: int
+    grace_until: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class StorageQuotaEnforcedView:
+    """Read-side projection of ``storage_quota_enforced`` notifications.
+
+    Records the outcome of one enforcement pass. The deletions are
+    soft (``files.deleted_at = now()``) so a support flow can
+    recover them while the file-lifecycle worker has not hard-
+    deleted them yet.
+    """
+
+    plan_code: PlanCode
+    deleted_files_count: int
+    freed_bytes: int
+
+
 NotificationDetailsView = (
     InviteSentView
     | InviteAcceptedView
     | InviteDeclinedView
     | AccessRevokedView
     | NewLoginView
+    | StorageQuotaWarningView
+    | StorageQuotaEnforcedView
 )
 
 

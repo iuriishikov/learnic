@@ -18,6 +18,7 @@ from enum import StrEnum
 
 import sqlalchemy as sa
 
+from learnic.entities.billing.constants import PLAN_CODE_MAX_LEN
 from learnic.entities.notification.enums import (
     NotificationCategory,
     NotificationKind,
@@ -348,6 +349,91 @@ notification_access_revoked_table = sa.Table(
     sa.CheckConstraint(
         f"kind = '{NotificationKind.ACCESS_REVOKED.value}'",
         name="ck_notif_access_revoked_kind",
+    ),
+)
+
+
+notification_storage_quota_warning_table = sa.Table(
+    "notification_storage_quota_warning",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "plan_code",
+        sa.String(PLAN_CODE_MAX_LEN),
+        nullable=False,
+    ),
+    sa.Column("over_bytes", sa.BigInteger, nullable=False),
+    sa.Column("plan_limit_bytes", sa.BigInteger, nullable=False),
+    sa.Column(
+        "grace_until",
+        sa.DateTime(timezone=True),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_storage_quota_warning_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.STORAGE_QUOTA_WARNING.value}'",
+        name="ck_notif_storage_quota_warning_kind",
+    ),
+)
+
+
+notification_storage_quota_enforced_table = sa.Table(
+    "notification_storage_quota_enforced",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "plan_code",
+        sa.String(PLAN_CODE_MAX_LEN),
+        nullable=False,
+    ),
+    sa.Column(
+        "deleted_files_count",
+        sa.Integer,
+        nullable=False,
+    ),
+    sa.Column("freed_bytes", sa.BigInteger, nullable=False),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_storage_quota_enforced_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.STORAGE_QUOTA_ENFORCED.value}'",
+        name="ck_notif_storage_quota_enforced_kind",
     ),
 )
 

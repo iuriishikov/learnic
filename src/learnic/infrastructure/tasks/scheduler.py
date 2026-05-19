@@ -6,9 +6,16 @@ from typing_extensions import override
 from learnic.application.common.email.components import EmailComponent
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.tasks.handlers.billing import (
+    reconcile_storage_quotas_task,
+)
 from learnic.infrastructure.tasks.handlers.email import send_email_task
 from learnic.infrastructure.tasks.handlers.example import example_task
+from learnic.infrastructure.tasks.handlers.file import (
+    purge_file_from_storage_task,
+)
 from learnic.infrastructure.tasks.handlers.web_push import send_web_push_task
 
 
@@ -30,6 +37,21 @@ class TaskSchedulerTaskIQ(TaskScheduler):
     @override
     async def schedule_example(self, payload: str) -> None:
         await example_task.kiq(payload)
+
+    @override
+    async def schedule_purge_file_from_storage(
+        self,
+        file_id: FileID,
+    ) -> None:
+        # @inject strips `handler` at runtime; .kiq stubs still see it.
+        await purge_file_from_storage_task.kiq(  # type: ignore[call-overload]
+            file_id,
+        )
+
+    @override
+    async def schedule_reconcile_storage_quotas(self) -> None:
+        # @inject strips `handler` at runtime; .kiq stubs still see it.
+        await reconcile_storage_quotas_task.kiq()  # type: ignore[call-overload]
 
     @override
     async def schedule_send_email(

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.file import FileView
+from learnic.application.common.persistence.file import FileMeta
 from learnic.entities.user.models import User, UserID
 
 
@@ -17,8 +17,8 @@ class UserView:
     patronymic: str | None
     is_verified: bool
     description: str | None
-    avatar: FileView | None
-    cover: FileView | None
+    avatar: FileMeta | None
+    cover: FileMeta | None
     website_url: str | None
     portfolio_url: str | None
     public_email: str | None
@@ -39,7 +39,7 @@ class UserSummaryView:
     last_name: str
     patronymic: str | None
     is_verified: bool
-    avatar: FileView | None
+    avatar: FileMeta | None
 
 
 class UserGateway(Protocol):

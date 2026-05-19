@@ -25,7 +25,7 @@ check:
     poetry run bandit -c pyproject.toml -r src
     poetry run semgrep scan --config auto --error
 
-[doc("Start dev infra, sync .env, run app + worker with reload")]
+[doc("Start dev infra, sync .env, run app + worker + scheduler with reload")]
 dev-up:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -39,6 +39,7 @@ dev-up:
     poetry run alembic upgrade head
     poetry run uvicorn learnic.web:create_app_production --factory --reload &
     poetry run taskiq worker learnic.worker:broker --reload &
+    poetry run taskiq scheduler learnic.worker:scheduler &
     wait
 
 [doc("Stop dev infra (keeps volumes)")]

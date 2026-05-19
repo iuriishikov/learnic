@@ -1,17 +1,47 @@
 from datetime import datetime
-from typing import Annotated, Final, Self
+from typing import Annotated, Final, Literal, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
 from fastapi import Depends, Path, Request, status
 from fastapi_error_map import ErrorAwareRouter
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
+from learnic.application.commands.course_block.check_answer import (
+    CheckBlockAnswerCommand,
+    CheckBlockAnswerCommandHandler,
+    MultiChoiceAnswerPayload,
+    SingleChoiceAnswerPayload,
+    TextAnswerPayload,
+)
+from learnic.application.commands.course_block.reveal_answer import (
+    RevealBlockAnswerCommand,
+    RevealBlockAnswerCommandHandler,
+    RevealedMultiChoice,
+    RevealedSingleChoice,
+    RevealedTextAnswers,
+)
 from learnic.application.commands.course_release.create import (
     CreateCourseReleaseCommand,
     CreateCourseReleaseCommandHandler,
 )
-from learnic.application.common.errors import EntityNotFoundError
+from learnic.application.common.errors import (
+    EntityNotFoundError,
+    WrongBlockTypeError,
+)
+from learnic.application.common.persistence.course_content import (
+    CodeBlockView,
+    FileBlockView,
+    HtmlBlockView,
+    KatexBlockView,
+    LessonBlockView,
+    MultiChoiceBlockView,
+    PhotoCollageBlockView,
+    RutubeVideoBlockView,
+    SingleChoiceBlockView,
+    TextInputBlockView,
+    VideoFileBlockView,
+)
 from learnic.application.common.persistence.course_release import (
     CourseReleaseContentView,
     CourseReleaseSummaryView,
@@ -30,6 +60,8 @@ from learnic.application.queries.course_release.list_for_product import (
     ListCourseReleasesQuery,
     ListCourseReleasesQueryHandler,
 )
+from learnic.entities.course_block.enums import BlockType
+from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
 from learnic.entities.course_release.constants import RELEASE_NOTES_MAX_LEN
 from learnic.entities.course_release.enums import CourseReleaseKind
 from learnic.entities.course_release.ids import CourseReleaseID
@@ -45,11 +77,20 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_OWNER_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
     PRODUCT_DOES_NOT_SUPPORT_RULE,
+    WRONG_BLOCK_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.course_content import (
+    ChoiceOptionSchema,
+    CodeBlockSchema,
     CourseDraftLessonSchema,
     CourseDraftModuleSchema,
+    FileBlockSchema,
+    HtmlBlockSchema,
+    KatexBlockSchema,
+    PhotoCollageBlockSchema,
+    RutubeVideoBlockSchema,
+    VideoFileBlockSchema,
     _block_view_to_schema,
 )
 
@@ -271,6 +312,334 @@ class CourseReleaseContentSchema(BaseModel):
         )
 
 
+# ============================== public block schemas ============================== #
+#
+# Student-facing projections of the three interactive answer blocks.
+# Strip ``correct_option_id`` / ``correct_option_ids`` / ``accepted_answers``
+# — those live server-side only. Passive blocks (html / katex / video /
+# code) carry no answer to hide and reuse their authoring schemas
+# verbatim.
+
+
+class PublicSingleChoiceBlockSchema(BaseModel):
+    """Single-choice block as exposed to a learner.
+
+    Carries the question options but NOT the correct id. The
+    learner submits a choice via the check endpoint; the server
+    answers ``is_correct`` without leaking the right answer.
+    """
+
+    type: Literal[BlockType.SINGLE_CHOICE] = Field(
+        default=BlockType.SINGLE_CHOICE,
+        description="Discriminator — always `single_choice`.",
+    )
+    oid: UUID
+    position: int
+    options: list[ChoiceOptionSchema]
+
+    @classmethod
+    def from_view(cls, view: SingleChoiceBlockView) -> Self:
+        return cls(
+            type=BlockType.SINGLE_CHOICE,
+            oid=view.oid,
+            position=view.position,
+            options=[ChoiceOptionSchema.from_view(o) for o in view.options],
+        )
+
+
+class PublicMultiChoiceBlockSchema(BaseModel):
+    """Multi-choice block as exposed to a learner (no correct set)."""
+
+    type: Literal[BlockType.MULTI_CHOICE] = Field(
+        default=BlockType.MULTI_CHOICE,
+        description="Discriminator — always `multi_choice`.",
+    )
+    oid: UUID
+    position: int
+    options: list[ChoiceOptionSchema]
+
+    @classmethod
+    def from_view(cls, view: MultiChoiceBlockView) -> Self:
+        return cls(
+            type=BlockType.MULTI_CHOICE,
+            oid=view.oid,
+            position=view.position,
+            options=[ChoiceOptionSchema.from_view(o) for o in view.options],
+        )
+
+
+class PublicTextInputBlockSchema(BaseModel):
+    """Text-input block as exposed to a learner.
+
+    Accepts the normalisation flags so the SPA can hint at casing
+    or whitespace expectations; the accepted-answer list itself is
+    server-side only.
+    """
+
+    type: Literal[BlockType.TEXT_INPUT] = Field(
+        default=BlockType.TEXT_INPUT,
+        description="Discriminator — always `text_input`.",
+    )
+    oid: UUID
+    position: int
+    case_sensitive: bool
+    trim_whitespace: bool
+
+    @classmethod
+    def from_view(cls, view: TextInputBlockView) -> Self:
+        return cls(
+            type=BlockType.TEXT_INPUT,
+            oid=view.oid,
+            position=view.position,
+            case_sensitive=view.case_sensitive,
+            trim_whitespace=view.trim_whitespace,
+        )
+
+
+_PublicLessonBlockSchemaUnion = (
+    HtmlBlockSchema
+    | KatexBlockSchema
+    | RutubeVideoBlockSchema
+    | CodeBlockSchema
+    | PublicSingleChoiceBlockSchema
+    | PublicMultiChoiceBlockSchema
+    | PublicTextInputBlockSchema
+    | FileBlockSchema
+    | VideoFileBlockSchema
+    | PhotoCollageBlockSchema
+)
+
+PublicLessonBlockSchema = Annotated[
+    _PublicLessonBlockSchemaUnion,
+    Discriminator("type"),
+]
+
+
+def _block_view_to_public_schema(
+    view: LessonBlockView,
+) -> _PublicLessonBlockSchemaUnion:
+    """Same dispatch as :func:`_block_view_to_schema` but strips secrets.
+
+    Passive blocks (html / katex / code / video) carry no answer
+    to hide and reuse their authoring schemas verbatim — only the
+    three interactive types get distinct public schemas.
+    """
+    if isinstance(view, HtmlBlockView):
+        return HtmlBlockSchema.from_view(view)
+    if isinstance(view, KatexBlockView):
+        return KatexBlockSchema.from_view(view)
+    if isinstance(view, CodeBlockView):
+        return CodeBlockSchema.from_view(view)
+    if isinstance(view, SingleChoiceBlockView):
+        return PublicSingleChoiceBlockSchema.from_view(view)
+    if isinstance(view, MultiChoiceBlockView):
+        return PublicMultiChoiceBlockSchema.from_view(view)
+    if isinstance(view, TextInputBlockView):
+        return PublicTextInputBlockSchema.from_view(view)
+    if isinstance(view, RutubeVideoBlockView):
+        return RutubeVideoBlockSchema.from_view(view)
+    if isinstance(view, FileBlockView):
+        return FileBlockSchema.from_view(view)
+    if isinstance(view, VideoFileBlockView):
+        return VideoFileBlockSchema.from_view(view)
+    if isinstance(view, PhotoCollageBlockView):
+        return PhotoCollageBlockSchema.from_view(view)
+    # mypy exhaustiveness — all variants of LessonBlockView are listed.
+    msg = f"unknown lesson block view: {type(view).__name__!r}"
+    raise RuntimeError(msg)
+
+
+class PublicReleaseLessonSchema(BaseModel):
+    """Lesson projection for the student-facing content tree."""
+
+    oid: UUID
+    title: str
+    position: int
+    blocks: list[PublicLessonBlockSchema]
+
+    @classmethod
+    def from_release_view(cls, view: ReleaseLessonView) -> Self:
+        return cls(
+            oid=view.oid,
+            title=view.title,
+            position=view.position,
+            blocks=[_block_view_to_public_schema(b) for b in view.blocks],
+        )
+
+
+class PublicReleaseModuleSchema(BaseModel):
+    """Module projection for the student-facing content tree."""
+
+    oid: UUID
+    title: str
+    description: str | None
+    position: int
+    lessons: list[PublicReleaseLessonSchema]
+
+    @classmethod
+    def from_release_view(cls, view: ReleaseModuleView) -> Self:
+        return cls(
+            oid=view.oid,
+            title=view.title,
+            description=view.description,
+            position=view.position,
+            lessons=[
+                PublicReleaseLessonSchema.from_release_view(ls) for ls in view.lessons
+            ],
+        )
+
+
+class PublicCourseReleaseContentSchema(BaseModel):
+    """Student-facing release content tree.
+
+    Same shape as :class:`CourseReleaseContentSchema` but the
+    interactive blocks inside don't carry their correct answers.
+    Use this for any endpoint a learner can hit; reserve the
+    authoring schema for endpoints behind ``READ_PRODUCT`` (i.e.
+    collaborators only).
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "release_id": "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d",
+                    "course_id": "3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8",
+                    "ordinal": 3,
+                    "version": {"major": 1, "minor": 1, "patch": 0},
+                    "kind": "minor",
+                    "notes": None,
+                    "released_at": "2026-05-01T10:00:00+00:00",
+                    "modules": [],
+                },
+            ],
+        },
+    )
+
+    release_id: UUID
+    course_id: UUID
+    ordinal: int
+    version: CourseReleaseVersionSchema
+    kind: CourseReleaseKind
+    notes: str | None
+    released_at: datetime
+    modules: list[PublicReleaseModuleSchema]
+
+    @classmethod
+    def from_view(cls, view: CourseReleaseContentView) -> Self:
+        return cls(
+            release_id=view.release_id,
+            course_id=view.product_id,
+            ordinal=view.ordinal,
+            version=CourseReleaseVersionSchema(
+                major=view.major,
+                minor=view.minor,
+                patch=view.patch,
+            ),
+            kind=view.kind,
+            notes=view.notes,
+            released_at=view.released_at,
+            modules=[
+                PublicReleaseModuleSchema.from_release_view(m) for m in view.modules
+            ],
+        )
+
+
+# ============================== check / reveal schemas ============================== #
+
+
+_BLOCK_ID_PATH: Final = Path(
+    description="Release-side block UUID (from the student content tree).",
+    examples=["d1e2f3a4-5b6c-4d7e-8f90-1a2b3c4d5e6f"],
+)
+
+
+class CheckSingleChoicePayload(BaseModel):
+    type: Literal[BlockType.SINGLE_CHOICE] = Field(
+        default=BlockType.SINGLE_CHOICE,
+    )
+    option_id: UUID = Field(
+        description="The id of the option the student picked.",
+    )
+
+
+class CheckMultiChoicePayload(BaseModel):
+    type: Literal[BlockType.MULTI_CHOICE] = Field(
+        default=BlockType.MULTI_CHOICE,
+    )
+    option_ids: list[UUID] = Field(
+        description=(
+            "The ids of options the student picked. Order does not "
+            "matter — server compares as a set."
+        ),
+        min_length=0,
+    )
+
+
+class CheckTextInputPayload(BaseModel):
+    type: Literal[BlockType.TEXT_INPUT] = Field(
+        default=BlockType.TEXT_INPUT,
+    )
+    answer: str = Field(
+        description="The text the student typed in. Sent verbatim.",
+        min_length=0,
+        max_length=2_000,
+    )
+
+
+CheckBlockAnswerSchema = Annotated[
+    CheckSingleChoicePayload | CheckMultiChoicePayload | CheckTextInputPayload,
+    Discriminator("type"),
+]
+
+
+class BlockCheckResultSchema(BaseModel):
+    """Response of ``POST .../check``. Only ``is_correct`` is exposed."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"is_correct": True}]},
+    )
+
+    is_correct: bool = Field(
+        description=(
+            "True iff the submission matches the block's correct "
+            "answer under the block's own comparison rules."
+        ),
+    )
+
+
+class RevealedSingleChoiceSchema(BaseModel):
+    type: Literal[BlockType.SINGLE_CHOICE] = Field(
+        default=BlockType.SINGLE_CHOICE,
+    )
+    option_id: UUID
+
+
+class RevealedMultiChoiceSchema(BaseModel):
+    type: Literal[BlockType.MULTI_CHOICE] = Field(
+        default=BlockType.MULTI_CHOICE,
+    )
+    option_ids: list[UUID]
+
+
+class RevealedTextAnswersSchema(BaseModel):
+    type: Literal[BlockType.TEXT_INPUT] = Field(
+        default=BlockType.TEXT_INPUT,
+    )
+    answers: list[str] = Field(
+        description=(
+            "All accepted spellings. The SPA can show them as a "
+            "spectrum (e.g. \"Paris\" / \"paris\")."
+        ),
+    )
+
+
+RevealedAnswerSchema = Annotated[
+    RevealedSingleChoiceSchema | RevealedMultiChoiceSchema | RevealedTextAnswersSchema,
+    Discriminator("type"),
+]
+
+
 # ============================== routes ============================== #
 
 
@@ -422,7 +791,7 @@ async def get_release_content(
     summary="Read the course content I'm enrolled in",
     operation_id="getMyCourseContent",
     dependencies=_AUTH_SECURITY,
-    response_model=CourseReleaseContentSchema,
+    response_model=PublicCourseReleaseContentSchema,
     error_map=AUTHENTICATED_MAP | {EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
 async def get_my_content(
@@ -430,7 +799,7 @@ async def get_my_content(
     interactor: FromDishka[GetMyCourseContentQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
-) -> CourseReleaseContentSchema:
+) -> PublicCourseReleaseContentSchema:
     """Return the pinned-release content for the calling student.
 
     Resolves the student's enrollment for ``product_id`` and
@@ -439,6 +808,11 @@ async def get_my_content(
     even if newer releases exist. Refunded enrollments are
     treated as no access (HTTP 404).
 
+    The blocks in the response are projected through the **public**
+    schema set: correct answers for interactive blocks are stripped
+    server-side. To check a submission or reveal an answer, see
+    ``POST .../release-blocks/{block_id}/check`` and ``.../reveal``.
+
     Args:
         request: Source of the access cookie.
         interactor: Injected handler.
@@ -446,9 +820,8 @@ async def get_my_content(
         course_id: Course product UUID.
 
     Returns:
-        :class:`CourseReleaseContentSchema` — the modules + lessons
-        + blocks tree of the student's pinned release. Same shape
-        as the author-facing release content.
+        :class:`PublicCourseReleaseContentSchema` — student-safe
+        projection of the pinned-release tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -463,4 +836,152 @@ async def get_my_content(
             product_id=ProductID(course_id),
         ),
     )
-    return CourseReleaseContentSchema.from_view(view)
+    return PublicCourseReleaseContentSchema.from_view(view)
+
+
+# ============================== check / reveal routes ============================== #
+
+
+def _to_command_payload(
+    payload: CheckSingleChoicePayload
+    | CheckMultiChoicePayload
+    | CheckTextInputPayload,
+) -> SingleChoiceAnswerPayload | MultiChoiceAnswerPayload | TextAnswerPayload:
+    if isinstance(payload, CheckSingleChoicePayload):
+        return SingleChoiceAnswerPayload(
+            option_id=ChoiceOptionID(payload.option_id),
+        )
+    if isinstance(payload, CheckMultiChoicePayload):
+        return MultiChoiceAnswerPayload(
+            option_ids=frozenset(
+                ChoiceOptionID(o) for o in payload.option_ids
+            ),
+        )
+    return TextAnswerPayload(answer=payload.answer)
+
+
+@student_router.post(
+    "/{course_id}/release-blocks/{block_id}/check",
+    summary="Submit an answer for an interactive block and learn correctness",
+    operation_id="checkBlockAnswer",
+    dependencies=_AUTH_SECURITY,
+    response_model=BlockCheckResultSchema,
+    error_map=AUTHENTICATED_MAP
+    | {
+        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def check_block_answer(
+    request: Request,
+    payload: CheckBlockAnswerSchema,
+    interactor: FromDishka[CheckBlockAnswerCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> BlockCheckResultSchema:
+    """Check the learner's submission against the server-side answer.
+
+    Wrong submissions return ``is_correct=false`` and nothing more —
+    the correct answer is not leaked. To see it, call the reveal
+    endpoint. Submitting a payload of the wrong shape for the block
+    yields 409.
+
+    Args:
+        request: Source of the access cookie.
+        payload: Discriminated union (single / multi / text) —
+            shape must match the block's type.
+        interactor: Injected handler.
+        auth: Injected authenticator.
+        course_id: Course product UUID.
+        block_id: Release-side block UUID.
+
+    Returns:
+        :class:`BlockCheckResultSchema` — ``{is_correct: bool}``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        EntityNotFoundError: HTTP 404 — block / product missing or
+            caller is not actively enrolled.
+        WrongBlockTypeError: HTTP 409 — payload shape doesn't fit
+            the block's type, or the block is not an answer block.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    result = await interactor.run(
+        CheckBlockAnswerCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            payload=_to_command_payload(payload),
+        ),
+    )
+    return BlockCheckResultSchema(is_correct=result.is_correct)
+
+
+def _to_reveal_schema(
+    answer: RevealedSingleChoice | RevealedMultiChoice | RevealedTextAnswers,
+) -> RevealedSingleChoiceSchema | RevealedMultiChoiceSchema | RevealedTextAnswersSchema:
+    if isinstance(answer, RevealedSingleChoice):
+        return RevealedSingleChoiceSchema(option_id=UUID(str(answer.option_id)))
+    if isinstance(answer, RevealedMultiChoice):
+        return RevealedMultiChoiceSchema(
+            option_ids=[UUID(str(o)) for o in answer.option_ids],
+        )
+    return RevealedTextAnswersSchema(answers=list(answer.answers))
+
+
+@student_router.post(
+    "/{course_id}/release-blocks/{block_id}/reveal",
+    summary="Reveal the correct answer for an interactive block",
+    operation_id="revealBlockAnswer",
+    dependencies=_AUTH_SECURITY,
+    response_model=RevealedAnswerSchema,
+    error_map=AUTHENTICATED_MAP
+    | {
+        EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def reveal_block_answer(
+    request: Request,
+    interactor: FromDishka[RevealBlockAnswerCommandHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> (
+    RevealedSingleChoiceSchema
+    | RevealedMultiChoiceSchema
+    | RevealedTextAnswersSchema
+):
+    """Reveal the correct answer to a learner who has given up.
+
+    Reveal is intentionally a separate explicit action — returning
+    the correct answer alongside a wrong check response would be a
+    one-shot backdoor. Calling reveal is recorded (in future
+    versions) as an explicit give-up signal.
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected handler.
+        auth: Injected authenticator.
+        course_id: Course product UUID.
+        block_id: Release-side block UUID.
+
+    Returns:
+        Discriminated reveal payload matching the block type.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        EntityNotFoundError: HTTP 404 — block / product missing or
+            caller is not actively enrolled.
+        WrongBlockTypeError: HTTP 409 — block isn't an answer block.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    answer = await interactor.run(
+        RevealBlockAnswerCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+        ),
+    )
+    return _to_reveal_schema(answer)

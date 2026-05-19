@@ -1,6 +1,8 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
+from learnic.entities.billing.ids import PlanCode
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
@@ -116,3 +118,42 @@ class NewLoginDetails(NotificationDetails):
     user_agent: str | None
     ip_address: str | None
     session_id: uuid.UUID
+
+
+@dataclass(slots=True)
+class StorageQuotaWarningDetails(NotificationDetails):
+    """Body for the ``storage_quota_warning`` notification.
+
+    Emitted by the reconciliation job when an author's used bytes
+    first exceed their plan cap. Carries the snapshot the SPA needs
+    to render a precise message — "You are over the FREE 2 GB cap
+    by 1.4 GB. Free up space before <grace_until> or we will delete
+    the most recently uploaded files." ``plan_code`` reflects the
+    plan at detection, not at the moment the user opens the panel
+    — drift between the two is informational copy, not an action
+    decision.
+    """
+
+    plan_code: PlanCode
+    over_bytes: int
+    plan_limit_bytes: int
+    grace_until: datetime
+
+
+@dataclass(slots=True)
+class StorageQuotaEnforcedDetails(NotificationDetails):
+    """Body for the ``storage_quota_enforced`` notification.
+
+    Emitted after the reconciliation job has soft-deleted the
+    overflow because the grace period expired without the user
+    bringing their usage under cap. ``deleted_files_count`` and
+    ``freed_bytes`` describe what was actually removed in this
+    enforcement pass; ``plan_code`` is informational. The panel
+    card is read-only — recovery (un-delete) is a support flow
+    while the soft-deleted rows still exist; eventual hard-delete
+    by the file-lifecycle worker is irreversible.
+    """
+
+    plan_code: PlanCode
+    deleted_files_count: int
+    freed_bytes: int

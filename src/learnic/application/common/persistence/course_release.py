@@ -5,6 +5,8 @@ from typing import Protocol
 from learnic.application.common.persistence.course_content import (
     LessonBlockView,
 )
+from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.models import LessonBlock
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_module.ids import CourseModuleID
 from learnic.entities.course_release.enums import CourseReleaseKind
@@ -31,6 +33,28 @@ class CourseReleaseGateway(Protocol):
     ) -> CourseRelease | None:
         """Return the highest-``ordinal`` release of the product or ``None``."""
         ...
+
+
+class CourseReleaseBlockGateway(Protocol):
+    """Read-side lookup for a single block inside a release snapshot.
+
+    Used by check/reveal handlers — the student-facing flow needs
+    a one-off load of an interactive block (without walking the
+    whole content tree). Returns the same ``LessonBlock`` domain
+    entity as the draft-side gateway so business logic (e.g.
+    ``block.check(payload)``) is type-agnostic about where the
+    block came from.
+
+    ``product_id`` on the returned entity is the **product** the
+    release belongs to — that is what the handler uses to verify
+    the caller's enrollment. ``lesson_id`` is the release-side
+    lesson id and is not consumed by the check flow.
+    """
+
+    async def with_id(
+        self,
+        oid: LessonBlockID,
+    ) -> LessonBlock | None: ...
 
 
 class CourseReleaseSnapshotter(Protocol):

@@ -26,14 +26,6 @@ class EmailNotVerifiedError(ApplicationError):
     """Raised when a user attempts to authenticate before verifying email."""
 
 
-class UserAvatarNotFoundError(ApplicationError):
-    """Raised when a user exists but has no avatar attached."""
-
-
-class UserCoverNotFoundError(ApplicationError):
-    """Raised when a user exists but has no cover attached."""
-
-
 class NotResourceOwnerError(ApplicationError):
     """Raised when a user attempts an operation on a resource they don't own.
 
@@ -135,6 +127,57 @@ class WrongBlockTypeError(ApplicationError):
         self.block_id = block_id
         self.expected = expected
         self.actual = actual
+
+
+class WrongFileContentTypeError(ApplicationError):
+    """Raised when a file's stored ``content_type`` doesn't match the slot.
+
+    A file-backed block enforces a content-type prefix at construction
+    time (``video/`` for video-file blocks, ``image/`` for collage
+    items). The check happens server-side against ``files.content_type``
+    — the client cannot lie its way past it by mislabelling the upload.
+    Surfaces as HTTP 415 Unsupported Media Type.
+    """
+
+    def __init__(
+        self,
+        file_id: object,
+        expected_prefix: str,
+        actual: str,
+    ) -> None:
+        super().__init__(
+            f"File {file_id!r} has content_type {actual!r}, "
+            f"expected to start with {expected_prefix!r}",
+        )
+        self.file_id = file_id
+        self.expected_prefix = expected_prefix
+        self.actual = actual
+
+
+class StorageQuotaExceededError(ApplicationError):
+    """Raised when a user's storage usage would exceed the plan limit.
+
+    Carries the plan code, current usage in bytes, the size of the
+    attempted upload, and the plan's storage cap so the SPA can render
+    a precise message ("0.4 GB attempted on a 2 GB FREE plan, 1.7 GB
+    already used"). Surfaces as HTTP 413 Payload Too Large.
+    """
+
+    def __init__(
+        self,
+        plan_code: str,
+        used_bytes: int,
+        attempted_bytes: int,
+        limit_bytes: int,
+    ) -> None:
+        super().__init__(
+            f"Plan {plan_code!r} cap is {limit_bytes} bytes; "
+            f"{used_bytes} already used and {attempted_bytes} attempted",
+        )
+        self.plan_code = plan_code
+        self.used_bytes = used_bytes
+        self.attempted_bytes = attempted_bytes
+        self.limit_bytes = limit_bytes
 
 
 class CrossCourseLessonMoveError(ApplicationError):

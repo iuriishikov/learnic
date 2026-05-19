@@ -45,12 +45,81 @@ _MASKED_EMAIL_DESCRIPTION = (
 
 
 class FileSchema(BaseModel):
-    """Reference to a file resource owned by the API.
+    """Reference to a file resource with a ready-to-use presigned URL.
 
-    Returned whenever an endpoint produces or owns a file — avatar and
-    cover uploads today; course banners, message attachments, etc. in
-    the future. Start with just the identifier; grow with extra fields
-    (URL, MIME, size) as concrete endpoints need them.
+    Surfaced everywhere the API embeds a file — avatars, covers,
+    user-experience icons, lesson-block uploads. The ``url`` is a
+    short-lived presigned-storage URL: the SPA renders it directly
+    with ``<img>`` / ``<video>`` / download links, no extra round-
+    trip needed. Re-fetch the parent resource to refresh the URL
+    when it expires (the URL's TTL is implementation-defined and
+    typically 1 hour).
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "content_type": "image/jpeg",
+                    "size_bytes": 184_320,
+                    "url": (
+                        "https://s3.example.com/learnic/avatars/"
+                        "ada.jpg?X-Amz-Signature=..."
+                    ),
+                },
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description=(
+            "Server-generated UUID identifying the stored file. Stable "
+            "across requests; use it for client-side cache keys."
+        ),
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    content_type: str = Field(
+        description=(
+            "MIME type recorded at upload time. Useful when the same "
+            "field can hold multiple types (a lesson-file block accepts "
+            "PDFs, archives, slide decks — the SPA branches on the "
+            "type to render a preview or a download tile)."
+        ),
+        examples=["image/jpeg", "video/mp4", "application/pdf"],
+    )
+    size_bytes: int = Field(
+        description=(
+            "Stored size in bytes. Surfaced so the SPA can render a "
+            "human-readable size next to the file without a separate "
+            "HEAD request."
+        ),
+        ge=1,
+        examples=[184_320, 52_428_800],
+    )
+    url: str = Field(
+        description=(
+            "Short-lived presigned-storage URL. Browser clients fetch "
+            "it directly via `<img>` / `<video>` / download links. "
+            "The URL expires; re-fetch the parent resource to get a "
+            "fresh one."
+        ),
+        examples=[
+            "https://s3.example.com/learnic/avatars/ada.jpg?X-Amz-Signature=...",
+        ],
+    )
+
+
+class UploadedFileSchema(BaseModel):
+    """Confirmation envelope returned by file-upload endpoints.
+
+    Carries only the freshly-created file's id. The full
+    :class:`FileSchema` with presigned URL is delivered by the parent
+    resource (avatar / cover lives on :class:`UserSchema`, product
+    cover on :class:`ProductSchema`, etc.) — the client should
+    refetch that resource after upload rather than locking onto a
+    URL the upload response would have to sign in advance.
     """
 
     model_config = ConfigDict(
@@ -62,11 +131,7 @@ class FileSchema(BaseModel):
     )
 
     oid: UUID = Field(
-        description=(
-            "Server-generated UUID identifying the stored file. Use it "
-            "to fetch presigned download URLs from the appropriate "
-            "aggregate endpoint (e.g. `GET /users/{user_id}/avatar`)."
-        ),
+        description="Server-generated UUID of the newly stored file.",
         examples=["550e8400-e29b-41d4-a716-446655440000"],
     )
 
@@ -77,10 +142,13 @@ class UserSchema(BaseModel):
     The user's identity is exposed as a single ``full_name`` string
     (``Last First Patronymic``) plus a ``email`` masked through the
     canonical ``f*****d@domain.com`` form so the API never returns a
-    plain address.
+    plain address. ``avatar`` / ``cover`` are nested :class:`FileSchema`
+    objects with presigned URLs baked in — no follow-up file-fetch
+    endpoint needed.
     """
 
     model_config = ConfigDict(
+        from_attributes=True,
         json_schema_extra={
             "examples": [
                 {
@@ -89,8 +157,16 @@ class UserSchema(BaseModel):
                     "email": "a*****a@example.com",
                     "is_verified": True,
                     "description": "<p>Mathematician.</p>",
-                    "avatar_url": "https://s3.example.com/avatars/...",
-                    "cover_url": None,
+                    "avatar": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 184_320,
+                        "url": (
+                            "https://s3.example.com/avatars/"
+                            "ada.jpg?X-Amz-Signature=..."
+                        ),
+                    },
+                    "cover": None,
                 },
             ],
         },
@@ -136,27 +212,21 @@ class UserSchema(BaseModel):
         max_length=DESCRIPTION_MAX_LEN,
         examples=[None, "<p>Hello world.</p>"],
     )
-    avatar_url: str | None = Field(
+    avatar: FileSchema | None = Field(
+        default=None,
         description=(
-            "Short-lived presigned URL for the user's avatar, or "
-            "`null` when no avatar is attached. The URL expires; "
+            "Resolved avatar file with a short-lived presigned URL, "
+            "or `null` when no avatar is attached. The URL expires; "
             "re-fetch the user resource to get a fresh one."
         ),
-        examples=[
-            None,
-            "https://s3.example.com/avatars/user.png?X-Amz-Signature=...",
-        ],
     )
-    cover_url: str | None = Field(
+    cover: FileSchema | None = Field(
+        default=None,
         description=(
-            "Short-lived presigned URL for the user's cover image, or "
-            "`null` when no cover is attached. The URL expires; "
+            "Resolved cover image with a short-lived presigned URL, "
+            "or `null` when no cover is attached. The URL expires; "
             "re-fetch the user resource to get a fresh one."
         ),
-        examples=[
-            None,
-            "https://s3.example.com/covers/user.png?X-Amz-Signature=...",
-        ],
     )
     website_url: str | None = Field(
         description=(
@@ -190,19 +260,13 @@ class UserSchema(BaseModel):
 
     @classmethod
     def from_view(cls, view: UserOutput) -> Self:
-        """Build the schema from a ``GetUserQueryHandler`` output."""
-        return cls(
-            oid=view.oid,
-            full_name=view.full_name,
-            email=view.email,
-            is_verified=view.is_verified,
-            description=view.description,
-            avatar_url=view.avatar_url,
-            cover_url=view.cover_url,
-            website_url=view.website_url,
-            portfolio_url=view.portfolio_url,
-            public_email=view.public_email,
-        )
+        """Build the schema from a ``GetUserQueryHandler`` output.
+
+        Pydantic does the heavy lifting through ``from_attributes=True``;
+        the method exists for caller-side discoverability and stays
+        cheap. Use :meth:`model_validate` directly if you prefer.
+        """
+        return cls.model_validate(view)
 
 
 class UserSummarySchema(BaseModel):
@@ -217,13 +281,19 @@ class UserSummarySchema(BaseModel):
     """
 
     model_config = ConfigDict(
+        from_attributes=True,
         json_schema_extra={
             "examples": [
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
                     "full_name": "Lovelace Ada",
                     "is_verified": True,
-                    "avatar_url": "https://s3.example.com/avatars/...",
+                    "avatar": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 184_320,
+                        "url": "https://s3.example.com/avatars/...",
+                    },
                 },
             ],
         },
@@ -251,27 +321,19 @@ class UserSummarySchema(BaseModel):
         ),
         examples=[True, False],
     )
-    avatar_url: str | None = Field(
+    avatar: FileSchema | None = Field(
+        default=None,
         description=(
-            "Short-lived presigned URL for the user's avatar, or "
-            "`null` when no avatar is attached. The URL expires; "
+            "Resolved avatar file with a short-lived presigned URL, "
+            "or `null` when no avatar is attached. The URL expires; "
             "re-issue the search to get a fresh one."
         ),
-        examples=[
-            None,
-            "https://s3.example.com/avatars/user.png?X-Amz-Signature=...",
-        ],
     )
 
     @classmethod
     def from_view(cls, view: UserSummaryOutput) -> Self:
         """Build the schema from a ``SearchUsersQueryHandler`` hit."""
-        return cls(
-            oid=view.oid,
-            full_name=view.full_name,
-            is_verified=view.is_verified,
-            avatar_url=view.avatar_url,
-        )
+        return cls.model_validate(view)
 
 
 class UserRefSchema(BaseModel):

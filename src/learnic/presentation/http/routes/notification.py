@@ -269,12 +269,102 @@ class NewLoginDetailsSchema(BaseModel):
     )
 
 
+class StorageQuotaWarningDetailsSchema(BaseModel):
+    """Body of a ``storage_quota_warning`` notification.
+
+    Emitted by the daily reconcile job when an author's used bytes
+    first exceed their plan cap. The SPA renders a card like
+    "You are over the FREE 2 GB cap by 1.4 GB. Free up space or
+    upgrade before <grace_until> or we will delete the most
+    recently uploaded files." All four numbers are a **snapshot at
+    detection** — for live state the SPA falls back to
+    ``GET /users/me/subscription``.
+    """
+
+    type: Literal["storage_quota_warning"] = Field(
+        default="storage_quota_warning",
+        description="Discriminator.",
+    )
+    plan_code: str = Field(
+        description=(
+            "Plan of the author at the moment the breach was "
+            "detected. Stable token (``FREE`` / ``BETA`` / ...)."
+        ),
+        examples=["FREE", "BETA"],
+    )
+    over_bytes: int = Field(
+        description=(
+            "How many bytes above the plan cap the author was at "
+            "detection. Drifts over time as the author uploads / "
+            "deletes; treat as historical."
+        ),
+        examples=[1503238553],
+        ge=0,
+    )
+    plan_limit_bytes: int = Field(
+        description="Plan cap captured at detection.",
+        examples=[2147483648],
+        ge=0,
+    )
+    grace_until: datetime = Field(
+        description=(
+            "ISO 8601 timestamp (UTC) — after this point the next "
+            "reconcile pass soft-deletes the overflow newest-first "
+            "until the author is back under cap. Computed as "
+            "``detected_at + OVER_QUOTA_GRACE_PERIOD_DAYS`` and "
+            "stable for the lifetime of the breach."
+        ),
+        examples=["2026-06-03T03:00:00+00:00"],
+    )
+
+
+class StorageQuotaEnforcedDetailsSchema(BaseModel):
+    """Body of a ``storage_quota_enforced`` notification.
+
+    Sent after the grace period expired and the reconcile job
+    soft-deleted the overflow. The card is informational — files
+    in the DB are flagged ``deleted_at != NULL`` and the
+    S3-purge worker physically removes the blobs. Recovery is a
+    support flow while the rows still exist.
+    """
+
+    type: Literal["storage_quota_enforced"] = Field(
+        default="storage_quota_enforced",
+        description="Discriminator.",
+    )
+    plan_code: str = Field(
+        description="Plan the author was on when enforcement ran.",
+        examples=["FREE", "BETA"],
+    )
+    deleted_files_count: int = Field(
+        description=(
+            "Number of files soft-deleted in this enforcement pass. "
+            "Picked newest-first across the author's courses; files "
+            "referenced from older blocks are preserved when the "
+            "freed total reaches the overage."
+        ),
+        examples=[7],
+        ge=0,
+    )
+    freed_bytes: int = Field(
+        description=(
+            "Total size in bytes of the soft-deleted files. May "
+            "exceed the overage at detection time — the loop stops "
+            "at the first file whose inclusion crosses the cap."
+        ),
+        examples=[1610612736],
+        ge=0,
+    )
+
+
 NotificationDetailsSchema = Annotated[
     InviteSentDetailsSchema
     | InviteAcceptedDetailsSchema
     | InviteDeclinedDetailsSchema
     | AccessRevokedDetailsSchema
-    | NewLoginDetailsSchema,
+    | NewLoginDetailsSchema
+    | StorageQuotaWarningDetailsSchema
+    | StorageQuotaEnforcedDetailsSchema,
     Field(discriminator="type"),
 ]
 

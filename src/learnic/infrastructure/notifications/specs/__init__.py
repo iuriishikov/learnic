@@ -37,6 +37,12 @@ from learnic.infrastructure.notifications.specs.invite_sent import (
 from learnic.infrastructure.notifications.specs.new_login import (
     NewLoginSpec,
 )
+from learnic.infrastructure.notifications.specs.storage_quota_enforced import (
+    StorageQuotaEnforcedSpec,
+)
+from learnic.infrastructure.notifications.specs.storage_quota_warning import (
+    StorageQuotaWarningSpec,
+)
 
 
 def default_registry() -> NotificationKindRegistry:
@@ -47,6 +53,8 @@ def default_registry() -> NotificationKindRegistry:
         InviteDeclinedSpec(),
         AccessRevokedSpec(),
         NewLoginSpec(),
+        StorageQuotaWarningSpec(),
+        StorageQuotaEnforcedSpec(),
     ]
     return NotificationKindRegistry(specs)
 
@@ -57,5 +65,7 @@ __all__ = [
     "InviteDeclinedSpec",
     "InviteSentSpec",
     "NewLoginSpec",
+    "StorageQuotaEnforcedSpec",
+    "StorageQuotaWarningSpec",
     "default_registry",
 ]
