@@ -50,6 +50,7 @@ from learnic.application.common.notifications.channels import (
 )
 from learnic.application.common.notifications.views import (
     CollaborationSnapshotView,
+    GiftSnapshotView,
     NotificationDetailsView,
     ProductRefView,
 )
@@ -66,6 +67,7 @@ from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 D = TypeVar("D", bound=NotificationDetails, contravariant=True)
@@ -88,6 +90,7 @@ class RefRequest:
     product_ids: set[ProductID] = field(default_factory=set)
     user_ids: set[UserID] = field(default_factory=set)
     collaboration_ids: set[ProductCollaborationID] = field(default_factory=set)
+    gift_ids: set[ProductGiftID] = field(default_factory=set)
     products_needing_manage_perm: set[ProductID] = field(default_factory=set)
     session_family_ids: set[uuid.UUID] = field(default_factory=set)
 
@@ -95,6 +98,7 @@ class RefRequest:
         self.product_ids |= other.product_ids
         self.user_ids |= other.user_ids
         self.collaboration_ids |= other.collaboration_ids
+        self.gift_ids |= other.gift_ids
         self.products_needing_manage_perm |= other.products_needing_manage_perm
         self.session_family_ids |= other.session_family_ids
 
@@ -141,6 +145,7 @@ class ResolvedRefs:
         ProductCollaborationID,
         CollaborationSnapshotView,
     ] = field(default_factory=dict)
+    gifts: dict[ProductGiftID, GiftSnapshotView] = field(default_factory=dict)
     manage_perms: dict[ProductID, bool] = field(default_factory=dict)
     session_active: dict[uuid.UUID, bool] = field(default_factory=dict)
 
@@ -155,6 +160,9 @@ class ResolvedRefs:
         oid: ProductCollaborationID,
     ) -> CollaborationSnapshotView | None:
         return self.collaborations.get(oid)
+
+    def gift(self, oid: ProductGiftID) -> GiftSnapshotView | None:
+        return self.gifts.get(oid)
 
     def can_manage(self, product_id: ProductID) -> bool:
         return self.manage_perms.get(product_id, False)

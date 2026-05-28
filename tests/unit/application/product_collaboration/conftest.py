@@ -77,6 +77,7 @@ def fake_collab_gateway() -> AsyncMock:
     gw.active_for_product_and_user = AsyncMock(return_value=None)
     gw.pending_for_product_and_email = AsyncMock(return_value=None)
     gw.count_email_invites_by_actor_since = AsyncMock(return_value=0)
+    gw.delete_expired_pending_invites = AsyncMock(return_value=0)
     return gw
 
 

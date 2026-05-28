@@ -1,3 +1,4 @@
+from collections.abc import Iterable, Sequence
 from typing import Any, Final
 
 import sqlalchemy as sa
@@ -8,7 +9,7 @@ from learnic.application.common.persistence.course_block import (
     LessonBlockGateway,
 )
 from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.ids import CollageItemID, LessonBlockID
 from learnic.entities.course_block.models import (
     ChoiceOption,
     CodeBlock,
@@ -27,6 +28,7 @@ from learnic.entities.course_block.models import (
 )
 from learnic.entities.course_block.value_objects import AcceptedAnswer
 from learnic.entities.course_lesson.ids import CourseLessonID
+from learnic.entities.file.ids import FileID
 from learnic.infrastructure.persistence.blocks.registry import (
     _common_from_row,
     spec_for_row,
@@ -39,6 +41,7 @@ from learnic.infrastructure.persistence.models.course_block import (
     lesson_blocks_table,
     multi_choice_blocks_table,
     photo_collage_blocks_table,
+    photo_collage_items_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
@@ -68,25 +71,23 @@ def _accepted_answers_to_jsonb(answers: list[AcceptedAnswer]) -> list[str]:
     return [a.value for a in answers]
 
 
-def _collage_items_to_jsonb(
-    items: list[CollageItem],
-) -> list[dict[str, Any]]:
-    """Serialize collage items into JSONB-friendly dicts.
+def _collage_item_to_payload_dict(item: CollageItem) -> dict[str, Any]:
+    """Serialize one :class:`CollageItem` into the canonical payload dict.
 
-    Shape mirrors what ``_jsonb_to_collage_items`` reads back: per-item
-    ``file_id`` is stringified UUID (or ``None`` if the file was purged)
-    and ``caption`` is the raw VO value (or ``None`` for captionless
-    items).
+    Shape is the ``{"oid", "file_id", "caption"}`` triple consumed by
+    :func:`collage_items_payload_to_domain` /
+    :func:`collage_items_payload_to_views` so reads and writes stay
+    in sync. Used by the draft-side composition that re-shapes
+    ``photo_collage_items_table`` rows into the payload list the
+    registry expects, and by the release snapshot writer.
     """
-    return [
-        {
-            "file_id": str(item.file_id) if item.file_id is not None else None,
-            "caption": (
-                item.caption.value if item.caption is not None else None
-            ),
-        }
-        for item in items
-    ]
+    return {
+        "oid": str(item.oid),
+        "file_id": str(item.file_id) if item.file_id is not None else None,
+        "caption": (
+            item.caption.value if item.caption is not None else None
+        ),
+    }
 
 
 def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
@@ -99,6 +100,104 @@ def _row_to_block(row: sa.Row[Any]) -> LessonBlock:
     """
     spec = spec_for_row(row)
     return spec.row_to_entity(row, _common_from_row(row))
+
+
+async def _load_collage_items_by_block(
+    session: AsyncSession,
+    block_ids: Iterable[LessonBlockID],
+) -> dict[LessonBlockID, list[dict[str, Any]]]:
+    """Batch-load items rows for the given block ids, grouped by block.
+
+    Returns a mapping of ``block_id -> [item dict, ...]`` in
+    ``position`` order. Each item dict matches the canonical
+    ``{"oid", "file_id", "caption"}`` payload shape the registry's
+    photo-collage dispatchers expect.
+    """
+    ids = list(block_ids)
+    if not ids:
+        return {}
+    stmt = (
+        sa.select(
+            photo_collage_items_table.c.oid,
+            photo_collage_items_table.c.block_id,
+            photo_collage_items_table.c.file_id,
+            photo_collage_items_table.c.caption,
+        )
+        .where(photo_collage_items_table.c.block_id.in_(ids))
+        .order_by(
+            photo_collage_items_table.c.block_id.asc(),
+            photo_collage_items_table.c.position.asc(),
+        )
+    )
+    rows = (await session.execute(stmt)).all()
+    out: dict[LessonBlockID, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(LessonBlockID(row.block_id), []).append(
+            {
+                "oid": str(row.oid),
+                "file_id": (
+                    str(row.file_id) if row.file_id is not None else None
+                ),
+                "caption": row.caption,
+            },
+        )
+    return out
+
+
+def _attach_collage_items(
+    rows: Sequence[sa.Row[Any]],
+    items_by_block: dict[LessonBlockID, list[dict[str, Any]]],
+) -> list[sa.Row[Any]]:
+    """Stash the loaded items payload onto each photo-collage row.
+
+    Each row's ``photo_collage_items`` attribute is replaced with the
+    canonical payload list so the registry's existing
+    ``_photo_collage_row_to_entity`` /
+    ``_photo_collage_row_to_view`` keep working without conditional
+    logic per source (draft vs release).
+
+    SA ``Row`` objects are immutable. We wrap each candidate row in a
+    thin shim that overrides only ``photo_collage_items`` and proxies
+    everything else to the underlying row.
+    """
+    out: list[sa.Row[Any]] = []
+    for row in rows:
+        block_type = row.type
+        block_type = (
+            block_type if isinstance(block_type, BlockType) else BlockType(block_type)
+        )
+        if block_type is not BlockType.PHOTO_COLLAGE:
+            out.append(row)
+            continue
+        items = items_by_block.get(LessonBlockID(row.oid), [])
+        out.append(_RowWithCollageItems(row, items))  # type: ignore[arg-type]
+    return out
+
+
+class _RowWithCollageItems:
+    """Read-only proxy that overrides ``photo_collage_items`` on a row.
+
+    Used by :func:`_attach_collage_items` so the existing registry
+    dispatchers see a payload list under the same attribute name they
+    already read on the release side.
+    """
+
+    __slots__ = ("_row", "_items")
+
+    def __init__(
+        self,
+        row: sa.Row[Any],
+        items: list[dict[str, Any]],
+    ) -> None:
+        self._row = row
+        self._items = items
+
+    @property
+    def photo_collage_items(self) -> list[dict[str, Any]]:
+        return self._items
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._row, name)
 
 
 def _select_blocks() -> sa.Select[Any]:
@@ -136,7 +235,6 @@ def _select_blocks() -> sa.Select[Any]:
         file_blocks_table.c.title.label("file_block_title"),
         video_file_blocks_table.c.file_id.label("video_file_block_file_id"),
         video_file_blocks_table.c.title.label("video_file_block_title"),
-        photo_collage_blocks_table.c["items"].label("photo_collage_items"),
         photo_collage_blocks_table.c.title.label("photo_collage_title"),
     ).select_from(
         lesson_blocks_table.outerjoin(
@@ -195,7 +293,12 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
         row = (await self._session.execute(stmt)).one_or_none()
         if row is None:
             return None
-        return _row_to_block(row)
+        items_by_block = await _load_collage_items_by_block(
+            self._session,
+            (LessonBlockID(row.oid),),
+        )
+        (attached,) = _attach_collage_items([row], items_by_block)
+        return _row_to_block(attached)
 
     @override
     async def list_for_lesson(
@@ -208,7 +311,12 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
             .order_by(lesson_blocks_table.c.position.asc())
         )
         rows = (await self._session.execute(stmt)).all()
-        return [_row_to_block(row) for row in rows]
+        items_by_block = await _load_collage_items_by_block(
+            self._session,
+            (LessonBlockID(row.oid) for row in rows),
+        )
+        attached = _attach_collage_items(rows, items_by_block)
+        return [_row_to_block(row) for row in attached]
 
     @override
     async def add_html(self, block: HtmlBlock) -> None:
@@ -553,24 +661,135 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
         await self._session.execute(
             sa.insert(photo_collage_blocks_table).values(
                 oid=block.oid,
-                items=_collage_items_to_jsonb(block.items),
                 title=block.title.value if block.title is not None else None,
             ),
         )
+        if block.items:
+            await self._session.execute(
+                sa.insert(photo_collage_items_table),
+                [
+                    {
+                        "oid": item.oid,
+                        "block_id": block.oid,
+                        "position": idx,
+                        "file_id": item.file_id,
+                        "caption": (
+                            item.caption.value
+                            if item.caption is not None
+                            else None
+                        ),
+                    }
+                    for idx, item in enumerate(block.items)
+                ],
+            )
 
     @override
-    async def update_photo_collage(self, block: PhotoCollageBlock) -> None:
+    async def add_photo_collage_item(
+        self,
+        block: PhotoCollageBlock,
+        item: CollageItem,
+    ) -> None:
+        position = len(block.items) - 1
+        await self._session.execute(
+            sa.insert(photo_collage_items_table).values(
+                oid=item.oid,
+                block_id=block.oid,
+                position=position,
+                file_id=item.file_id,
+                caption=(
+                    item.caption.value if item.caption is not None else None
+                ),
+            ),
+        )
+        await self._touch_collage_parent(block.oid)
+
+    @override
+    async def remove_photo_collage_item(
+        self,
+        block: PhotoCollageBlock,
+        item_id: CollageItemID,
+    ) -> None:
+        await self._session.execute(
+            sa.delete(photo_collage_items_table).where(
+                photo_collage_items_table.c.oid == item_id,
+            ),
+        )
+        await self._repack_collage_positions(block)
+        await self._touch_collage_parent(block.oid)
+
+    @override
+    async def reorder_photo_collage_items(
+        self,
+        block: PhotoCollageBlock,
+    ) -> None:
+        await self._repack_collage_positions(block)
+        await self._touch_collage_parent(block.oid)
+
+    @override
+    async def update_photo_collage_item_caption(
+        self,
+        block: PhotoCollageBlock,
+        item_id: CollageItemID,
+    ) -> None:
+        target = next(it for it in block.items if it.oid == item_id)
+        await self._session.execute(
+            sa.update(photo_collage_items_table)
+            .where(photo_collage_items_table.c.oid == item_id)
+            .values(
+                caption=(
+                    target.caption.value
+                    if target.caption is not None
+                    else None
+                ),
+            ),
+        )
+        await self._touch_collage_parent(block.oid)
+
+    @override
+    async def update_photo_collage_title(
+        self,
+        block: PhotoCollageBlock,
+    ) -> None:
         await self._session.execute(
             sa.update(photo_collage_blocks_table)
             .where(photo_collage_blocks_table.c.oid == block.oid)
             .values(
-                items=_collage_items_to_jsonb(block.items),
                 title=block.title.value if block.title is not None else None,
             ),
         )
+        await self._touch_collage_parent(block.oid)
+
+    async def _repack_collage_positions(
+        self,
+        block: PhotoCollageBlock,
+    ) -> None:
+        """Rewrite ``position`` on every items row from ``block.items``.
+
+        The ``UNIQUE(block_id, position)`` constraint is deferred-
+        unfriendly inside one ``UPDATE`` (each new value would collide
+        with the existing row at the same target index mid-statement),
+        so the rewrite happens via a ``CASE WHEN`` expression: every
+        affected row gets its new index in one update, evaluated
+        atomically.
+        """
+        if not block.items:
+            return
+        whens: dict[Any, int] = {
+            item.oid: idx for idx, item in enumerate(block.items)
+        }
+        case_expr = sa.case(whens, value=photo_collage_items_table.c.oid)
+        ids = [item.oid for item in block.items]
+        await self._session.execute(
+            sa.update(photo_collage_items_table)
+            .where(photo_collage_items_table.c.block_id == block.oid)
+            .where(photo_collage_items_table.c.oid.in_(ids))
+            .values(position=case_expr),
+        )
+
+    async def _touch_collage_parent(self, oid: LessonBlockID) -> None:
         await self._session.execute(
             sa.update(lesson_blocks_table)
-            .where(lesson_blocks_table.c.oid == block.oid)
+            .where(lesson_blocks_table.c.oid == oid)
             .values(updated_at=sa.func.now()),
         )
 
@@ -581,6 +800,34 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
             sa.delete(lesson_blocks_table).where(
                 lesson_blocks_table.c.oid == oid,
             ),
+        )
+
+    @override
+    async def remove_file_from_collages(
+        self,
+        file_id: FileID,
+    ) -> None:
+        # Bump ``updated_at`` on the parent lesson_blocks rows FIRST so
+        # live subscribers see a change after their next refetch — once
+        # the items rows lose their FK pointer in the next statement,
+        # the join below would no longer find them.
+        affected_subq = sa.select(
+            photo_collage_items_table.c.block_id,
+        ).where(photo_collage_items_table.c.file_id == file_id)
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid.in_(affected_subq))
+            .values(updated_at=sa.func.now()),
+        )
+        # Null out the FK on every items row pointing at the file. We
+        # don't delete the row — the gallery is allowed to ship with a
+        # missing-file placeholder slot, same as the parent ``file_blocks``
+        # / ``video_file_blocks`` SET NULL semantics. The author can
+        # remove the placeholder via the per-item delete endpoint.
+        await self._session.execute(
+            sa.update(photo_collage_items_table)
+            .where(photo_collage_items_table.c.file_id == file_id)
+            .values(file_id=None),
         )
 
     @override

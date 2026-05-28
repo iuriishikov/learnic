@@ -24,11 +24,20 @@ from learnic.infrastructure.statistics.specs._spec import (
     StatisticTypeRegistry,
     StatisticTypeSpec,
 )
+from learnic.infrastructure.statistics.specs.enrollment import (
+    EnrollmentSpec,
+)
 from learnic.infrastructure.statistics.specs.product_view import (
     ProductViewSpec,
 )
 from learnic.infrastructure.statistics.specs.profile_view import (
     ProfileViewSpec,
+)
+from learnic.infrastructure.statistics.specs.registration import (
+    RegistrationSpec,
+)
+from learnic.infrastructure.statistics.specs.site_visit import (
+    SiteVisitSpec,
 )
 
 
@@ -37,12 +46,18 @@ def default_registry() -> StatisticTypeRegistry:
     specs: list[StatisticTypeSpec[Any]] = [
         ProfileViewSpec(),
         ProductViewSpec(),
+        RegistrationSpec(),
+        EnrollmentSpec(),
+        SiteVisitSpec(),
     ]
     return StatisticTypeRegistry(specs)
 
 
 __all__ = [
+    "EnrollmentSpec",
     "ProductViewSpec",
     "ProfileViewSpec",
+    "RegistrationSpec",
+    "SiteVisitSpec",
     "default_registry",
 ]

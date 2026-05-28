@@ -24,6 +24,7 @@ from typing import Any, ClassVar, Literal
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.models import Role
 from learnic.entities.tag.models import Tag
@@ -90,19 +91,14 @@ class UnarchivedPayload:
 
 
 @dataclass(slots=True, frozen=True)
-class DeletedPayload:
-    KIND: ClassVar[Literal["deleted"]] = "deleted"
+class VisibilityChangedPayload:
+    KIND: ClassVar[Literal["visibility_changed"]] = "visibility_changed"
+    visibility: str
 
 
 @dataclass(slots=True, frozen=True)
-class WebinarDefaultsUpdatedPayload:
-    KIND: ClassVar[Literal["webinar_defaults_updated"]] = "webinar_defaults_updated"
-    total_lessons: int
-    default_duration_minutes: int
-    allow_recording: bool
-    default_max_participants: int | None
-    default_stream_url: str | None
-    access_window_minutes: int | None
+class DeletedPayload:
+    KIND: ClassVar[Literal["deleted"]] = "deleted"
 
 
 # ---------------------------------------------------------------- #
@@ -383,6 +379,63 @@ class TagsChangedPayload:
         )
 
 
+# ---------------------------------------------------------------- #
+# Gift payloads.
+#
+# A product's "Gifts" tab lists every issued gift and its lifecycle
+# status (``pending_invite`` → ``accepted`` / ``declined`` /
+# ``revoked``). Each transition emits one kind so collaborators
+# watching the editor see the tab update without a manual refresh.
+# The payload carries only ``gift_id``: the SPA refetches the
+# permission-gated gift list rather than splicing a single row, the
+# same invalidate-and-refetch policy already used for collaboration
+# events. ``gift_id`` lets the SPA scope/log the change; the email
+# of an unregistered invitee is deliberately NOT on the wire (unlike
+# collaboration invites) so it never reaches a collaborator who only
+# has editor access — the gift list endpoint gates that field.
+# ---------------------------------------------------------------- #
+
+
+@dataclass(slots=True, frozen=True)
+class GiftIssuedPayload:
+    KIND: ClassVar[Literal["gift_issued"]] = "gift_issued"
+    gift_id: str
+
+    @classmethod
+    def of(cls, gift_id: ProductGiftID) -> "GiftIssuedPayload":
+        return cls(gift_id=str(gift_id))
+
+
+@dataclass(slots=True, frozen=True)
+class GiftAcceptedPayload:
+    KIND: ClassVar[Literal["gift_accepted"]] = "gift_accepted"
+    gift_id: str
+
+    @classmethod
+    def of(cls, gift_id: ProductGiftID) -> "GiftAcceptedPayload":
+        return cls(gift_id=str(gift_id))
+
+
+@dataclass(slots=True, frozen=True)
+class GiftDeclinedPayload:
+    KIND: ClassVar[Literal["gift_declined"]] = "gift_declined"
+    gift_id: str
+
+    @classmethod
+    def of(cls, gift_id: ProductGiftID) -> "GiftDeclinedPayload":
+        return cls(gift_id=str(gift_id))
+
+
+@dataclass(slots=True, frozen=True)
+class GiftRevokedPayload:
+    KIND: ClassVar[Literal["gift_revoked"]] = "gift_revoked"
+    gift_id: str
+
+    @classmethod
+    def of(cls, gift_id: ProductGiftID) -> "GiftRevokedPayload":
+        return cls(gift_id=str(gift_id))
+
+
 ProductPayload = (
     NameChangedPayload
     | DescriptionChangedPayload
@@ -393,8 +446,8 @@ ProductPayload = (
     | PublishedPayload
     | ArchivedPayload
     | UnarchivedPayload
+    | VisibilityChangedPayload
     | DeletedPayload
-    | WebinarDefaultsUpdatedPayload
     | QaAddedPayload
     | QaQuestionChangedPayload
     | QaAnswerChangedPayload
@@ -409,6 +462,10 @@ ProductPayload = (
     | RoleUpdatedPayload
     | RoleDeletedPayload
     | TagsChangedPayload
+    | GiftIssuedPayload
+    | GiftAcceptedPayload
+    | GiftDeclinedPayload
+    | GiftRevokedPayload
 )
 
 
@@ -443,17 +500,10 @@ def payload_from_wire(kind: str, data: dict[str, Any]) -> ProductPayload:
         return ArchivedPayload(status=data["status"])
     if kind == UnarchivedPayload.KIND:
         return UnarchivedPayload(status=data["status"])
+    if kind == VisibilityChangedPayload.KIND:
+        return VisibilityChangedPayload(visibility=data["visibility"])
     if kind == DeletedPayload.KIND:
         return DeletedPayload()
-    if kind == WebinarDefaultsUpdatedPayload.KIND:
-        return WebinarDefaultsUpdatedPayload(
-            total_lessons=data["total_lessons"],
-            default_duration_minutes=data["default_duration_minutes"],
-            allow_recording=data["allow_recording"],
-            default_max_participants=data["default_max_participants"],
-            default_stream_url=data["default_stream_url"],
-            access_window_minutes=data["access_window_minutes"],
-        )
     if kind == QaAddedPayload.KIND:
         return QaAddedPayload(
             qa_id=data["qa_id"],
@@ -536,5 +586,13 @@ def payload_from_wire(kind: str, data: dict[str, Any]) -> ProductPayload:
         return RoleDeletedPayload(role_id=data["role_id"])
     if kind == TagsChangedPayload.KIND:
         return TagsChangedPayload(tags=list(data["tags"]))
+    if kind == GiftIssuedPayload.KIND:
+        return GiftIssuedPayload(gift_id=data["gift_id"])
+    if kind == GiftAcceptedPayload.KIND:
+        return GiftAcceptedPayload(gift_id=data["gift_id"])
+    if kind == GiftDeclinedPayload.KIND:
+        return GiftDeclinedPayload(gift_id=data["gift_id"])
+    if kind == GiftRevokedPayload.KIND:
+        return GiftRevokedPayload(gift_id=data["gift_id"])
     msg = f"unknown product payload kind: {kind!r}"
     raise ValueError(msg)

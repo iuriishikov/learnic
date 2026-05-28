@@ -68,9 +68,25 @@ from learnic.application.commands.course_block.update_file import (
     UpdateFileBlockCommand,
     UpdateFileBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_photo_collage import (
-    UpdatePhotoCollageBlockCommand,
-    UpdatePhotoCollageBlockCommandHandler,
+from learnic.application.commands.course_block.add_photo_collage_item import (
+    AddPhotoCollageItemCommand,
+    AddPhotoCollageItemCommandHandler,
+)
+from learnic.application.commands.course_block.remove_photo_collage_item import (
+    RemovePhotoCollageItemCommand,
+    RemovePhotoCollageItemCommandHandler,
+)
+from learnic.application.commands.course_block.reorder_photo_collage_items import (
+    ReorderPhotoCollageItemsCommand,
+    ReorderPhotoCollageItemsCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage_item_caption import (  # noqa: E501
+    UpdatePhotoCollageItemCaptionCommand,
+    UpdatePhotoCollageItemCaptionCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage_title import (
+    UpdatePhotoCollageTitleCommand,
+    UpdatePhotoCollageTitleCommandHandler,
 )
 from learnic.application.commands.course_block.update_video_file import (
     UpdateVideoFileBlockCommand,
@@ -168,6 +184,10 @@ from learnic.application.common.persistence.course_content import (
     SingleChoiceBlockView,
     TextInputBlockView,
     VideoFileBlockView,
+)
+from learnic.application.queries.course_content.get_block import (
+    GetLessonBlockQuery,
+    GetLessonBlockQueryHandler,
 )
 from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQuery,
@@ -895,6 +915,14 @@ class CollageItemSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    oid: UUID = Field(
+        description=(
+            "Stable identity of the photo. The SPA passes this back "
+            "to the granular per-item endpoints "
+            "(remove / reorder / caption) so reordering can't lose "
+            "track of which photo is which."
+        ),
+    )
     file: FileSchema | None = Field(
         default=None,
         description=(
@@ -2800,13 +2828,14 @@ async def update_rutube_video_block(
     operation_id="addFileBlock",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=CreatedLessonBlockSchema,
+    response_model=FileBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE},
 )
 async def add_file_block(
     request: Request,
     interactor: FromDishka[AddFileBlockCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     lesson_id: Annotated[UUID, _LESSON_ID_PATH],
@@ -2821,12 +2850,14 @@ async def add_file_block(
             f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
         ),
     ),
-) -> CreatedLessonBlockSchema:
+) -> FileBlockSchema:
     """Upload bytes, append a generic-file block to the lesson. Author-only.
 
     Args:
         request: Source of the access cookie.
         interactor: Injected add-file-block handler.
+        block_query: Injected query handler used to return the full
+            block view after the command commits.
         auth: Injected authenticator.
         course_id: Course product UUID (framing only — handler authorises
             on the lesson's denormalised product id).
@@ -2836,7 +2867,9 @@ async def add_file_block(
         title: ``multipart/form-data`` field ``title``; optional.
 
     Returns:
-        ``201 Created`` with the new block's UUID.
+        ``201 Created`` with the full :class:`FileBlockSchema` for
+        the new block so the SPA can ``setQueryData`` without
+        refetching the whole draft tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -2859,15 +2892,20 @@ async def add_file_block(
             title=title,
         ),
     )
-    return CreatedLessonBlockSchema(oid=oid)
+    view = await block_query.run(
+        GetLessonBlockQuery(actor_id=ctx.user_id, block_id=oid),
+    )
+    assert isinstance(view, FileBlockView)  # noqa: S101
+    return FileBlockSchema.from_view(view)
 
 
 @router.patch(
     "/{course_id}/blocks/{block_id}/file",
     summary="Replace the file and/or title of a file block",
     operation_id="updateFileBlock",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     dependencies=_AUTH_SECURITY,
+    response_model=FileBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {
         WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
@@ -2877,6 +2915,7 @@ async def add_file_block(
 async def update_file_block(
     request: Request,
     interactor: FromDishka[UpdateFileBlockCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     block_id: Annotated[UUID, _BLOCK_ID_PATH],
@@ -2891,11 +2930,13 @@ async def update_file_block(
         max_length=BLOCK_TITLE_MAX_LEN,
         description="New caption, or omit to clear the existing one.",
     ),
-) -> None:
+) -> FileBlockSchema:
     """Update the file-block: replace the file, the title, or both.
 
     Returns:
-        ``204 No Content``.
+        ``200 OK`` with the full :class:`FileBlockSchema` reflecting
+        the new file/title so the SPA can ``setQueryData`` without
+        refetching the whole draft tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -2922,6 +2963,14 @@ async def update_file_block(
             title=title,
         ),
     )
+    view = await block_query.run(
+        GetLessonBlockQuery(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+        ),
+    )
+    assert isinstance(view, FileBlockView)  # noqa: S101
+    return FileBlockSchema.from_view(view)
 
 
 @router.post(
@@ -2930,7 +2979,7 @@ async def update_file_block(
     operation_id="addVideoFileBlock",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=CreatedLessonBlockSchema,
+    response_model=VideoFileBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {
         WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
@@ -2940,6 +2989,7 @@ async def update_file_block(
 async def add_video_file_block(
     request: Request,
     interactor: FromDishka[AddVideoFileBlockCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     lesson_id: Annotated[UUID, _LESSON_ID_PATH],
@@ -2957,11 +3007,13 @@ async def add_video_file_block(
             f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
         ),
     ),
-) -> CreatedLessonBlockSchema:
+) -> VideoFileBlockSchema:
     """Upload a video and append a video-file block. Author-only.
 
     Returns:
-        ``201 Created`` with the new block's UUID.
+        ``201 Created`` with the full :class:`VideoFileBlockSchema`
+        for the new block so the SPA can ``setQueryData`` without
+        refetching the whole draft tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -2985,15 +3037,20 @@ async def add_video_file_block(
             title=title,
         ),
     )
-    return CreatedLessonBlockSchema(oid=oid)
+    view = await block_query.run(
+        GetLessonBlockQuery(actor_id=ctx.user_id, block_id=oid),
+    )
+    assert isinstance(view, VideoFileBlockView)  # noqa: S101
+    return VideoFileBlockSchema.from_view(view)
 
 
 @router.patch(
     "/{course_id}/blocks/{block_id}/video-file",
     summary="Replace the video and/or title of a video-file block",
     operation_id="updateVideoFileBlock",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     dependencies=_AUTH_SECURITY,
+    response_model=VideoFileBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {
         WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
@@ -3004,6 +3061,7 @@ async def add_video_file_block(
 async def update_video_file_block(
     request: Request,
     interactor: FromDishka[UpdateVideoFileBlockCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     block_id: Annotated[UUID, _BLOCK_ID_PATH],
@@ -3016,11 +3074,13 @@ async def update_video_file_block(
         max_length=BLOCK_TITLE_MAX_LEN,
         description="New caption, or omit to clear.",
     ),
-) -> None:
+) -> VideoFileBlockSchema:
     """Update video-file block: new video, new title, or both.
 
     Returns:
-        ``204 No Content``.
+        ``200 OK`` with the full :class:`VideoFileBlockSchema`
+        reflecting the new video/title so the SPA can ``setQueryData``
+        without refetching the whole draft tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -3048,6 +3108,14 @@ async def update_video_file_block(
             title=title,
         ),
     )
+    view = await block_query.run(
+        GetLessonBlockQuery(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+        ),
+    )
+    assert isinstance(view, VideoFileBlockView)  # noqa: S101
+    return VideoFileBlockSchema.from_view(view)
 
 
 def _zip_collage_uploads(
@@ -3094,7 +3162,7 @@ async def _read_collage_items(
     operation_id="addPhotoCollageBlock",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=CreatedLessonBlockSchema,
+    response_model=PhotoCollageBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {
         WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
@@ -3104,6 +3172,7 @@ async def _read_collage_items(
 async def add_photo_collage_block(
     request: Request,
     interactor: FromDishka[AddPhotoCollageBlockCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     lesson_id: Annotated[UUID, _LESSON_ID_PATH],
@@ -3134,13 +3203,15 @@ async def add_photo_collage_block(
             f"{BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
         ),
     ),
-) -> CreatedLessonBlockSchema:
+) -> PhotoCollageBlockSchema:
     """Upload all photos and append a photo-collage block. Author-only.
 
     Every uploaded file must have an `image/*` content type.
 
     Returns:
-        ``201 Created`` with the new block's UUID.
+        ``201 Created`` with the full :class:`PhotoCollageBlockSchema`
+        for the new block so the SPA can ``setQueryData`` without
+        refetching the whole draft tree.
 
     Raises:
         InvalidTokenError: HTTP 401.
@@ -3162,67 +3233,396 @@ async def add_photo_collage_block(
             title=title,
         ),
     )
-    return CreatedLessonBlockSchema(oid=oid)
+    view = await block_query.run(
+        GetLessonBlockQuery(actor_id=ctx.user_id, block_id=oid),
+    )
+    assert isinstance(view, PhotoCollageBlockView)  # noqa: S101
+    return PhotoCollageBlockSchema.from_view(view)
 
 
-@router.patch(
-    "/{course_id}/blocks/{block_id}/photo-collage",
-    summary="Replace the items and title of a photo-collage block",
-    operation_id="updatePhotoCollageBlock",
-    status_code=status.HTTP_204_NO_CONTENT,
+# ====================== schemas — photo-collage granular ====================== #
+
+
+class ReorderPhotoCollageItemsSchema(BaseModel):
+    """Body for ``PUT /courses/{course_id}/blocks/{block_id}/photo-collage/items/order``.
+
+    ``ordered_ids`` must be a permutation of the block's current
+    items — no additions, no omissions. Add/remove flows have
+    their own dedicated endpoints.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "ordered_ids": [
+                        "11111111-2222-4333-8444-555555555555",
+                        "22222222-3333-4444-8555-666666666666",
+                    ],
+                },
+            ],
+        },
+    )
+
+    ordered_ids: list[UUID] = Field(
+        description=(
+            "Full ordered list of collage item ids. Must match the "
+            "block's existing items exactly (same set, no missing "
+            "or extra ids)."
+        ),
+        examples=[
+            [
+                "11111111-2222-4333-8444-555555555555",
+                "22222222-3333-4444-8555-666666666666",
+            ],
+        ],
+    )
+
+
+class UpdatePhotoCollageItemCaptionSchema(BaseModel):
+    """Body for the per-item caption PATCH endpoint.
+
+    ``caption`` is the new caption value, or ``null`` to clear.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"caption": "Закат над Камчаткой"}, {"caption": None}],
+        },
+    )
+
+    caption: str | None = Field(
+        default=None,
+        description=(
+            "New caption text, or `null` to clear. "
+            f"Max {PHOTO_COLLAGE_CAPTION_MAX_LEN} chars "
+            "(`PHOTO_COLLAGE_CAPTION_MAX_LEN`)."
+        ),
+        max_length=PHOTO_COLLAGE_CAPTION_MAX_LEN,
+        examples=["Закат над Камчаткой", None],
+    )
+
+
+class UpdatePhotoCollageTitleSchema(BaseModel):
+    """Body for the photo-collage title PATCH endpoint."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"title": "Камчатка 2025"}, {"title": None}],
+        },
+    )
+
+    title: str | None = Field(
+        default=None,
+        description=(
+            "New collage title, or `null` to clear. "
+            f"Max {BLOCK_TITLE_MAX_LEN} chars (`BLOCK_TITLE_MAX_LEN`)."
+        ),
+        max_length=BLOCK_TITLE_MAX_LEN,
+        examples=["Камчатка 2025", None],
+    )
+
+
+_ITEM_ID_PATH: Final = Path(
+    description="Target photo-collage item's UUID.",
+    examples=["11111111-2222-4333-8444-555555555555"],
+)
+
+
+async def _photo_collage_view(
+    block_query: GetLessonBlockQueryHandler,
+    actor_id: Any,
+    block_id: UUID,
+) -> PhotoCollageBlockSchema:
+    view = await block_query.run(
+        GetLessonBlockQuery(
+            actor_id=actor_id,
+            block_id=LessonBlockID(block_id),
+        ),
+    )
+    assert isinstance(view, PhotoCollageBlockView)  # noqa: S101
+    return PhotoCollageBlockSchema.from_view(view)
+
+
+@router.post(
+    "/{course_id}/blocks/{block_id}/photo-collage/items",
+    summary="Append one photo to a photo-collage block",
+    operation_id="addPhotoCollageItem",
+    status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
+    response_model=PhotoCollageBlockSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {
         WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
         WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE,
+        StorageQuotaExceededError: STORAGE_QUOTA_EXCEEDED_RULE,
     },
 )
-async def update_photo_collage_block(
+async def add_photo_collage_item(
     request: Request,
-    interactor: FromDishka[UpdatePhotoCollageBlockCommandHandler],
+    interactor: FromDishka[AddPhotoCollageItemCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
     block_id: Annotated[UUID, _BLOCK_ID_PATH],
-    files: list[UploadFile] = File(  # noqa: B008
+    file: UploadFile = File(  # noqa: B008
         description=(
-            "New ordered list of photo bytes — full replace; the new "
-            "set is the complete new state."
+            "New photo bytes. Must have an `image/*` content type "
+            "(HTTP 415 `WrongFileContentType` otherwise)."
         ),
     ),
-    captions: list[str] | None = Form(  # noqa: B008
+    caption: str | None = Form(  # noqa: B008
         default=None,
-        description="New optional per-photo captions; same rules as add.",
+        max_length=PHOTO_COLLAGE_CAPTION_MAX_LEN,
+        description=(
+            "Optional caption for the new photo. Max "
+            f"{PHOTO_COLLAGE_CAPTION_MAX_LEN} chars."
+        ),
     ),
-    title: str | None = Form(  # noqa: B008
-        default=None,
-        max_length=BLOCK_TITLE_MAX_LEN,
-        description="New title, or omit to clear.",
-    ),
-) -> None:
-    """Replace items and title of a photo-collage block.
+) -> PhotoCollageBlockSchema:
+    """Append one image to an existing photo-collage block.
+
+    Args:
+        request: Source of the access cookie.
+        course_id: URL framing — target course UUID.
+        block_id: Target photo-collage block UUID.
+        file: One image upload (multipart `file` field).
+        caption: Optional caption for the new item.
 
     Returns:
-        ``204 No Content``.
+        ``201 Created`` with the full
+        :class:`PhotoCollageBlockSchema` reflecting the new item so
+        the SPA can ``setQueryData`` without refetching the draft
+        tree. The new item's `oid` is the last entry in ``items``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404 — block not found.
+        WrongBlockTypeError: HTTP 409.
+        StorageQuotaExceededError: HTTP 413.
+        WrongFileContentTypeError: HTTP 415 — not an image.
+        FieldError: HTTP 422 — caption VO violation or
+            ``TooManyCollageItemsError`` if already at the cap.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_upload(
+        file, max_bytes=LESSON_COLLAGE_ITEM_MAX_BYTES,
+    )
+    await interactor.run(
+        AddPhotoCollageItemCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            data=data,
+            content_type=content_type,
+            caption=caption,
+        ),
+    )
+    return await _photo_collage_view(block_query, ctx.user_id, block_id)
+
+
+@router.delete(
+    "/{course_id}/blocks/{block_id}/photo-collage/items/{item_id}",
+    summary="Remove one photo from a photo-collage block",
+    operation_id="removePhotoCollageItem",
+    status_code=status.HTTP_200_OK,
+    dependencies=_AUTH_SECURITY,
+    response_model=PhotoCollageBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def remove_photo_collage_item(
+    request: Request,
+    interactor: FromDishka[RemovePhotoCollageItemCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+    item_id: Annotated[UUID, _ITEM_ID_PATH],
+) -> PhotoCollageBlockSchema:
+    """Delete one item from a photo-collage block by id.
+
+    Returns:
+        ``200 OK`` with the updated
+        :class:`PhotoCollageBlockSchema`.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404 — block or item not found.
+        WrongBlockTypeError: HTTP 409.
+        FieldError: HTTP 422 —
+            ``TooFewCollageItemsError`` if the removal would push
+            below the minimum item count.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    from learnic.entities.course_block.ids import (  # noqa: PLC0415
+        CollageItemID,
+    )
+
+    await interactor.run(
+        RemovePhotoCollageItemCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            item_id=CollageItemID(item_id),
+        ),
+    )
+    return await _photo_collage_view(block_query, ctx.user_id, block_id)
+
+
+@router.put(
+    "/{course_id}/blocks/{block_id}/photo-collage/items/order",
+    summary="Reorder items inside a photo-collage block",
+    operation_id="reorderPhotoCollageItems",
+    status_code=status.HTTP_200_OK,
+    dependencies=_AUTH_SECURITY,
+    response_model=PhotoCollageBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def reorder_photo_collage_items(
+    request: Request,
+    payload: ReorderPhotoCollageItemsSchema,
+    interactor: FromDishka[ReorderPhotoCollageItemsCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> PhotoCollageBlockSchema:
+    """Reorder photos within a collage by full id permutation.
+
+    Returns:
+        ``200 OK`` with the updated
+        :class:`PhotoCollageBlockSchema`.
 
     Raises:
         InvalidTokenError: HTTP 401.
         NotResourceOwnerError: HTTP 403.
         EntityNotFoundError: HTTP 404.
         WrongBlockTypeError: HTTP 409.
-        WrongFileContentTypeError: HTTP 415.
-        FieldError: HTTP 422.
+        FieldError: HTTP 422 — ``CollageItemsMismatchError`` if the
+            payload set differs from the block's current items.
     """
     del course_id
     ctx = await auth.authenticate(request)
-    items = await _read_collage_items(files, captions)
+    from learnic.entities.course_block.ids import (  # noqa: PLC0415
+        CollageItemID,
+    )
+
     await interactor.run(
-        UpdatePhotoCollageBlockCommand(
+        ReorderPhotoCollageItemsCommand(
             actor_id=ctx.user_id,
             block_id=LessonBlockID(block_id),
-            items=items,
-            title=title,
+            ordered_ids=tuple(
+                CollageItemID(oid) for oid in payload.ordered_ids
+            ),
         ),
     )
+    return await _photo_collage_view(block_query, ctx.user_id, block_id)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/photo-collage/items/{item_id}/caption",
+    summary="Replace one photo's caption inside a photo-collage block",
+    operation_id="updatePhotoCollageItemCaption",
+    status_code=status.HTTP_200_OK,
+    dependencies=_AUTH_SECURITY,
+    response_model=PhotoCollageBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def update_photo_collage_item_caption(
+    request: Request,
+    payload: UpdatePhotoCollageItemCaptionSchema,
+    interactor: FromDishka[UpdatePhotoCollageItemCaptionCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+    item_id: Annotated[UUID, _ITEM_ID_PATH],
+) -> PhotoCollageBlockSchema:
+    """Replace the caption on one collage item, or clear it.
+
+    Returns:
+        ``200 OK`` with the updated
+        :class:`PhotoCollageBlockSchema`.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409.
+        FieldError: HTTP 422 — caption VO violation.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    from learnic.entities.course_block.ids import (  # noqa: PLC0415
+        CollageItemID,
+    )
+
+    await interactor.run(
+        UpdatePhotoCollageItemCaptionCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            item_id=CollageItemID(item_id),
+            caption=payload.caption,
+        ),
+    )
+    return await _photo_collage_view(block_query, ctx.user_id, block_id)
+
+
+@router.patch(
+    "/{course_id}/blocks/{block_id}/photo-collage/title",
+    summary="Replace a photo-collage block's title",
+    operation_id="updatePhotoCollageTitle",
+    status_code=status.HTTP_200_OK,
+    dependencies=_AUTH_SECURITY,
+    response_model=PhotoCollageBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {
+        WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE,
+    },
+)
+async def update_photo_collage_title(
+    request: Request,
+    payload: UpdatePhotoCollageTitleSchema,
+    interactor: FromDishka[UpdatePhotoCollageTitleCommandHandler],
+    block_query: FromDishka[GetLessonBlockQueryHandler],
+    auth: FromDishka[Authenticator],
+    course_id: Annotated[UUID, _COURSE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> PhotoCollageBlockSchema:
+    """Replace the title on a photo-collage block, or clear it.
+
+    Returns:
+        ``200 OK`` with the updated
+        :class:`PhotoCollageBlockSchema`.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409.
+        FieldError: HTTP 422 — title VO violation.
+    """
+    del course_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdatePhotoCollageTitleCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            title=payload.title,
+        ),
+    )
+    return await _photo_collage_view(block_query, ctx.user_id, block_id)
 
 
 # ============================== draft reset ============================== #

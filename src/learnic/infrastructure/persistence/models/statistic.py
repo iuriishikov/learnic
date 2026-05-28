@@ -166,6 +166,109 @@ statistic_product_view_table = sa.Table(
 )
 
 
+statistic_registration_table = sa.Table(
+    "statistic_registration",
+    mapper_registry.metadata,
+    sa.Column(
+        "statistic_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "type",
+        sa.Enum(
+            StatisticType,
+            name="statistic_type",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["statistic_id", "type"],
+        ["statistics.oid", "statistics.type"],
+        ondelete="CASCADE",
+        name="fk_stat_registration_parent",
+    ),
+    sa.CheckConstraint(
+        f"type = '{StatisticType.REGISTRATION.value}'",
+        name="ck_stat_registration_type",
+    ),
+)
+
+
+statistic_enrollment_table = sa.Table(
+    "statistic_enrollment",
+    mapper_registry.metadata,
+    sa.Column(
+        "statistic_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "type",
+        sa.Enum(
+            StatisticType,
+            name="statistic_type",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["statistic_id", "type"],
+        ["statistics.oid", "statistics.type"],
+        ondelete="CASCADE",
+        name="fk_stat_enrollment_parent",
+    ),
+    sa.CheckConstraint(
+        f"type = '{StatisticType.ENROLLMENT.value}'",
+        name="ck_stat_enrollment_type",
+    ),
+    sa.Index(
+        "ix_stat_enrollment_product",
+        "product_id",
+    ),
+)
+
+
+statistic_site_visit_table = sa.Table(
+    "statistic_site_visit",
+    mapper_registry.metadata,
+    sa.Column(
+        "statistic_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "type",
+        sa.Enum(
+            StatisticType,
+            name="statistic_type",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["statistic_id", "type"],
+        ["statistics.oid", "statistics.type"],
+        ondelete="CASCADE",
+        name="fk_stat_site_visit_parent",
+    ),
+    sa.CheckConstraint(
+        f"type = '{StatisticType.SITE_VISIT.value}'",
+        name="ck_stat_site_visit_type",
+    ),
+)
+
+
 _mapped = False
 
 

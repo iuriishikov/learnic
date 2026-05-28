@@ -12,10 +12,14 @@ from learnic.application.common.auth.authorizer import (
 from learnic.application.common.auth.resource_lineage import (
     ResourceLineageReader,
 )
-from learnic.application.common.errors import InsufficientPermissionsError
+from learnic.application.common.errors import (
+    InsufficientPermissionsError,
+    NotResourceOwnerError,
+)
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
 )
+from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.grant import CollaborationGrant
 from learnic.entities.role.ids import RoleID
@@ -67,6 +71,19 @@ class AuthorizerService(Authorizer):
                 product_id=target.product_id,
                 permission=permission.value,
                 target_id=target.target_id,
+            )
+
+    @override
+    async def require_owner(
+        self,
+        actor: UserID,
+        product_id: ProductID,
+    ) -> None:
+        target = AuthzTarget.for_product(product_id)
+        if not await self._is_product_owner(actor, target):
+            raise NotResourceOwnerError(
+                resource_id=product_id,
+                user_id=actor,
             )
 
     @override

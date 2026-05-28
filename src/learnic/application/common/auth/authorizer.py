@@ -77,6 +77,25 @@ class Authorizer(Protocol):
         permission: Permission,
     ) -> None: ...
 
+    async def require_owner(
+        self,
+        actor: UserID,
+        product_id: ProductID,
+    ) -> None:
+        """Gate an operation to the product's author only.
+
+        Unlike :meth:`require`, this bypasses the permission system
+        entirely: it is satisfied **only** by the product's author,
+        never by a collaborator — no role can grant it. Use it for
+        operations that are intrinsically owner-only (e.g. switching
+        a product between public and private visibility).
+
+        Raises:
+            NotResourceOwnerError: ``actor`` is not the author of
+                ``product_id``; HTTP 403.
+        """
+        ...
+
     async def effective_permissions(
         self,
         actor: UserID,

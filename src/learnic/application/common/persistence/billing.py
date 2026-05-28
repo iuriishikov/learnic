@@ -135,6 +135,40 @@ class AuthorActiveFilesReader(Protocol):
     ) -> list[AuthorFileRef]: ...
 
 
+class GlobalSchedulerLock(Protocol):
+    """Cluster-wide non-blocking lock for periodic jobs.
+
+    Hardens cron-driven handlers against multi-replica schedulers:
+    if more than one scheduler-pod queues the same tick, every
+    worker that picks up a duplicate ``.kiq()`` enters the handler,
+    tries to acquire the lock, fails immediately, and exits. Only
+    the first worker proceeds. The single-replica scheduler stays
+    the recommended deployment; this is the belt to its braces.
+
+    Implementations use a Postgres **session-level** advisory lock
+    (``pg_try_advisory_lock`` / ``pg_advisory_unlock``) rather than
+    a transaction-scoped one because handlers like
+    :class:`ReconcileStorageQuotasCommandHandler` commit several
+    times inside one run — a xact-lock would release on the first
+    commit and leave the rest of the pass unprotected. The lock
+    is automatically released when the session is closed (worker
+    exits) even if ``release`` is not called explicitly, so a
+    crashed worker does not hold the lock forever.
+    """
+
+    async def try_acquire(self, key: str) -> bool:
+        """Acquire the lock keyed on ``key``.
+
+        Returns ``True`` if the caller now holds the lock,
+        ``False`` if another session is already holding it (no
+        wait). The caller MUST pair every ``True`` return with a
+        ``release(key)`` in a ``finally``.
+        """
+        ...
+
+    async def release(self, key: str) -> None: ...
+
+
 class StorageQuotaLock(Protocol):
     """Per-user serialization point for quota-changing operations.
 

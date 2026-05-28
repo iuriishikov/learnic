@@ -7,6 +7,9 @@ from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
 )
+from learnic.application.common.email.rate_limit import (
+    EmailSendRateLimiter,
+)
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
@@ -39,6 +42,7 @@ from learnic.entities.user.models import UserID
 class RevokeCollaborationCommand:
     actor_id: UserID
     collaboration_id: ProductCollaborationID
+    actor_ip: str | None
 
 
 @final
@@ -60,6 +64,7 @@ class RevokeCollaborationCommandHandler:
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
         security: SecurityPolicies,
+        email_rate_limiter: EmailSendRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -70,6 +75,7 @@ class RevokeCollaborationCommandHandler:
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
         self._security: Final = security
+        self._email_rate_limiter: Final = email_rate_limiter
 
     async def run(
         self,
@@ -96,6 +102,12 @@ class RevokeCollaborationCommandHandler:
         # ``invite_sent`` snapshot republish below.
         was_active = collab.status is CollaborationStatus.ACTIVE
         collab.revoke()
+        if recipient_email is not None:
+            await self._email_rate_limiter.register(
+                actor_id=data.actor_id,
+                recipient=recipient_email,
+                ip=data.actor_ip,
+            )
         await self._transaction.commit()
         if recipient_email is not None:
             base = self._security.frontend_base_url.rstrip("/")

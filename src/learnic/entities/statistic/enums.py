@@ -17,3 +17,6 @@ class StatisticType(StrEnum):
 
     PROFILE_VIEW = "profile_view"
     PRODUCT_VIEW = "product_view"
+    REGISTRATION = "registration"
+    ENROLLMENT = "enrollment"
+    SITE_VISIT = "site_visit"

@@ -12,6 +12,7 @@ from learnic.entities.product.constants import (
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
+    ProductVisibility,
 )
 from learnic.entities.product.models import Product
 from learnic.entities.product.qa import ProductQA
@@ -63,6 +64,16 @@ products_table = sa.Table(
         ),
         nullable=False,
         server_default=ProductStatus.DRAFT.value,
+    ),
+    sa.Column(
+        "visibility",
+        sa.Enum(
+            ProductVisibility,
+            name="product_visibility",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        server_default=ProductVisibility.PUBLIC.value,
     ),
     sa.Column("name", sa.String(TITLE_MAX_LEN), nullable=False),
     sa.Column("description", sa.Text(), nullable=True),
@@ -161,6 +172,7 @@ def map_product_table() -> None:
             "author_id": products_table.c.author_id,
             "type": products_table.c.type,
             "status": products_table.c.status,
+            "visibility": products_table.c.visibility,
             "name": composite(ProductTitle, products_table.c.name),
             "description": composite(
                 ProductDescription.of_optional,

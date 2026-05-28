@@ -57,6 +57,7 @@ from learnic.application.commands.session.revoke import (
     RevokeSessionCommandHandler,
 )
 from learnic.application.common.errors import (
+    AccountBannedError,
     EmailAlreadyRegisteredError,
     EmailNotVerifiedError,
     EntityNotFoundError,
@@ -67,6 +68,10 @@ from learnic.application.common.persistence.session import SessionView
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
 )
+from learnic.application.common.statistics.collector import (
+    StatisticsCollector,
+)
+from learnic.entities.statistic.models import Statistic
 from learnic.application.queries.auth.token_status import (
     GetTokenStatusQuery,
     GetTokenStatusQueryHandler,
@@ -105,6 +110,7 @@ from learnic.presentation.http.common.cookies import (
 )
 from learnic.presentation.http.common.device import device_from_request
 from learnic.presentation.http.common.errors.rules import (
+    ACCOUNT_BANNED_RULE,
     AUTHENTICATED_MAP,
     EMAIL_ALREADY_REGISTERED_RULE,
     EMAIL_NOT_VERIFIED_RULE,
@@ -398,6 +404,7 @@ async def register(
     response: Response,
     interactor: FromDishka[RegisterCommandHandler],
     cfg: FromDishka[SecurityConfig],
+    stats: FromDishka[StatisticsCollector],
 ) -> None:
     """Register a new user and mail a verification link.
 
@@ -409,6 +416,8 @@ async def register(
             the registration tab can auto-login once the user verifies.
         interactor: Injected register command handler.
         cfg: Injected security config driving cookie flags.
+        stats: Injected statistics collector; records a ``registration``
+            event for the new account (fire-and-forget).
 
     Returns:
         ``201 Created`` with an empty body. The ``signup_session``
@@ -431,6 +440,7 @@ async def register(
             patronymic=payload.patronymic,
         ),
     )
+    await stats.record(Statistic.for_registration(actor_id=result.user_id))
     set_signup_session_cookie(response, result.signup_session_token, cfg)
 
 
@@ -443,6 +453,7 @@ async def register(
         FieldError: FIELD_ERROR_RULE,
         InvalidCredentialsError: INVALID_CREDENTIALS_RULE,
         EmailNotVerifiedError: EMAIL_NOT_VERIFIED_RULE,
+        AccountBannedError: ACCOUNT_BANNED_RULE,
     },
 )
 async def login(
@@ -471,6 +482,7 @@ async def login(
 
     Raises:
         InvalidCredentialsError: No user or wrong password; HTTP 401.
+        AccountBannedError: User is banned from the platform; HTTP 403.
         EmailNotVerifiedError: Email not confirmed; HTTP 403.
         FieldError: VO violated during password/email parse; HTTP 422.
     """
@@ -898,13 +910,21 @@ async def me(
     request: Request,
     interactor: FromDishka[GetUserQueryHandler],
     auth: FromDishka[Authenticator],
+    stats: FromDishka[StatisticsCollector],
 ) -> UserSchema:
     """Return the currently authenticated user's profile.
+
+    Loading the profile is the SPA's app-open call, so it doubles as
+    the activity signal behind DAU / MAU: a ``site_visit`` event is
+    recorded for the caller, deduped to at most one row per user per
+    UTC day (fire-and-forget — a failed stat never breaks the read).
 
     Args:
         request: Source of the access cookie used to authenticate.
         interactor: Injected get-user query handler.
         auth: Injected authenticator that validates the access cookie.
+        stats: Injected statistics collector for the ``site_visit``
+            activity event.
 
     Returns:
         ``UserSchema`` with the user's public profile fields.
@@ -915,6 +935,7 @@ async def me(
     """
     ctx = await auth.authenticate(request)
     view = await interactor.run(GetUserQuery(oid=ctx.user_id))
+    await stats.record(Statistic.for_site_visit(actor_id=ctx.user_id))
     return UserSchema.from_view(view)
 
 

@@ -158,7 +158,7 @@ per kind).
   `duration_changed`, `price_changed`.
 - Cover: `cover_changed`, `cover_removed`.
 - Status: `published`, `archived`, `unarchived`, `deleted`.
-- Webinar defaults: `webinar_defaults_updated`.
+- Visibility: `visibility_changed`.
 - Q&A: `qa_added`, `qa_question_changed`, `qa_answer_changed`,
   `qa_reordered`, `qa_deleted`.
 - Collaboration: `collaboration_invited`,
@@ -166,6 +166,8 @@ per kind).
   `collaboration_revoked`, `collaboration_grants_updated`.
 - Role catalogue: `role_created`, `role_updated`, `role_deleted`.
 - Tags: `tags_changed`.
+- Gifts: `gift_issued`, `gift_accepted`, `gift_declined`,
+  `gift_revoked`.
 
 `payload` carries id-level fields plus the new value when trivial
 (e.g. `name_changed` → `{"name": "..."}`); for non-trivial changes
@@ -174,13 +176,12 @@ the client should refetch the affected resource via REST.
 minor units (kopecks for RUB); currency is implicit (account
 currency, RUB-only at this phase). The SPA can apply it in place
 without a REST refetch.
-`webinar_defaults_updated` is emitted by the PUT-style replace of
-all webinar defaults and carries the full new snapshot —
-`total_lessons` (int), `default_duration_minutes` (int),
-`allow_recording` (bool), `default_max_participants`
-(int | null), `default_stream_url` (string | null),
-`access_window_minutes` (int | null) — so the SPA can apply the
-change in place without a REST refetch.
+`visibility_changed` carries `{"visibility": "public" | "private"}`
+— the product's new enrollment visibility (orthogonal to lifecycle
+`status`; `private` stays catalog-visible but is invite-only, i.e.
+self-enroll is refused). Owner-only mutation via
+`PATCH /products/{id}/visibility`; the SPA can apply it in place
+without a REST refetch.
 
 `collaboration_*` events carry
 `{"collaboration_id": "<UUID>", "collaborator_id": "<UUID | absent>",
@@ -229,6 +230,21 @@ tag list. The SPA replaces the cached `product.tags` array
 verbatim; there are no per-item add/remove deltas because the
 product tag set is always rewritten in one shot. Order in the
 payload mirrors storage (`product_tags.position` ascending).
+
+`gift_*` events track the product's gift lifecycle so a
+collaborator watching the editor's "Gifts" tab sees it update
+live. `gift_issued` fires on both the by-user
+(`POST /products/{product_id}/gifts/by-user`) and by-email
+(`…/gifts/by-email`) invite paths; `gift_accepted` /
+`gift_declined` when the recipient resolves the invite;
+`gift_revoked` when a manager cancels a still-pending gift. Each
+carries only `{"gift_id": "<UUID>"}`; the SPA refetches the
+permission-gated list (`GET /products/{product_id}/gifts`)
+rather than applying in place. Unlike `collaboration_invited`,
+the invitee's email is deliberately NOT on the wire so it never
+reaches a collaborator who only has editor access. Expiry of
+stale pending invites is swept by a daily cron and is NOT
+broadcast — the SPA discovers purged invites on its next refetch.
 
 **Content `kind` values** (`ContentPayload` union — courses only):
 
@@ -289,6 +305,86 @@ ordering is not guaranteed — each `kind` drives an independent
 slice of the SPA cache, so the SPA must not rely on one family's
 event arriving before another's. Client → server messages are not
 interpreted yet.
+
+### `WS /products/{product_id}/cursors` — live editor cursors
+
+Bidirectional push of "where is each editor / viewer right now"
+deltas for one product. Used by the SPA to render other users'
+cursors on the editor surface (field labels, lesson titles, block
+inputs, …) and to optionally raise their "what they're doing"
+status (`editing`, `typing`, `viewing`, `commenting`, …) next to
+the avatar. The server stays semantically dumb: ``field_id`` and
+``action`` are opaque strings; the SPA owns the taxonomy.
+
+Authorisation reuses `read_product` — every collaborator whose
+grants transitively include `READ_PRODUCT` (owners + every editor
+/ manager) can subscribe; non-authorised callers get `4403`. The
+product must exist (`4404` otherwise) and the access cookie must
+validate (`4401` otherwise) before `accept`.
+
+**Lifecycle and replay policy.** No replay. Immediately after
+`accept`, the server pushes a `snapshot` message with every other
+user's current cursor (the caller's own cursor is omitted). After
+that, the channel is bidirectional:
+
+- The client publishes its own `cursor_at` / `cursor_left`
+  messages as the editing user focuses / blurs / types.
+- The server fans out other users' deltas (`cursor_at` /
+  `cursor_left`) and emits `user_gone` when a user's last
+  connection for the product closes.
+- Stale cursors (no `cursor_at` from a user for at least 30 s)
+  are pruned lazily — the next `snapshot` filters them out. The
+  SPA carries its own ~15 s eviction timer per cursor and never
+  needs to wait for server-side staleness.
+
+On reconnect, re-open the socket and replay the current
+`cursor_at`; the new `snapshot` will hydrate everyone else.
+
+**Client → server** (JSON):
+
+- `{"type": "cursor_at", "field_id": "<str ≤256>",
+  "action": "<str ≤64>" | null}` — caller's cursor is now at
+  `field_id`. Any subsequent `cursor_at` from the same client
+  overwrites the previous entry. `field_id` and `action` are
+  opaque to the server; the server only enforces length caps.
+  Send periodic refreshes (every ~10 s) while the field stays
+  focused so the lazy-staleness window doesn't trip on a quiet
+  editor.
+- `{"type": "cursor_left", "field_id": "<str>"}` — caller is no
+  longer at `field_id`. The server forwards `cursor_left` only
+  when its stored entry actually matches both the caller's
+  connection and `field_id`; a stale "leave" for a field the
+  caller already moved off of is a no-op (the originator silently
+  drops it).
+
+**Server → client** (JSON):
+
+- `{"type": "snapshot", "cursors": [{"user_id", "field_id",
+  "action", "updated_at"}]}` — sent exactly once, right after
+  `accept`. Contains every other live cursor for the product;
+  empty list is valid.
+- `{"type": "cursor_at", "user_id", "field_id", "action",
+  "updated_at"}` — another user's new or refreshed cursor.
+  Replace any previous entry for `user_id` in the SPA store.
+- `{"type": "cursor_left", "user_id", "field_id"}` — another
+  user explicitly left `field_id`. Drop the entry from the SPA
+  store.
+- `{"type": "user_gone", "user_id"}` — another user's last
+  connection for this product closed. Drop every entry for
+  `user_id`.
+
+`updated_at` is ISO 8601 UTC. The server never echoes the
+caller's own deltas back, so the SPA can publish optimistically
+and treat its local copy as the source of truth for its own
+cursor.
+
+Field-id and action taxonomies are SPA-owned and intentionally
+opaque to the server. The current SPA convention uses dotted,
+lowercase keys (`product.title`, `module.<id>.title`,
+`lesson.<id>.title`, `block.<id>.body`, `block.<id>.option.<idx>`,
+`block.<id>.tab.<idx>.code`, …) and a small action set
+(`editing`, `typing`, `viewing`, `commenting`). New keys / actions
+do not require backend changes.
 
 ### `WS /users/me/notifications` — per-user notification deltas
 
@@ -546,6 +642,24 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
+        "name": "Admin",
+        "description": (
+            "Platform-administration endpoints under `/admin`. Every "
+            "operation requires the `accessCookie` scheme **and** the "
+            "caller's platform-admin flag — non-admins get HTTP 403 "
+            "`NotAdmin`. Admins are minted out-of-band via the "
+            "`learnic-admin grant-admin <user_id>` CLI (no self-service "
+            "route). Covers a dashboard counters read "
+            "(`GET /admin/stats`), banning a user "
+            "(`POST /admin/users/{user_id}/ban`, which also revokes "
+            "every active session — there is no user-deletion "
+            "counterpart), and permanently deleting a course "
+            "(`DELETE /admin/courses/{course_id}`, irreversible and "
+            "allowed in any status, unlike the author-facing "
+            "draft-only delete)."
+        ),
+    },
+    {
         "name": "Users",
         "description": (
             "User profile reads and edits. `GET /users/{user_id}` is "
@@ -606,8 +720,10 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "be deleted; published or archived products must be "
             "archived first (HTTP 409 `ProductNotInDraft`). "
             "Real-time deltas of product metadata and Q&A flow over "
-            "`WS /products/{product_id}/events` — see the "
-            "**WebSocket channels** section in the API description."
+            "`WS /products/{product_id}/events`; live editor "
+            "cursors flow over `WS /products/{product_id}/cursors` — "
+            "see the **WebSocket channels** section in the API "
+            "description."
         ),
     },
     {
@@ -657,10 +773,12 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "(author/admin removal of access). Course completion "
             "lives on `details.completed_at` and is orthogonal to "
             "`status` — a completed enrollment is still `active`. "
-            "Create: `POST /courses/{course_id}/enrollments` "
-            "(course self-enroll; 409 on `ProductDoesNotSupport`, "
-            "`AlreadyEnrolled`, or `CannotEnrollInUnreleased"
-            "Course`). "
+            "Create: `POST /products/{product_id}/enrollments` "
+            "(self-enroll; product must be `PUBLISHED` — 409 "
+            "`CannotEnrollInUnpublishedProduct` otherwise; 409 on "
+            "`ProductDoesNotSupport`, `AlreadyEnrolled`, or "
+            "`CannotEnrollInUnreleasedCourse`). Admin grants live on "
+            "an internal handler and do not expose an HTTP route. "
             "Caller-scoped: `GET /users/me/enrollments`. "
             "List by parent: "
             "`GET /courses/{course_id}/enrollments` (author/"
@@ -773,6 +891,29 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "`read_product` (every collaborator) — see the "
             "**WebSocket channels** section in the API description "
             "for the full kind list and payload semantics."
+        ),
+    },
+    {
+        "name": "Gifts",
+        "description": (
+            "Gift product (course) access to another person. The "
+            "gifter issues a gift via "
+            "`POST /products/{id}/gifts/by-user` (registered user) or "
+            "`POST /products/{id}/gifts/by-email` (possibly "
+            "unregistered) — both produce a `PENDING_INVITE` row with "
+            "a ~14-day TTL and notify the recipient on three channels: "
+            "a push banner, an in-app card with Accept / Decline "
+            "buttons, and an email with Accept / Decline buttons that "
+            "link to the SPA routes `/gifts/{id}/accept` and "
+            "`/gifts/{id}/decline` (carrying the token). Those pages "
+            "POST to `POST /gifts/{id}/accept-by-token` / "
+            "`/gifts/{id}/decline`; the in-app card POSTs to the "
+            "token-less `POST /gifts/{id}/accept`. Accepting creates "
+            "the course enrollment; the gifter is notified of the "
+            "outcome. The gifter may cancel a still-pending gift with "
+            "`DELETE /gifts/{id}`. Expired pending gifts are purged by "
+            "a nightly job and cannot be accepted. Requires "
+            "`manage_releases` on the product to issue or revoke."
         ),
     },
     {

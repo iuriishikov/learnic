@@ -124,6 +124,13 @@ class UserReaderAlchemy(UserReader):
         )
 
     @override
+    async def is_admin(self, oid: UserID) -> bool | None:
+        stmt = sa.select(users_table.c.is_admin).where(
+            users_table.c.oid == oid,
+        )
+        return await self._session.scalar(stmt)
+
+    @override
     async def search_by_name(
         self,
         tokens: tuple[str, ...],

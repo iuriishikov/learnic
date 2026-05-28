@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from typing import Final, final
 
@@ -21,7 +22,7 @@ from learnic.application.common.persistence.course_lesson import (
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.storage.file_uploads import FileUploadService
-from learnic.entities.course_block.ids import LessonBlockID
+from learnic.entities.course_block.ids import CollageItemID, LessonBlockID
 from learnic.entities.course_block.models import CollageItem, PhotoCollageBlock
 from learnic.entities.course_block.value_objects import (
     BlockTitle,
@@ -116,7 +117,13 @@ class AddPhotoCollageBlockCommandHandler:
             caption = (
                 CollageCaption(src.caption) if src.caption is not None else None
             )
-            out.append(CollageItem(file_id=file.oid, caption=caption))
+            out.append(
+                CollageItem(
+                    oid=CollageItemID(uuid.uuid4()),
+                    file_id=file.oid,
+                    caption=caption,
+                ),
+            )
         return out
 
     async def run(self, data: AddPhotoCollageBlockCommand) -> LessonBlockID:

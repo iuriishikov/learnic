@@ -71,7 +71,14 @@ def parse_device_label(user_agent: str | None) -> str | None:
     return f"{browser} on {operating_system}"
 
 
-def _client_ip(request: Request) -> str | None:
+def client_ip(request: Request) -> str | None:
+    """Best-effort originating client IP, honouring proxy headers.
+
+    Prefers ``X-Forwarded-For`` (first hop) then ``X-Real-IP`` so the
+    captured address is the real client when the API sits behind a
+    reverse proxy / load balancer; falls back to the socket peer.
+    Returns ``None`` when nothing usable is present.
+    """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         # First entry is the originating client; later entries are proxies.
@@ -101,7 +108,7 @@ def device_from_request(request: Request) -> DeviceContext:
     if label is not None:
         label = label[:_DEVICE_LABEL_MAX_LEN]
     return DeviceContext(
-        ip_address=_client_ip(request),
+        ip_address=client_ip(request),
         user_agent=user_agent,
         device_label=label,
     )

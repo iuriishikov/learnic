@@ -101,8 +101,20 @@ from learnic.application.commands.course_block.update_file import (
 from learnic.application.commands.course_block.update_html import (
     UpdateHtmlBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_photo_collage import (
-    UpdatePhotoCollageBlockCommandHandler,
+from learnic.application.commands.course_block.add_photo_collage_item import (
+    AddPhotoCollageItemCommandHandler,
+)
+from learnic.application.commands.course_block.remove_photo_collage_item import (
+    RemovePhotoCollageItemCommandHandler,
+)
+from learnic.application.commands.course_block.reorder_photo_collage_items import (
+    ReorderPhotoCollageItemsCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage_item_caption import (  # noqa: E501
+    UpdatePhotoCollageItemCaptionCommandHandler,
+)
+from learnic.application.commands.course_block.update_photo_collage_title import (
+    UpdatePhotoCollageTitleCommandHandler,
 )
 from learnic.application.commands.course_block.update_video_file import (
     UpdateVideoFileBlockCommandHandler,
@@ -128,11 +140,11 @@ from learnic.application.commands.course_draft.reset import (
 from learnic.application.commands.enrollment.complete import (
     CompleteEnrollmentCommandHandler,
 )
-from learnic.application.commands.enrollment.enroll_in_course import (
-    EnrollStudentInCourseCommandHandler,
+from learnic.application.commands.enrollment.enroll_into_product import (
+    EnrollIntoProductCommandHandler,
 )
-from learnic.application.commands.enrollment.grant_course import (
-    GrantCourseEnrollmentCommandHandler,
+from learnic.application.commands.enrollment.repin import (
+    RePinCourseEnrollmentCommandHandler,
 )
 from learnic.application.commands.enrollment.update_progress import (
     UpdateProgressCommandHandler,
@@ -185,6 +197,9 @@ from learnic.application.commands.product.change_duration import (
 from learnic.application.commands.product.change_name import (
     ChangeProductNameCommandHandler,
 )
+from learnic.application.commands.product.change_visibility import (
+    ChangeProductVisibilityCommandHandler,
+)
 from learnic.application.commands.product.cover.remove import (
     RemoveProductCoverCommandHandler,
 )
@@ -218,6 +233,9 @@ from learnic.application.commands.product_collaboration.invite_by_user import (
 from learnic.application.commands.product_collaboration.leave import (
     LeaveProductCommandHandler,
 )
+from learnic.application.commands.product_collaboration.purge_expired_invites import (  # noqa: E501
+    PurgeExpiredInvitesCommandHandler,
+)
 from learnic.application.commands.product_collaboration.reinvite import (
     ReinviteCollaboratorCommandHandler,
 )
@@ -226,6 +244,33 @@ from learnic.application.commands.product_collaboration.revoke import (
 )
 from learnic.application.commands.product_collaboration.update_grants import (
     UpdateCollaborationGrantsCommandHandler,
+)
+from learnic.application.commands.product_gift.accept import (
+    AcceptGiftByTokenCommandHandler,
+)
+from learnic.application.commands.product_gift.accept_in_app import (
+    AcceptGiftInAppCommandHandler,
+)
+from learnic.application.commands.product_gift.decline_in_app import (
+    DeclineGiftCommandHandler,
+)
+from learnic.application.commands.product_gift.invite_by_email import (
+    InviteGiftByEmailCommandHandler,
+)
+from learnic.application.commands.product_gift.invite_by_user import (
+    InviteGiftByUserCommandHandler,
+)
+from learnic.application.commands.product_gift.purge_expired_invites import (
+    PurgeExpiredGiftsCommandHandler,
+)
+from learnic.application.commands.product_gift.revoke import (
+    RevokeGiftCommandHandler,
+)
+from learnic.application.queries.product_gift.get_gift import (
+    GetGiftQueryHandler,
+)
+from learnic.application.queries.product_gift.list_for_product import (
+    ListProductGiftsQueryHandler,
 )
 from learnic.application.commands.notification.mark_all_as_read import (
     MarkAllNotificationsAsReadCommandHandler,
@@ -395,6 +440,7 @@ from learnic.application.billing.entitlement import EntitlementService
 from learnic.application.common.persistence.billing import (
     AuthorActiveFilesReader,
     FileUsageReader,
+    GlobalSchedulerLock,
     StorageQuotaBreachGateway,
     StorageQuotaLock,
     SubscriptionGateway,
@@ -458,6 +504,13 @@ from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationReader,
     ProductCollaborationSaver,
 )
+from learnic.application.common.persistence.email_sending import (
+    EmailSendingGateway,
+)
+from learnic.application.common.persistence.product_gift import (
+    ProductGiftGateway,
+    ProductGiftReader,
+)
 from learnic.application.common.persistence.role import (
     RoleGateway,
     RoleReader,
@@ -497,6 +550,8 @@ from learnic.application.common.persistence.user import (
 from learnic.application.common.collaboration.event_bus import (
     ContentEventBus,
 )
+from learnic.application.common.cursors.event_bus import CursorsEventBus
+from learnic.application.common.cursors.state import CursorsState
 from learnic.application.common.presence.event_bus import PresenceEventBus
 from learnic.application.common.product_events.event_bus import (
     ProductEventBus,
@@ -516,6 +571,9 @@ from learnic.application.common.security.signup_sessions import (
     SignupSessionStore,
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
+from learnic.application.common.email.rate_limit import (
+    EmailSendRateLimiter,
+)
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.storage.file_uploads import (
     DefaultStorageBucket,
@@ -531,9 +589,39 @@ from learnic.application.queries.presence.get_users_presence import (
 from learnic.application.queries.session.list_my import (
     ListMySessionsQueryHandler,
 )
+from learnic.application.commands.admin.ban_user import (
+    BanUserCommandHandler,
+)
+from learnic.application.commands.admin.delete_course import (
+    AdminDeleteCourseCommandHandler,
+)
+from learnic.application.commands.admin.grant_admin import (
+    GrantAdminCommandHandler,
+)
+from learnic.application.queries.admin.get_metric_series import (
+    GetAdminMetricSeriesQueryHandler,
+)
+from learnic.application.queries.admin.get_stats import (
+    GetAdminStatsQueryHandler,
+)
+from learnic.application.common.persistence.admin_metrics import (
+    AdminMetricsReader,
+)
+from learnic.application.common.persistence.admin_stats import (
+    AdminStatsReader,
+)
+from learnic.application.common.persistence.teacher_ranking import (
+    TeacherRankingReader,
+)
 from learnic.application.queries.user.get import GetUserQueryHandler
+from learnic.application.queries.user.get_admin_status import (
+    GetMyAdminStatusQueryHandler,
+)
 from learnic.application.queries.user.search import (
     SearchUsersQueryHandler,
+)
+from learnic.application.queries.user.top_teachers import (
+    GetTopTeachersQueryHandler,
 )
 from learnic.application.queries.product.check_name_availability import (
     CheckProductNameAvailabilityQueryHandler,
@@ -550,6 +638,9 @@ from learnic.application.queries.product.get_published import (
 from learnic.application.queries.product.search import (
     SearchPublishedProductsQueryHandler,
 )
+from learnic.application.queries.product.search_my import (
+    SearchMyProductsQueryHandler,
+)
 from learnic.application.queries.product.get_by_user import (
     GetUserProductsQueryHandler,
 )
@@ -558,11 +649,14 @@ from learnic.application.queries.product.recommend_for_me import (
     RankingWeights,
     RecommendForMeQueryHandler,
 )
+from learnic.application.queries.course_content.get_block import (
+    GetLessonBlockQueryHandler,
+)
 from learnic.application.queries.course_content.get_draft import (
     GetCourseDraftQueryHandler,
 )
-from learnic.application.queries.course_content.get_for_student import (
-    GetMyCourseContentQueryHandler,
+from learnic.application.queries.course_content.get import (
+    GetCourseContentQueryHandler,
 )
 from learnic.application.queries.course_release.get_content import (
     GetCourseReleaseContentQueryHandler,
@@ -645,6 +739,7 @@ from learnic.infrastructure.persistence.adapters.course_release import (
 from learnic.infrastructure.persistence.adapters.billing import (
     AuthorActiveFilesReaderAlchemy,
     FileUsageReaderAlchemy,
+    GlobalSchedulerLockAlchemy,
     StorageQuotaBreachMapperAlchemy,
     StorageQuotaLockAlchemy,
     SubscriptionMapperAlchemy,
@@ -687,6 +782,13 @@ from learnic.infrastructure.persistence.adapters.product_collaboration import (
     ProductCollaborationMapperAlchemy,
     ProductCollaborationReaderAlchemy,
     ProductCollaborationSaverAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.email_sending import (
+    EmailSendingMapperAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.product_gift import (
+    ProductGiftMapperAlchemy,
+    ProductGiftReaderAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.resource_lineage import (
     ResourceLineageReaderAlchemy,
@@ -742,6 +844,15 @@ from learnic.infrastructure.persistence.adapters.transaction import (
     EntitySaverAlchemy,
     TransactionAlchemy,
 )
+from learnic.infrastructure.persistence.adapters.admin_metrics import (
+    AdminMetricsReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.admin_stats import (
+    AdminStatsReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.teacher_ranking import (
+    TeacherRankingReaderAlchemy,
+)
 from learnic.infrastructure.persistence.adapters.user import (
     UserMapperAlchemy,
     UserReaderAlchemy,
@@ -756,6 +867,12 @@ from learnic.infrastructure.persistence.adapters.user_experience import (
 )
 from learnic.infrastructure.collaboration.event_bus_redis import (
     ContentEventBusRedis,
+)
+from learnic.infrastructure.cursors.adapters.event_bus_redis import (
+    CursorsEventBusRedis,
+)
+from learnic.infrastructure.cursors.adapters.state_redis import (
+    CursorsStateRedis,
 )
 from learnic.infrastructure.presence.adapters.event_bus_redis import (
     PresenceEventBusRedis,
@@ -775,6 +892,7 @@ from learnic.infrastructure.security.bleach_html_sanitizer import (
 from learnic.infrastructure.security.jwt_access import JwtAccessTokenService
 from learnic.infrastructure.storage.adapters.s3 import S3FileStorage
 from learnic.infrastructure.tasks.scheduler import TaskSchedulerTaskIQ
+from learnic.presentation.http.common.admin_deps import AdminAuthenticator
 from learnic.presentation.http.common.auth_deps import Authenticator
 
 
@@ -888,6 +1006,18 @@ class GatewaysProvider(Provider):
     entity_saver = provide(EntitySaverAlchemy, provides=EntitySaver)
     user_gateway = provide(UserMapperAlchemy, provides=UserGateway)
     user_reader = provide(UserReaderAlchemy, provides=UserReader)
+    admin_stats_reader = provide(
+        AdminStatsReaderAlchemy,
+        provides=AdminStatsReader,
+    )
+    teacher_ranking_reader = provide(
+        TeacherRankingReaderAlchemy,
+        provides=TeacherRankingReader,
+    )
+    admin_metrics_reader = provide(
+        AdminMetricsReaderAlchemy,
+        provides=AdminMetricsReader,
+    )
     files_gateway = provide(FilesMapperAlchemy, provides=FilesGateway)
     files_reader = provide(FilesReaderAlchemy, provides=FilesReader)
     subscription_gateway = provide(
@@ -905,6 +1035,10 @@ class GatewaysProvider(Provider):
     storage_quota_lock = provide(
         StorageQuotaLockAlchemy,
         provides=StorageQuotaLock,
+    )
+    global_scheduler_lock = provide(
+        GlobalSchedulerLockAlchemy,
+        provides=GlobalSchedulerLock,
     )
     storage_quota_breach_gateway = provide(
         StorageQuotaBreachMapperAlchemy,
@@ -1026,6 +1160,14 @@ class GatewaysProvider(Provider):
         ProductCollaborationSaverAlchemy,
         provides=ProductCollaborationSaver,
     )
+    product_gift_gateway = provide(
+        ProductGiftMapperAlchemy,
+        provides=ProductGiftGateway,
+    )
+    product_gift_reader = provide(
+        ProductGiftReaderAlchemy,
+        provides=ProductGiftReader,
+    )
     notification_gateway = provide(
         NotificationGatewayAlchemy,
         provides=NotificationGateway,
@@ -1072,6 +1214,11 @@ class GatewaysProvider(Provider):
         provides=RoleHierarchy,
     )
     file_upload_service = provide(FileUploadService)
+    email_sending_gateway = provide(
+        EmailSendingMapperAlchemy,
+        provides=EmailSendingGateway,
+    )
+    email_send_rate_limiter = provide(EmailSendRateLimiter)
 
 
 class SecurityProvider(Provider):
@@ -1107,6 +1254,7 @@ class SecurityProvider(Provider):
         scope=Scope.APP,
     )
     authenticator = provide(Authenticator, scope=Scope.REQUEST)
+    admin_authenticator = provide(AdminAuthenticator, scope=Scope.REQUEST)
 
 
 class S3Provider(Provider):
@@ -1175,6 +1323,13 @@ class PresenceProvider(Provider):
 
     event_bus = provide(PresenceEventBusRedis, provides=PresenceEventBus)
     tracker = provide(PresenceTrackerRedis, provides=PresenceTracker)
+
+
+class CursorsProvider(Provider):
+    scope = Scope.APP
+
+    event_bus = provide(CursorsEventBusRedis, provides=CursorsEventBus)
+    state = provide(CursorsStateRedis, provides=CursorsState)
 
 
 class CollaborationProvider(Provider):
@@ -1318,8 +1473,16 @@ class ConfirmEventsProvider(Provider):
 class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
+    grant_admin = provide(GrantAdminCommandHandler)
+    ban_user = provide(BanUserCommandHandler)
+    admin_delete_course = provide(AdminDeleteCourseCommandHandler)
+    get_admin_stats = provide(GetAdminStatsQueryHandler)
+    get_admin_metric_series = provide(GetAdminMetricSeriesQueryHandler)
+
     get_user = provide(GetUserQueryHandler)
+    get_my_admin_status = provide(GetMyAdminStatusQueryHandler)
     search_users = provide(SearchUsersQueryHandler)
+    get_top_teachers = provide(GetTopTeachersQueryHandler)
 
     get_user_presence = provide(GetUserPresenceQueryHandler)
     get_users_presence = provide(GetUsersPresenceQueryHandler)
@@ -1371,6 +1534,9 @@ class InteractorsProvider(Provider):
         ChangeProductDescriptionCommandHandler,
     )
     change_product_duration = provide(ChangeProductDurationCommandHandler)
+    change_product_visibility = provide(
+        ChangeProductVisibilityCommandHandler,
+    )
     set_product_cover = provide(SetProductCoverCommandHandler)
     remove_product_cover = provide(RemoveProductCoverCommandHandler)
     publish_product = provide(PublishProductCommandHandler)
@@ -1379,6 +1545,7 @@ class InteractorsProvider(Provider):
     delete_product = provide(DeleteProductCommandHandler)
     get_product = provide(GetProductQueryHandler)
     get_my_products = provide(GetMyProductsQueryHandler)
+    search_my_products = provide(SearchMyProductsQueryHandler)
     get_published_products = provide(GetPublishedProductsQueryHandler)
     search_published_products = provide(
         SearchPublishedProductsQueryHandler,
@@ -1398,14 +1565,10 @@ class InteractorsProvider(Provider):
     delete_product_qa = provide(DeleteProductQACommandHandler)
     get_product_qa_list = provide(GetProductQAListQueryHandler)
 
-    enroll_student_in_course = provide(
-        EnrollStudentInCourseCommandHandler,
-    )
-    grant_course_enrollment = provide(
-        GrantCourseEnrollmentCommandHandler,
-    )
+    enroll_into_product = provide(EnrollIntoProductCommandHandler)
     update_progress = provide(UpdateProgressCommandHandler)
     complete_enrollment = provide(CompleteEnrollmentCommandHandler)
+    repin_course_enrollment = provide(RePinCourseEnrollmentCommandHandler)
     get_product_enrollments = provide(GetProductEnrollmentsQueryHandler)
     get_student_enrollments = provide(GetStudentEnrollmentsQueryHandler)
 
@@ -1440,7 +1603,17 @@ class InteractorsProvider(Provider):
     update_text_input_block = provide(UpdateTextInputBlockCommandHandler)
     update_file_block = provide(UpdateFileBlockCommandHandler)
     update_video_file_block = provide(UpdateVideoFileBlockCommandHandler)
-    update_photo_collage_block = provide(UpdatePhotoCollageBlockCommandHandler)
+    add_photo_collage_item = provide(AddPhotoCollageItemCommandHandler)
+    remove_photo_collage_item = provide(RemovePhotoCollageItemCommandHandler)
+    reorder_photo_collage_items = provide(
+        ReorderPhotoCollageItemsCommandHandler,
+    )
+    update_photo_collage_item_caption = provide(
+        UpdatePhotoCollageItemCaptionCommandHandler,
+    )
+    update_photo_collage_title = provide(
+        UpdatePhotoCollageTitleCommandHandler,
+    )
     entitlement_service = provide(EntitlementService)
     get_my_subscription = provide(GetMySubscriptionQueryHandler)
     get_course_storage_remaining = provide(
@@ -1457,7 +1630,8 @@ class InteractorsProvider(Provider):
     reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
     delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
     get_course_draft = provide(GetCourseDraftQueryHandler)
-    get_my_course_content = provide(GetMyCourseContentQueryHandler)
+    get_lesson_block = provide(GetLessonBlockQueryHandler)
+    get_course_content = provide(GetCourseContentQueryHandler)
     create_course_release = provide(CreateCourseReleaseCommandHandler)
     list_course_releases = provide(ListCourseReleasesQueryHandler)
     get_course_release_content = provide(
@@ -1497,6 +1671,19 @@ class InteractorsProvider(Provider):
     revoke_collaboration = provide(RevokeCollaborationCommandHandler)
     reinvite_collaborator = provide(ReinviteCollaboratorCommandHandler)
     leave_product = provide(LeaveProductCommandHandler)
+    purge_expired_collaboration_invites = provide(
+        PurgeExpiredInvitesCommandHandler,
+    )
+
+    invite_gift_by_user = provide(InviteGiftByUserCommandHandler)
+    invite_gift_by_email = provide(InviteGiftByEmailCommandHandler)
+    accept_gift_by_token = provide(AcceptGiftByTokenCommandHandler)
+    accept_gift_in_app = provide(AcceptGiftInAppCommandHandler)
+    decline_gift = provide(DeclineGiftCommandHandler)
+    revoke_gift = provide(RevokeGiftCommandHandler)
+    purge_expired_gifts = provide(PurgeExpiredGiftsCommandHandler)
+    get_gift = provide(GetGiftQueryHandler)
+    list_product_gifts = provide(ListProductGiftsQueryHandler)
     list_product_collaborators = provide(
         ListProductCollaboratorsQueryHandler,
     )
@@ -1570,6 +1757,7 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         PushProvider(),
         RedisProvider(),
         PresenceProvider(),
+        CursorsProvider(),
         CollaborationProvider(),
         ProductEventsProvider(),
         NotificationEventsProvider(),

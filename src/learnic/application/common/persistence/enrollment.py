@@ -55,6 +55,16 @@ class EnrollmentGateway(Protocol):
         student_id: UserID,
     ) -> Enrollment | None: ...
 
+    async def update_course_details(self, enrollment: Enrollment) -> None:
+        """Persist the course-kind ``details`` body of ``enrollment``.
+
+        The polymorphic ``details`` body is not mapped
+        imperatively, so SQLAlchemy cannot auto-flush mutations
+        on it. Handlers that mutate ``details`` (e.g. re-pinning
+        the release) call this method to write the subtype row.
+        """
+        ...
+
 
 class EnrollmentReader(Protocol):
     """Read-side queries returning :class:`EnrollmentView`."""

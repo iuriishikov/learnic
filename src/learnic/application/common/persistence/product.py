@@ -9,6 +9,7 @@ from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
+    ProductVisibility,
 )
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
@@ -38,6 +39,7 @@ class ProductView:
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    visibility: ProductVisibility = ProductVisibility.PUBLIC
 
 
 @dataclass(slots=True, frozen=True)
@@ -80,6 +82,47 @@ class ProductReader(Protocol):
         Includes products where ``user_id`` is the author **or** has
         an :class:`CollaborationStatus.ACTIVE` collaboration.
         ``PENDING_INVITE`` and ``REVOKED`` collaborations are excluded.
+        """
+        ...
+
+    async def accessible_to_count(self, user_id: UserID) -> int:
+        """Return the total number of products ``user_id`` can access.
+
+        Mirrors ``accessible_to(...)``'s membership predicate (author
+        OR active collaborator, any product status) without
+        pagination so the SPA can drive numbered page controls on
+        the "my courses" view.
+        """
+        ...
+
+    async def search_accessible_to(
+        self,
+        user_id: UserID,
+        query: str,
+        pagination: Pagination,
+    ) -> list[ProductView]:
+        """Search ``user_id``'s accessible products by free-text ``query``.
+
+        Same membership rule as ``accessible_to(...)`` (author OR
+        active collaborator, any status) intersected with the
+        weighted full-text + ``pg_trgm`` fallback used by
+        ``search_published``. ``query`` is trimmed/lower-cased
+        inside the adapter; callers pass the raw user input. An
+        empty query is invalid — the handler routes empty input to
+        ``accessible_to(...)`` instead.
+        """
+        ...
+
+    async def search_accessible_to_count(
+        self,
+        user_id: UserID,
+        query: str,
+    ) -> int:
+        """Return the total number of accessible products matching ``query``.
+
+        Mirrors ``search_accessible_to(...)``'s WHERE filter without
+        pagination so the SPA can render numbered page controls on
+        the search-mode "my courses" view.
         """
         ...
 
@@ -140,8 +183,8 @@ class ProductReader(Protocol):
         """Published products authored by ``author_id``, newest first.
 
         Powers the public profile page's "products" section. Excludes
-        drafts, archived, and banned products — only ``PUBLISHED`` rows
-        are visible to non-author viewers.
+        drafts and archived products — only ``PUBLISHED`` rows are
+        visible to non-author viewers.
         """
         ...
 

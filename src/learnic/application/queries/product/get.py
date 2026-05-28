@@ -11,7 +11,11 @@ from learnic.application.common.persistence.tag import TagView
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
-from learnic.entities.product.enums import ProductStatus, ProductType
+from learnic.entities.product.enums import (
+    ProductStatus,
+    ProductType,
+    ProductVisibility,
+)
 from learnic.entities.product.ids import ProductID
 
 
@@ -35,6 +39,7 @@ class ProductOutput:
     oid: ProductID
     type: ProductType
     status: ProductStatus
+    visibility: ProductVisibility
     name: str
     description: str | None
     total_duration_in_hours: int | None
@@ -76,6 +81,7 @@ async def resolve_product_output(
         oid=view.oid,
         type=view.type,
         status=view.status,
+        visibility=view.visibility,
         name=view.name,
         description=view.description,
         total_duration_in_hours=view.total_duration_in_hours,
@@ -90,6 +96,16 @@ async def resolve_product_output(
 
 @final
 class GetProductQueryHandler:
+    """Fetch one product by id.
+
+    Returns the same payload regardless of visibility — a ``PRIVATE``
+    product is still publicly browsable (it shows up in the catalog
+    and on its detail page); the only thing privacy changes is that
+    self-enrollment is refused (see ``EnrollIntoProductCommand``).
+    The ``visibility`` field rides along so the SPA can hide the
+    self-enroll CTA and surface "invite-only" instead.
+    """
+
     def __init__(
         self,
         reader: ProductReader,

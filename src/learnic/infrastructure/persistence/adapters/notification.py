@@ -22,6 +22,7 @@ from learnic.application.common.notifications.reader import NotificationReader
 from learnic.application.common.notifications.views import (
     CategoryCount,
     CollaborationSnapshotView,
+    GiftSnapshotView,
     NotificationCounters,
     NotificationListPage,
     NotificationView,
@@ -40,6 +41,8 @@ from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.enums import GiftStatus
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.notifications.specs._persistence import (
@@ -51,6 +54,9 @@ from learnic.infrastructure.persistence.models.notification import (
 from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.product_collaboration import (
     product_collaborations_table,
+)
+from learnic.infrastructure.persistence.models.product_gift import (
+    product_gifts_table,
 )
 from learnic.infrastructure.persistence.models.refresh_token import (
     refresh_tokens_table,
@@ -271,6 +277,37 @@ class NotificationReaderAlchemy(NotificationReader):
         return self._project_rows(rows, details_by_id, refs)
 
     @override
+    async def list_gift_received_for_gift(
+        self,
+        recipient_id: UserID,
+        gift_id: ProductGiftID,
+    ) -> tuple[NotificationView, ...]:
+        gift_received_spec = _persistence(
+            self._kinds.by_kind(NotificationKind.GIFT_RECEIVED),
+        )
+        stmt = (
+            self._select_with_actor()
+            .join(
+                gift_received_spec.table,
+                gift_received_spec.table.c.notification_id
+                == notifications_table.c.oid,
+            )
+            .where(
+                notifications_table.c.recipient_id == recipient_id,
+                notifications_table.c.kind
+                == NotificationKind.GIFT_RECEIVED.value,
+                gift_received_spec.table.c.gift_id == gift_id,
+            )
+            .order_by(notifications_table.c.created_at.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        if not rows:
+            return ()
+        details_by_id = await self._load_details_for_rows(rows)
+        refs = await self._resolve_refs(recipient_id, details_by_id)
+        return self._project_rows(rows, details_by_id, refs)
+
+    @override
     async def counters_for(
         self,
         recipient_id: UserID,
@@ -375,6 +412,7 @@ class NotificationReaderAlchemy(NotificationReader):
         collaborations = await self._fetch_collaborations(
             request.collaboration_ids,
         )
+        gifts = await self._fetch_gifts(request.gift_ids)
         manage_perms = await self._fetch_manage_perms(
             recipient_id,
             request.products_needing_manage_perm,
@@ -387,6 +425,7 @@ class NotificationReaderAlchemy(NotificationReader):
             products=products,
             users=users,
             collaborations=collaborations,
+            gifts=gifts,
             manage_perms=manage_perms,
             session_active=session_active,
         )
@@ -464,6 +503,37 @@ class NotificationReaderAlchemy(NotificationReader):
         return {
             ProductCollaborationID(row.oid): CollaborationSnapshotView(
                 status=CollaborationStatus(row.status),
+                accepted_at=row.accepted_at,
+                declined_at=row.declined_at,
+                revoked_at=row.revoked_at,
+                invite_expires_at=row.invite_expires_at,
+            )
+            for row in rows
+        }
+
+    async def _fetch_gifts(
+        self,
+        ids: set[ProductGiftID],
+    ) -> dict[ProductGiftID, GiftSnapshotView]:
+        if not ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                sa.select(
+                    product_gifts_table.c.oid,
+                    product_gifts_table.c.status,
+                    product_gifts_table.c.accepted_at,
+                    product_gifts_table.c.declined_at,
+                    product_gifts_table.c.revoked_at,
+                    product_gifts_table.c.invite_expires_at,
+                ).where(
+                    product_gifts_table.c.oid.in_(ids),
+                ),
+            )
+        ).all()
+        return {
+            ProductGiftID(row.oid): GiftSnapshotView(
+                status=GiftStatus(row.status),
                 accepted_at=row.accepted_at,
                 declined_at=row.declined_at,
                 revoked_at=row.revoked_at,

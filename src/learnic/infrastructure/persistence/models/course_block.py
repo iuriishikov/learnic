@@ -26,6 +26,7 @@ from learnic.entities.course_block.constants import (
     BLOCK_TITLE_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    PHOTO_COLLAGE_CAPTION_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
     VIDEO_TITLE_MAX_LEN,
 )
@@ -231,12 +232,14 @@ text_input_blocks_table = sa.Table(
 )
 
 
-# File-backed block tables. ``file_id`` is ``ON DELETE SET NULL`` so a
-# block survives the deletion of its backing file (read-side renders
-# the block as a missing-file placeholder) — same shape as
-# ``products.cover_file_id``. Two separate tables for ``file_blocks``
-# and ``video_file_blocks`` keep the discriminator-to-table mapping
-# 1:1 with ``BlockType`` (matching the Rutube vs hosted-video split).
+# File-backed block tables. ``file_id`` is ``ON DELETE CASCADE`` so
+# enforcement of the storage quota (or any other hard-delete of the
+# backing file) takes the block with it — product policy: if the
+# author lost the file because they exceeded the quota and the grace
+# period expired, the dependent block is no longer useful and goes
+# too. Replace flows (update_file / update_video_file) UPDATE the
+# block to point at the new file BEFORE the cascade fires, so the
+# CASCADE finds nothing to delete in that case.
 file_blocks_table = sa.Table(
     "file_blocks",
     mapper_registry.metadata,
@@ -249,7 +252,7 @@ file_blocks_table = sa.Table(
     sa.Column(
         "file_id",
         sa.Uuid,
-        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        sa.ForeignKey("files.oid", ondelete="CASCADE"),
         nullable=True,
     ),
     sa.Column(
@@ -272,7 +275,7 @@ video_file_blocks_table = sa.Table(
     sa.Column(
         "file_id",
         sa.Uuid,
-        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        sa.ForeignKey("files.oid", ondelete="CASCADE"),
         nullable=True,
     ),
     sa.Column(
@@ -283,12 +286,16 @@ video_file_blocks_table = sa.Table(
 )
 
 
-# Photo-collage ``items`` is a JSONB array of ``{"file_id": "<uuid>|
-# null", "caption": "<str>|null"}`` entries — same denormalised
-# rationale as ``code_blocks.tabs`` (opaque to SQL, invariants
-# enforced upstream by the entity). Per-item file FKs cannot be
-# expressed inside a JSONB array; referential integrity for items
-# is intentionally managed at the application boundary.
+# Photo-collage items moved out of a JSONB array on
+# ``photo_collage_blocks`` into a dedicated child table so granular
+# operations (add / remove / reorder / caption edit) can address one
+# photo by its stable ``oid`` without rewriting the whole array.
+# Per-item file FKs are now real ``files`` references with
+# ``ON DELETE SET NULL`` (same rationale as the parent ``file_blocks``
+# / ``video_file_blocks``: the gallery survives backing-file deletion
+# with a placeholder slot). The release snapshot side continues to
+# store items denormalised inside a JSONB column on
+# ``course_release_photo_collage_blocks``.
 photo_collage_blocks_table = sa.Table(
     "photo_collage_blocks",
     mapper_registry.metadata,
@@ -298,10 +305,60 @@ photo_collage_blocks_table = sa.Table(
         sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
         primary_key=True,
     ),
-    sa.Column("items", JSONB, nullable=False),
     sa.Column(
         "title",
         sa.String(BLOCK_TITLE_MAX_LEN),
         nullable=True,
+    ),
+)
+
+
+photo_collage_items_table = sa.Table(
+    "photo_collage_items",
+    mapper_registry.metadata,
+    sa.Column("oid", sa.Uuid, primary_key=True),
+    sa.Column(
+        "block_id",
+        sa.Uuid,
+        sa.ForeignKey("photo_collage_blocks.oid", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("position", sa.Integer, nullable=False),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "caption",
+        sa.String(PHOTO_COLLAGE_CAPTION_MAX_LEN),
+        nullable=True,
+    ),
+    sa.Column(
+        "created_at",
+        sa.DateTime(timezone=True),
+        server_default=sa.func.now(),
+        nullable=False,
+    ),
+    sa.Column(
+        "updated_at",
+        sa.DateTime(timezone=True),
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+        server_onupdate=sa.func.now(),
+        nullable=False,
+    ),
+    # DEFERRABLE so reorder UPDATEs that swap positions inside a
+    # single CASE WHEN statement don't fail the per-row check —
+    # the constraint is only validated at COMMIT, by which point
+    # every row has its final position.
+    sa.UniqueConstraint(
+        "block_id",
+        "position",
+        name="uq_photo_collage_items_block_position",
+        deferrable=True,
+        initially="DEFERRED",
     ),
 )

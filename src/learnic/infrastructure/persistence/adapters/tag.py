@@ -99,7 +99,7 @@ class TagReaderAlchemy(TagReader):
     @override
     async def popular(self, limit: int) -> list[TagView]:
         # Count usages only across PUBLISHED products — draft /
-        # archived / banned slices are not part of what a marketplace
+        # archived slices are not part of what a marketplace
         # visitor can see, so a tag whose only carriers are drafts
         # should not surface in the public popular row.
         usage_count = sa.func.count(product_tags_table.c.product_id).label(

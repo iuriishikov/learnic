@@ -14,6 +14,8 @@ from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.enums import GiftStatus
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 
@@ -165,6 +167,53 @@ class StorageQuotaEnforcedView:
     freed_bytes: int
 
 
+@dataclass(slots=True, frozen=True)
+class GiftSnapshotView:
+    """Live snapshot of the gift referenced by a gift notification.
+
+    Embedded inside :class:`GiftReceivedView` / :class:`GiftAcceptedView`
+    / :class:`GiftDeclinedView` and hydrated by the reader through a
+    join with ``product_gifts``. The frontend uses :attr:`status`
+    (plus the timestamps) as the single source of truth for the
+    Accept / Decline card state — a reload picks up the latest gift
+    row, so local React state never has to remember whether the gift
+    was already resolved.
+
+    ``None`` only if the underlying gift row was deleted out of band
+    (the nightly expiry sweep removes expired pending rows). Treat
+    ``None`` defensively as ``unavailable`` on the client.
+    """
+
+    status: GiftStatus
+    accepted_at: datetime | None
+    declined_at: datetime | None
+    revoked_at: datetime | None
+    invite_expires_at: datetime | None
+
+
+@dataclass(slots=True, frozen=True)
+class GiftReceivedView:
+    gift_id: ProductGiftID
+    product: ProductRefView
+    gift: GiftSnapshotView | None
+
+
+@dataclass(slots=True, frozen=True)
+class GiftAcceptedView:
+    gift_id: ProductGiftID
+    product: ProductRefView
+    recipient: UserRefView
+    gift: GiftSnapshotView | None
+
+
+@dataclass(slots=True, frozen=True)
+class GiftDeclinedView:
+    gift_id: ProductGiftID
+    product: ProductRefView
+    decliner: UserRefView
+    gift: GiftSnapshotView | None
+
+
 NotificationDetailsView = (
     InviteSentView
     | InviteAcceptedView
@@ -173,6 +222,9 @@ NotificationDetailsView = (
     | NewLoginView
     | StorageQuotaWarningView
     | StorageQuotaEnforcedView
+    | GiftReceivedView
+    | GiftAcceptedView
+    | GiftDeclinedView
 )
 
 

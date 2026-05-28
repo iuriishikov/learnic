@@ -27,6 +27,7 @@ from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 _logger = logging.getLogger(__name__)
@@ -139,6 +140,28 @@ class NotificationPublisher:
         views = await self._reader.list_invite_sent_for_collaboration(
             recipient_id,
             collaboration_id,
+        )
+        for view in views:
+            await self._event_bus.publish(
+                recipient_id,
+                NotificationUpdatedEvent(notification=view),
+            )
+
+    async def republish_for_gift(
+        self,
+        recipient_id: UserID,
+        gift_id: ProductGiftID,
+    ) -> None:
+        """Re-emit the recipient's ``gift_received`` card(s) for ``gift_id``.
+
+        Mirrors :meth:`republish_for_collaboration`: after a gift
+        changes status (accept / decline / revoke) the recipient's
+        own card has to flip in real time so the Accept / Decline
+        buttons resolve without a full-list refetch.
+        """
+        views = await self._reader.list_gift_received_for_gift(
+            recipient_id,
+            gift_id,
         )
         for view in views:
             await self._event_bus.publish(

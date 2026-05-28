@@ -16,22 +16,31 @@ from fastapi_error_map import rule
 from fastapi_error_map.rules import Rule
 
 from learnic.application.common.errors import (
+    CannotEnrollInUnpublishedProductError,
+    CannotGiftToOwnerError,
     CannotInviteOwnerError,
     CollaborationAlreadyExistsError,
     EmailInviteRateLimitExceededError,
+    EmailSendRateLimitExceededError,
     EntityNotFoundError,
+    GiftAlreadyExistsError,
     InsufficientPermissionsError,
     InvalidTokenError,
     InviteEmailMismatchError,
+    NotAdminError,
     NotResourceOwnerError,
+    ProductNotGiftableError,
     RoleInUseError,
     RoleNameAlreadyTakenError,
-    StorageQuotaExceededError,
-    WrongFileContentTypeError,
 )
 from learnic.entities.common.errors import FieldError
 from learnic.entities.product_collaboration.errors import (
     OperationNotAllowedInStatusError,
+)
+from learnic.entities.product_gift.errors import (
+    InviteTokenExpiredError,
+    InviteTokenMismatchError,
+    OperationNotAllowedInGiftStatusError,
 )
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
@@ -75,6 +84,16 @@ EMAIL_ALREADY_REGISTERED_RULE: Final[Rule] = rule(
 )
 
 EMAIL_NOT_VERIFIED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.FORBIDDEN,
+    translator=_named,
+)
+
+ACCOUNT_BANNED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.FORBIDDEN,
+    translator=_named,
+)
+
+NOT_ADMIN_RULE: Final[Rule] = rule(
     status=HTTPStatus.FORBIDDEN,
     translator=_named,
 )
@@ -142,6 +161,25 @@ CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
+CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""Body shape: ``{"error": "CannotEnrollInUnpublishedProduct",
+"product_id": ..., "status": "draft"|"archived"}`` — the SPA
+can tell the user *why* the self-enroll was rejected (draft vs.
+archived) and decide whether to surface a "course not yet
+available" CTA or hide the action entirely."""
+
+CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+"""409 ``{"error": "CannotEnrollInPrivateProduct"}`` — self-enroll was
+attempted on a private (invite-only) product. The SPA should hide the
+self-enroll CTA for private products and surface gift/invite access
+instead."""
+
 PRODUCT_DOES_NOT_SUPPORT_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_field,
@@ -169,8 +207,37 @@ COHORT_FULL_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
+ENROLLMENT_DOES_NOT_SUPPORT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""Body shape: ``{"error": "EnrollmentDoesNotSupport",
+"enrollment_id": ..., "enrollment_kind": "course",
+"capability": "<capability>"}`` — mirrors
+:data:`PRODUCT_DOES_NOT_SUPPORT_RULE` so the SPA can branch on
+which enrollment kind is missing which capability."""
+
+CANNOT_REPIN_REVOKED_ENROLLMENT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""Body shape: ``{"error": "CannotRepinRevokedEnrollment",
+"enrollment_id": ..., "status": "revoked"}`` — re-pin was
+attempted on a non-ACTIVE enrollment."""
+
 AUTHENTICATED_MAP: Final[dict[type[Exception], int | Rule]] = {
     InvalidTokenError: INVALID_TOKEN_RULE,
+    EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+}
+
+# Base preset for admin-only routes: the access cookie must validate
+# (401), the caller must carry the platform-admin flag (403), and the
+# targeted entity must exist (404). Admin auth runs through
+# ``AdminAuthenticator`` which raises ``InvalidTokenError`` /
+# ``NotAdminError``.
+ADMIN_MAP: Final[dict[type[Exception], int | Rule]] = {
+    InvalidTokenError: INVALID_TOKEN_RULE,
+    NotAdminError: NOT_ADMIN_RULE,
     EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
 }
 
@@ -242,12 +309,23 @@ EMAIL_INVITE_RATE_LIMIT_RULE: Final[Rule] = rule(
     translator=_rate_limited,
 )
 
+EMAIL_SEND_RATE_LIMIT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.TOO_MANY_REQUESTS,
+    translator=_rate_limited,
+)
+"""429 with body ``{"error": "EmailSendRateLimitExceeded", "limit":
+int, "retry_after_seconds": int}`` — the cross-flow per-user
+outbound-email cap enforced by ``EmailSendRateLimiter``. Distinct from
+``EMAIL_INVITE_RATE_LIMIT_RULE`` (invite/gift-only cap), but shares the
+same response shape."""
+
 COLLABORATION_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     CannotInviteOwnerError: CANNOT_INVITE_OWNER_RULE,
     CollaborationAlreadyExistsError: COLLABORATION_ALREADY_EXISTS_RULE,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
     EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
+    EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
 }
 
 OPERATION_NOT_ALLOWED_IN_STATUS_RULE: Final[Rule] = rule(
@@ -263,6 +341,7 @@ COLLABORATION_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
     OperationNotAllowedInStatusError: OPERATION_NOT_ALLOWED_IN_STATUS_RULE,
+    EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
 }
 
 ROLE_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {
@@ -280,5 +359,73 @@ COLLABORATION_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_WITH_FIELD_MAP,
     NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
     InviteEmailMismatchError: INVITE_EMAIL_MISMATCH_RULE,
+}
+
+# ------------------------------- gifts --------------------------------- #
+
+CANNOT_GIFT_TO_OWNER_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+
+GIFT_ALREADY_EXISTS_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+
+PRODUCT_NOT_GIFTABLE_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""409 with body ``{"error": "ProductNotGiftable", "product_id": ...,
+"product_type": "webinar"}`` — only course products can be gifted."""
+
+GIFT_TOKEN_ERROR_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+"""409 ``{"error": "InviteTokenMismatch"|"InviteTokenExpired"}`` — the
+gift accept token did not match the stored hash or its TTL elapsed."""
+
+GIFT_OPERATION_NOT_ALLOWED_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""409 ``{"error": "OperationNotAllowedInGiftStatusError", "status":
+"...", "operation": "..."}`` — accept/decline/revoke attempted on a
+gift in a status that forbids it (already accepted/declined/revoked)."""
+
+GIFT_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
+    CannotGiftToOwnerError: CANNOT_GIFT_TO_OWNER_RULE,
+    GiftAlreadyExistsError: GIFT_ALREADY_EXISTS_RULE,
+    ProductNotGiftableError: PRODUCT_NOT_GIFTABLE_RULE,
+    CannotEnrollInUnpublishedProductError: (
+        CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE
+    ),
+    EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
+    EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
+}
+
+GIFT_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_WITH_FIELD_MAP,
+    NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
+    InviteEmailMismatchError: INVITE_EMAIL_MISMATCH_RULE,
+    CannotEnrollInUnpublishedProductError: (
+        CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE
+    ),
+    OperationNotAllowedInGiftStatusError: GIFT_OPERATION_NOT_ALLOWED_RULE,
+    InviteTokenMismatchError: GIFT_TOKEN_ERROR_RULE,
+    InviteTokenExpiredError: GIFT_TOKEN_ERROR_RULE,
+}
+
+GIFT_REVOKE_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
+    OperationNotAllowedInGiftStatusError: GIFT_OPERATION_NOT_ALLOWED_RULE,
+}
+
+GIFT_GET_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_MAP,
+    NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
 }
 

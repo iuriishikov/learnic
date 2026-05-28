@@ -6,8 +6,11 @@ from typing import Self
 from learnic.entities.common.base_entity import BaseEntity
 from learnic.entities.product.ids import ProductID
 from learnic.entities.statistic.details import (
+    EnrollmentDetails,
     ProductViewDetails,
     ProfileViewDetails,
+    RegistrationDetails,
+    SiteVisitDetails,
     StatisticDetails,
 )
 from learnic.entities.statistic.enums import StatisticType
@@ -76,4 +79,53 @@ class Statistic(BaseEntity[StatisticID]):
                 product_id=product_id,
                 referrer=referrer,
             ),
+        )
+
+    @classmethod
+    def for_registration(
+        cls,
+        *,
+        actor_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=StatisticID(uuid.uuid4()),
+            type=StatisticType.REGISTRATION,
+            actor_id=actor_id,
+            created_at=moment,
+            details=RegistrationDetails(),
+        )
+
+    @classmethod
+    def for_enrollment(
+        cls,
+        *,
+        actor_id: UserID,
+        product_id: ProductID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=StatisticID(uuid.uuid4()),
+            type=StatisticType.ENROLLMENT,
+            actor_id=actor_id,
+            created_at=moment,
+            details=EnrollmentDetails(product_id=product_id),
+        )
+
+    @classmethod
+    def for_site_visit(
+        cls,
+        *,
+        actor_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=StatisticID(uuid.uuid4()),
+            type=StatisticType.SITE_VISIT,
+            actor_id=actor_id,
+            created_at=moment,
+            details=SiteVisitDetails(),
         )

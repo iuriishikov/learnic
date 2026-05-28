@@ -26,6 +26,33 @@ class EmailNotVerifiedError(ApplicationError):
     """Raised when a user attempts to authenticate before verifying email."""
 
 
+class AccountBannedError(ApplicationError):
+    """Raised when a banned user attempts to log in.
+
+    Carries ``user_id`` for logging; clients see only
+    ``{"error": "AccountBanned"}`` (HTTP 403). Banning also revokes
+    the user's active sessions, so in-flight access tokens are
+    rejected independently of this login-time guard.
+    """
+
+    def __init__(self, user_id: object) -> None:
+        super().__init__(f"User {user_id!r} is banned")
+        self.user_id = user_id
+
+
+class NotAdminError(ApplicationError):
+    """Raised when a non-admin user hits an admin-only endpoint.
+
+    The caller is authenticated (a valid access cookie) but lacks
+    the platform-admin flag. Carries ``user_id`` for logging;
+    clients see only ``{"error": "NotAdmin"}`` (HTTP 403).
+    """
+
+    def __init__(self, user_id: object) -> None:
+        super().__init__(f"User {user_id!r} is not an administrator")
+        self.user_id = user_id
+
+
 class NotResourceOwnerError(ApplicationError):
     """Raised when a user attempts an operation on a resource they don't own.
 
@@ -236,6 +263,44 @@ class CannotEnrollInUnreleasedCourseError(ApplicationError):
         self.product_id = product_id
 
 
+class CannotEnrollInUnpublishedProductError(ApplicationError):
+    """Raised on self-enroll against a product whose status is not ``PUBLISHED``.
+
+    The self-enroll endpoint is the only public path students reach
+    enrollment through, and it accepts ``PUBLISHED`` products only —
+    drafts and archived products are author-side state and must not
+    accept new students. Carries the offending product id and its
+    current status so the SPA can render a precise message (and so
+    logs stay debuggable).
+    """
+
+    def __init__(self, product_id: object, status: str) -> None:
+        super().__init__(
+            f"Product {product_id!r} is {status!r} "
+            "(must be 'published' to self-enroll)",
+        )
+        self.product_id = product_id
+        self.status = status
+
+
+class CannotEnrollInPrivateProductError(ApplicationError):
+    """Raised on self-enroll against a product whose visibility is ``PRIVATE``.
+
+    Private products are invite-only: the public self-enroll endpoint
+    refuses them, so the only way in is an accepted gift/invite (which
+    enrolls through :class:`EnrollmentService` directly, bypassing this
+    gate). Carries the offending product id so the SPA can render a
+    precise "this course is invite-only" message. Surfaces as HTTP 409.
+    """
+
+    def __init__(self, product_id: object) -> None:
+        super().__init__(
+            f"Product {product_id!r} is private (invite-only) "
+            "and cannot be self-enrolled",
+        )
+        self.product_id = product_id
+
+
 class CohortFullError(ApplicationError):
     """Raised when a cohort's participant cap is reached."""
 
@@ -365,3 +430,87 @@ class EmailInviteRateLimitExceededError(ApplicationError):
         self.actor_id = actor_id
         self.limit = limit
         self.retry_after_seconds = retry_after_seconds
+
+
+class EmailSendRateLimitExceededError(ApplicationError):
+    """Raised when an actor exceeds the per-user outbound-email cap.
+
+    Distinct from :class:`EmailInviteRateLimitExceededError`, which
+    counts only collaboration / gift invitations: this is the
+    cross-flow cap enforced by ``EmailSendRateLimiter`` over *every*
+    user-initiated email, counted from the ``email_sendings`` audit
+    log. The limit is keyed on ``actor_id`` alone (never IP), so users
+    sharing one VPN / NAT egress are billed independently. Carries
+    ``actor_id``, the configured ``limit``, and ``retry_after_seconds``
+    so the HTTP layer can populate the standard ``Retry-After`` header.
+    Surfaces as HTTP 429.
+    """
+
+    def __init__(
+        self,
+        *,
+        actor_id: object,
+        limit: int,
+        retry_after_seconds: int,
+    ) -> None:
+        super().__init__(
+            f"User {actor_id!r} exceeded the email-send limit "
+            f"of {limit} per window",
+        )
+        self.actor_id = actor_id
+        self.limit = limit
+        self.retry_after_seconds = retry_after_seconds
+
+
+class CannotGiftToOwnerError(ApplicationError):
+    """Raised when a product is gifted to its own author.
+
+    The author already has full access, so a gift would be a no-op.
+    Surfaces as HTTP 409.
+    """
+
+    def __init__(self, product_id: object, user_id: object) -> None:
+        super().__init__(
+            f"User {user_id!r} owns product {product_id!r} — cannot gift",
+        )
+        self.product_id = product_id
+        self.user_id = user_id
+
+
+class GiftAlreadyExistsError(ApplicationError):
+    """Raised when a pending or accepted gift already exists.
+
+    Surfaces as HTTP 409. Carries ``product_id`` plus either
+    ``recipient_id`` or ``invited_email`` depending on which gift
+    path triggered the conflict.
+    """
+
+    def __init__(
+        self,
+        *,
+        product_id: object,
+        recipient_id: object = None,
+        invited_email: object = None,
+    ) -> None:
+        super().__init__(
+            f"Gift already exists for product {product_id!r}",
+        )
+        self.product_id = product_id
+        self.recipient_id = recipient_id
+        self.invited_email = invited_email
+
+
+class ProductNotGiftableError(ApplicationError):
+    """Raised when gifting a product whose type cannot be gifted.
+
+    Only course products support enrollment-as-a-gift today.
+    Surfaces as HTTP 409.
+    """
+
+    def __init__(self, product_id: object, product_type: str) -> None:
+        super().__init__(
+            f"Product {product_id!r} of type {product_type!r} "
+            "cannot be gifted",
+        )
+        self.product_id = product_id
+        self.product_type = product_type

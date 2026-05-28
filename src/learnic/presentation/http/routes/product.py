@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Annotated, Final, Self
 from uuid import UUID
 
@@ -17,10 +17,6 @@ from fastapi import (
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from learnic.application.commands.enrollment.enroll_in_course import (
-    EnrollStudentInCourseCommand,
-    EnrollStudentInCourseCommandHandler,
-)
 from learnic.application.commands.product.add_course import (
     AddCourseProductCommand,
     AddCourseProductCommandHandler,
@@ -40,6 +36,10 @@ from learnic.application.commands.product.change_duration import (
 from learnic.application.commands.product.change_name import (
     ChangeProductNameCommand,
     ChangeProductNameCommandHandler,
+)
+from learnic.application.commands.product.change_visibility import (
+    ChangeProductVisibilityCommand,
+    ChangeProductVisibilityCommandHandler,
 )
 from learnic.application.commands.product.cover.remove import (
     RemoveProductCoverCommand,
@@ -61,12 +61,18 @@ from learnic.application.commands.product.unarchive import (
     UnarchiveProductCommand,
     UnarchiveProductCommandHandler,
 )
+from learnic.application.commands.enrollment.enroll_into_product import (
+    EnrollIntoProductCommand,
+    EnrollIntoProductCommandHandler,
+)
 from learnic.application.commands.product_qa.add import (
     AddProductQACommand,
     AddProductQACommandHandler,
 )
 from learnic.application.common.errors import (
     AlreadyEnrolledError,
+    CannotEnrollInPrivateProductError,
+    CannotEnrollInUnpublishedProductError,
     CannotEnrollInUnreleasedCourseError,
     CannotPublishCourseDirectlyError,
     EntityNotFoundError,
@@ -74,6 +80,7 @@ from learnic.application.common.errors import (
     ProductNotArchivedError,
     ProductNotInDraftError,
 )
+from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.application.queries.enrollment.list_for_product import (
     GetProductEnrollmentsQuery,
     GetProductEnrollmentsQueryHandler,
@@ -114,6 +121,10 @@ from learnic.application.queries.product.search import (
     SearchPublishedProductsQuery,
     SearchPublishedProductsQueryHandler,
 )
+from learnic.application.queries.product.search_my import (
+    SearchMyProductsQuery,
+    SearchMyProductsQueryHandler,
+)
 from learnic.application.queries.product.recommend_for_me import (
     RecommendForMeQuery,
     RecommendForMeQueryHandler,
@@ -133,8 +144,8 @@ from learnic.entities.product.constants import (
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
+    ProductVisibility,
 )
-from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
@@ -144,6 +155,8 @@ from learnic.presentation.http.common.errors.rules import (
     ALREADY_ENROLLED_RULE,
     AUTHENTICATED_OWNER_FIELD_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
+    CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE,
+    CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE,
     CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE,
     CANNOT_PUBLISH_COURSE_DIRECTLY_RULE,
     ENTITY_NOT_FOUND_RULE,
@@ -156,7 +169,6 @@ from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.tag import TagSchema
 from learnic.presentation.http.common.schemas import (
     FileSchema,
-    UploadedFileSchema,
     UserRefSchema,
 )
 from learnic.presentation.http.common.upload_limits import (
@@ -267,6 +279,29 @@ class ChangeProductDurationSchema(BaseModel):
     )
 
 
+class ChangeProductVisibilitySchema(BaseModel):
+    """Body for ``PATCH /products/{id}/visibility``.
+
+    Owner-only — only the product's author may switch visibility; the
+    capability is not delegable to collaborators through any role.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"visibility": "private"}]},
+    )
+
+    visibility: ProductVisibility = Field(
+        description=(
+            "Target visibility. `public` allows self-enrollment; "
+            "`private` makes the product invite-only — it stays "
+            "visible in the catalog/search but self-enroll is refused "
+            "and access is granted only through an accepted gift. "
+            "Orthogonal to `status`."
+        ),
+        examples=["public", "private"],
+    )
+
+
 # ---------------------------- response schemas ------------------------- #
 
 
@@ -280,6 +315,7 @@ class ProductSchema(BaseModel):
                     "oid": "3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8",
                     "type": "course",
                     "status": "published",
+                    "visibility": "public",
                     "name": "Async Python deep dive",
                     "description": "<p>A 30-hour course.</p>",
                     "total_duration_in_hours": 30,
@@ -315,6 +351,20 @@ class ProductSchema(BaseModel):
     oid: UUID
     type: ProductType
     status: ProductStatus
+    visibility: ProductVisibility = Field(
+        description=(
+            "Enrollment visibility, orthogonal to `status`. Both "
+            "`public` and `private` products appear in the "
+            "catalog/search and on their detail page; the difference "
+            "is enrollment. `public` accepts self-enrollment; "
+            "`private` is invite-only — self-enroll is refused (409 "
+            "`CannotEnrollInPrivateProduct`) and access is granted "
+            "only through an accepted gift. The SPA should hide the "
+            "self-enroll CTA when `private`. Toggled by the owner via "
+            "`PATCH /products/{id}/visibility`."
+        ),
+        examples=["public", "private"],
+    )
     name: str
     description: str | None
     total_duration_in_hours: int | None
@@ -346,6 +396,7 @@ class ProductSchema(BaseModel):
             oid=view.oid,
             type=view.type,
             status=view.status,
+            visibility=view.visibility,
             name=view.name,
             description=view.description,
             total_duration_in_hours=view.total_duration_in_hours,
@@ -669,85 +720,39 @@ async def change_duration(
     )
 
 
-@router.post(
-    "/{product_id}/cover",
-    summary="Upload (or replace) a product's cover image",
-    operation_id="setProductCover",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=_AUTH_SECURITY,
-    response_model=UploadedFileSchema,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
-)
-async def set_cover(
-    request: Request,
-    file: UploadFile,
-    interactor: FromDishka[SetProductCoverCommandHandler],
-    auth: FromDishka[Authenticator],
-    product_id: UUID = _PRODUCT_ID_PATH,
-) -> UploadedFileSchema:
-    """Upload (or replace) a product's cover image.
-
-    The previous cover (if any) is soft-deleted in the same
-    transaction; only the S3 PUT for the new blob happens
-    out-of-band.
-
-    Args:
-        request: Source of the access-token cookie.
-        file: ``multipart/form-data`` field ``file`` carrying the
-            image bytes. Capped at ``PRODUCT_COVER_MAX_BYTES``; the
-            server reads ``Content-Type`` from the upload and rejects
-            payloads above the limit with a 422 ``FileTooLargeError``.
-        interactor: Injected set-cover command handler.
-        auth: Injected authenticator that validates the access cookie.
-        product_id: Target product's UUID, parsed from the URL path.
-
-    Returns:
-        ``201 Created`` with :class:`FileSchema` carrying the new
-        file's id.
-
-    Raises:
-        InvalidTokenError: Missing or denied access cookie; HTTP 401.
-        NotResourceOwnerError: Caller is not the product's author;
-            HTTP 403.
-        EntityNotFoundError: No product with the given id; HTTP 404.
-        FieldError: Cover VO invariants violated; HTTP 422.
-        FileTooLargeError: Payload over ``PRODUCT_COVER_MAX_BYTES``;
-            HTTP 422.
-    """
-    ctx = await auth.authenticate(request)
-    data, content_type = await read_upload(
-        file, max_bytes=PRODUCT_COVER_MAX_BYTES,
-    )
-    file_id = await interactor.run(
-        SetProductCoverCommand(
-            actor_id=ctx.user_id,
-            product_id=ProductID(product_id),
-            data=data,
-            content_type=content_type,
-        ),
-    )
-    return UploadedFileSchema(oid=file_id)
-
-
-@router.delete(
-    "/{product_id}/cover",
-    summary="Detach a product's cover image",
-    operation_id="removeProductCover",
+@router.patch(
+    "/{product_id}/visibility",
+    summary="Switch a product between public and private (owner only)",
+    operation_id="changeProductVisibility",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
-async def remove_cover(
+async def change_visibility(
     request: Request,
-    interactor: FromDishka[RemoveProductCoverCommandHandler],
+    payload: ChangeProductVisibilitySchema,
+    interactor: FromDishka[ChangeProductVisibilityCommandHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
 ) -> None:
-    """Detach the product's cover and soft-delete the file row.
+    """Set the product's discovery visibility (public ⇄ private).
+
+    Owner-only: only the product's author may toggle visibility, and —
+    unlike the other editing routes — the gate is **ownership**, not a
+    permission. No collaborator role can grant it, so a non-author
+    (collaborator included) always gets ``403 NotResourceOwner``.
+    Visibility is orthogonal to lifecycle ``status``: a ``PUBLISHED``
+    product can be made ``PRIVATE`` without unpublishing it. A
+    ``PRIVATE`` product stays fully visible in the catalog/search and
+    on its detail page — switching only blocks **self-enrollment**
+    (the product becomes invite-only, joinable through a gift);
+    existing enrollments and gift access are untouched. Idempotent —
+    re-applying the current visibility is a no-op.
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected remove-cover command handler.
+        payload: ``{"visibility": "public" | "private"}``.
+        interactor: Injected change-visibility command handler.
         auth: Injected authenticator that validates the access cookie.
         product_id: Target product's UUID, parsed from the URL path.
 
@@ -762,28 +767,144 @@ async def remove_cover(
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
+        ChangeProductVisibilityCommand(
+            actor_id=ctx.user_id,
+            product_id=ProductID(product_id),
+            visibility=payload.visibility,
+        ),
+    )
+
+
+@router.post(
+    "/{product_id}/cover",
+    summary="Upload (or replace) a product's cover image",
+    operation_id="setProductCover",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=ProductSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def set_cover(
+    request: Request,
+    file: UploadFile,
+    interactor: FromDishka[SetProductCoverCommandHandler],
+    get_query: FromDishka[GetProductQueryHandler],
+    auth: FromDishka[Authenticator],
+    product_id: UUID = _PRODUCT_ID_PATH,
+) -> ProductSchema:
+    """Upload (or replace) a product's cover image.
+
+    The previous cover (if any) is soft-deleted in the same
+    transaction; only the S3 PUT for the new blob happens
+    out-of-band.
+
+    Args:
+        request: Source of the access-token cookie.
+        file: ``multipart/form-data`` field ``file`` carrying the
+            image bytes. Capped at ``PRODUCT_COVER_MAX_BYTES``; the
+            server reads ``Content-Type`` from the upload and rejects
+            payloads above the limit with a 422 ``FileTooLargeError``.
+        interactor: Injected set-cover command handler.
+        get_query: Injected query handler used to return the full
+            updated product after the command commits.
+        auth: Injected authenticator that validates the access cookie.
+        product_id: Target product's UUID, parsed from the URL path.
+
+    Returns:
+        ``201 Created`` with the full :class:`ProductSchema` carrying
+        the freshly resolved cover. The SPA can ``setQueryData``
+        directly instead of refetching ``GET /products/{id}``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotResourceOwnerError: Caller is not the product's author;
+            HTTP 403.
+        EntityNotFoundError: No product with the given id; HTTP 404.
+        FieldError: Cover VO invariants violated; HTTP 422.
+        FileTooLargeError: Payload over ``PRODUCT_COVER_MAX_BYTES``;
+            HTTP 422.
+    """
+    ctx = await auth.authenticate(request)
+    data, content_type = await read_upload(
+        file, max_bytes=PRODUCT_COVER_MAX_BYTES,
+    )
+    await interactor.run(
+        SetProductCoverCommand(
+            actor_id=ctx.user_id,
+            product_id=ProductID(product_id),
+            data=data,
+            content_type=content_type,
+        ),
+    )
+    view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
+    return ProductSchema.from_output(view)
+
+
+@router.delete(
+    "/{product_id}/cover",
+    summary="Detach a product's cover image",
+    operation_id="removeProductCover",
+    status_code=status.HTTP_200_OK,
+    dependencies=_AUTH_SECURITY,
+    response_model=ProductSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def remove_cover(
+    request: Request,
+    interactor: FromDishka[RemoveProductCoverCommandHandler],
+    get_query: FromDishka[GetProductQueryHandler],
+    auth: FromDishka[Authenticator],
+    product_id: UUID = _PRODUCT_ID_PATH,
+) -> ProductSchema:
+    """Detach the product's cover and soft-delete the file row.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected remove-cover command handler.
+        get_query: Injected query handler used to return the full
+            updated product after the command commits.
+        auth: Injected authenticator that validates the access cookie.
+        product_id: Target product's UUID, parsed from the URL path.
+
+    Returns:
+        ``200 OK`` with the full :class:`ProductSchema` reflecting
+        the detached cover so the SPA can ``setQueryData`` instead
+        of refetching ``GET /products/{id}``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotResourceOwnerError: Caller is not the product's author;
+            HTTP 403.
+        EntityNotFoundError: No product with the given id; HTTP 404.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
         RemoveProductCoverCommand(
             actor_id=ctx.user_id,
             product_id=ProductID(product_id),
         ),
     )
+    view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
+    return ProductSchema.from_output(view)
 
 
 @router.post(
     "/{product_id}/publish",
     summary="Publish a product directly",
     operation_id="publishProduct",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     dependencies=_AUTH_SECURITY,
+    response_model=ProductSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {CannotPublishCourseDirectlyError: CANNOT_PUBLISH_COURSE_DIRECTLY_RULE},
 )
 async def publish(
     request: Request,
     interactor: FromDishka[PublishProductCommandHandler],
+    get_query: FromDishka[GetProductQueryHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
-) -> None:
+) -> ProductSchema:
     """Mark a product published.
 
     Course products cannot be published via this endpoint — they
@@ -794,11 +915,15 @@ async def publish(
     Args:
         request: Source of the access-token cookie.
         interactor: Injected publish command handler.
+        get_query: Injected query handler used to return the full
+            updated product after the command commits.
         auth: Injected authenticator that validates the access cookie.
         product_id: Target product's UUID, parsed from the URL path.
 
     Returns:
-        ``204 No Content``.
+        ``200 OK`` with the full :class:`ProductSchema` reflecting
+        the published status so the SPA can ``setQueryData`` instead
+        of refetching ``GET /products/{id}``.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
@@ -815,32 +940,40 @@ async def publish(
             product_id=ProductID(product_id),
         ),
     )
+    view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
+    return ProductSchema.from_output(view)
 
 
 @router.post(
     "/{product_id}/archive",
     summary="Archive a product",
     operation_id="archiveProduct",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     dependencies=_AUTH_SECURITY,
+    response_model=ProductSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
 async def archive(
     request: Request,
     interactor: FromDishka[ArchiveProductCommandHandler],
+    get_query: FromDishka[GetProductQueryHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
-) -> None:
+) -> ProductSchema:
     """Move the product into the archived state.
 
     Args:
         request: Source of the access-token cookie.
         interactor: Injected archive command handler.
+        get_query: Injected query handler used to return the full
+            updated product after the command commits.
         auth: Injected authenticator that validates the access cookie.
         product_id: Target product's UUID, parsed from the URL path.
 
     Returns:
-        ``204 No Content``.
+        ``200 OK`` with the full :class:`ProductSchema` reflecting
+        the archived status so the SPA can ``setQueryData`` instead
+        of refetching ``GET /products/{id}``.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
@@ -855,23 +988,27 @@ async def archive(
             product_id=ProductID(product_id),
         ),
     )
+    view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
+    return ProductSchema.from_output(view)
 
 
 @router.post(
     "/{product_id}/unarchive",
     summary="Restore an archived product",
     operation_id="unarchiveProduct",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     dependencies=_AUTH_SECURITY,
+    response_model=ProductSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
     | {ProductNotArchivedError: PRODUCT_NOT_ARCHIVED_RULE},
 )
 async def unarchive(
     request: Request,
     interactor: FromDishka[UnarchiveProductCommandHandler],
+    get_query: FromDishka[GetProductQueryHandler],
     auth: FromDishka[Authenticator],
     product_id: UUID = _PRODUCT_ID_PATH,
-) -> None:
+) -> ProductSchema:
     """Move an archived product back to its prior lifecycle state.
 
     The target status is derived from ``published_at``: a non-null
@@ -883,11 +1020,15 @@ async def unarchive(
     Args:
         request: Source of the access-token cookie.
         interactor: Injected unarchive command handler.
+        get_query: Injected query handler used to return the full
+            updated product after the command commits.
         auth: Injected authenticator that validates the access cookie.
         product_id: Target product's UUID, parsed from the URL path.
 
     Returns:
-        ``204 No Content``.
+        ``200 OK`` with the full :class:`ProductSchema` reflecting
+        the restored status so the SPA can ``setQueryData`` instead
+        of refetching ``GET /products/{id}``.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
@@ -904,6 +1045,8 @@ async def unarchive(
             product_id=ProductID(product_id),
         ),
     )
+    view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
+    return ProductSchema.from_output(view)
 
 
 @router.delete(
@@ -951,15 +1094,33 @@ async def delete_product(
 
 @router.get(
     "/mine",
-    summary="List products the current user can access",
+    summary="List or search products the current user can access",
     operation_id="getMyProducts",
     response_model=list[ProductSchema],
+    responses={
+        200: {
+            "headers": {
+                "x-total-count": {
+                    "description": (
+                        "Total number of accessible products matching "
+                        "the filter (without pagination). Used by the "
+                        "SPA to render numbered page controls — "
+                        "`ceil(total / limit)` is the total page "
+                        "count."
+                    ),
+                    "schema": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
+    },
     dependencies=_AUTH_SECURITY,
     error_map={**AUTHENTICATED_WITH_FIELD_MAP},
 )
 async def get_mine(
     request: Request,
-    interactor: FromDishka[GetMyProductsQueryHandler],
+    response: Response,
+    list_interactor: FromDishka[GetMyProductsQueryHandler],
+    search_interactor: FromDishka[SearchMyProductsQueryHandler],
     auth: FromDishka[Authenticator],
     offset: int = Query(
         0,
@@ -974,36 +1135,83 @@ async def get_mine(
         description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
         examples=[20],
     ),
+    q: str | None = Query(
+        None,
+        min_length=SEARCH_QUERY_MIN_LEN,
+        max_length=SEARCH_QUERY_MAX_LEN,
+        description=(
+            "Optional free-text search query. When omitted or empty, "
+            "returns accessible products ordered by ``created_at`` "
+            "descending (newest first). When provided, performs the "
+            "same weighted full-text + ``pg_trgm`` fuzzy search used "
+            "by the public catalog, restricted to the caller's "
+            "accessible set (author OR active collaborator, any "
+            "product status). Length bounds: "
+            f"`[{SEARCH_QUERY_MIN_LEN}, {SEARCH_QUERY_MAX_LEN}]` "
+            "(`SEARCH_QUERY_MIN_LEN` / `SEARCH_QUERY_MAX_LEN`)."
+        ),
+        examples=["python", "иванов", "машинное обучение"],
+    ),
 ) -> list[ProductSchema]:
-    """Return products accessible to the current user, newest first.
+    """Return products accessible to the current user.
 
     A product appears in the result if the caller is its author or
     has an active collaboration on it (``PENDING_INVITE`` and
     ``REVOKED`` collaborations are excluded). Any product status is
     returned.
 
+    Two modes share one URL — discriminated by the presence of ``q``:
+
+    * **List mode** (``q`` omitted) — newest-first paginated set,
+      identical to the legacy behaviour.
+    * **Search mode** (``q`` provided) — weighted multi-field
+      full-text search (name, author full name, tag names,
+      HTML-stripped description) with a ``pg_trgm`` fuzzy fallback
+      for typos and transliteration, restricted to the caller's
+      accessible set.
+
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected get-my-products query handler.
+        response: Injected FastAPI response so the handler can set
+            the ``X-Total-Count`` header.
+        list_interactor: Injected newest-first query handler.
+        search_interactor: Injected free-text search query handler.
         auth: Injected authenticator that validates the access cookie.
         offset: Pagination offset.
         limit: Page size.
+        q: Optional free-text query. When empty / omitted, list mode
+            applies; otherwise search mode runs.
 
     Returns:
-        List of :class:`ProductSchema`, ordered by ``created_at``
-        descending.
+        List of :class:`ProductSchema` (body). In list mode ordered
+        by ``created_at`` desc; in search mode ordered by combined
+        ranking (``ts_rank_cd`` × 2 + ``similarity``) then
+        ``created_at`` desc. The ``X-Total-Count`` response header
+        carries the unpaginated match total so the SPA can drive
+        numbered page controls without a second round-trip.
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
     """
     ctx = await auth.authenticate(request)
-    views = await interactor.run(
-        GetMyProductsQuery(
-            user_id=ctx.user_id,
-            pagination=Pagination(limit=limit, offset=offset),
-        ),
-    )
-    return [ProductSchema.from_output(view) for view in views]
+    pagination = Pagination(limit=limit, offset=offset)
+    if q is None or not q.strip():
+        result = await list_interactor.run(
+            GetMyProductsQuery(
+                user_id=ctx.user_id,
+                pagination=pagination,
+            ),
+        )
+    else:
+        result = await search_interactor.run(
+            SearchMyProductsQuery(
+                user_id=ctx.user_id,
+                q=q,
+                pagination=pagination,
+            ),
+        )
+    response.headers["X-Total-Count"] = str(result.total)
+    return [ProductSchema.from_output(view) for view in result.items]
 
 
 @router.get(
@@ -1183,13 +1391,18 @@ async def get_one(
     """Return a single product by id (public).
 
     Authentication is **optional**: anonymous callers receive the
-    same payload as signed-in ones. A valid access cookie has one
+    same payload as signed-in ones, regardless of the product's
+    visibility — a ``PRIVATE`` product is still publicly browsable.
+    Privacy only affects enrollment: self-enroll is refused for
+    private products (see ``POST /products/{id}/enrollments``), and
+    the ``visibility`` field lets the SPA hide the self-enroll CTA
+    and show "invite-only" instead. A valid access cookie has one
     extra effect — the call records a ``product_view`` statistic
     attributed to the caller. Authors viewing their own products
     are **not** filtered out: a self-view is a valid analytics
-    signal (preview / dashboard navigation) and the SPA can split
-    it out later via ``actor_id == product.author_id``. A missing
-    or stale cookie degrades silently to the anonymous path.
+    signal (preview / dashboard navigation) and the SPA can split it
+    out later via ``actor_id == product.author_id``. A missing or
+    stale cookie degrades silently to the anonymous path.
 
     Args:
         request: Source of the (optional) access cookie and
@@ -1446,11 +1659,11 @@ async def get_qa_list(
     return [ProductQASchema.from_view(view) for view in views]
 
 
-# ===================== Course-enrollment schemas ======================= #
+# ======================= Enrollment routes ============================ #
 
 
-class CreatedCourseEnrollmentSchema(BaseModel):
-    """Response for ``POST /courses/{course_id}/enrollments``."""
+class CreatedEnrollmentSchema(BaseModel):
+    """Response for ``POST /products/{product_id}/enrollments``."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -1466,62 +1679,79 @@ class CreatedCourseEnrollmentSchema(BaseModel):
     )
 
 
-# ===================== Course-enrollment routes ======================== #
-
-
-@course_router.post(
-    "/{course_id}/enrollments",
-    summary="Enroll the current user into a course",
-    operation_id="enrollIntoCourse",
+@router.post(
+    "/{product_id}/enrollments",
+    summary="Self-enroll the current user into a product",
+    operation_id="enrollIntoProduct",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
-    response_model=CreatedCourseEnrollmentSchema,
+    response_model=CreatedEnrollmentSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP
     | {
+        CannotEnrollInUnpublishedProductError: (
+            CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE
+        ),
+        CannotEnrollInPrivateProductError: (
+            CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE
+        ),
+        CannotEnrollInUnreleasedCourseError: (
+            CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE
+        ),
         ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE,
         AlreadyEnrolledError: ALREADY_ENROLLED_RULE,
-        CannotEnrollInUnreleasedCourseError: (CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE),
     },
 )
-async def enroll_in_course(
+async def enroll_into_product(
     request: Request,
-    interactor: FromDishka[EnrollStudentInCourseCommandHandler],
+    interactor: FromDishka[EnrollIntoProductCommandHandler],
     auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,
-) -> CreatedCourseEnrollmentSchema:
-    """Self-enroll the current user into a course product.
+    product_id: UUID = _PRODUCT_ID_PATH,
+) -> CreatedEnrollmentSchema:
+    """Create an enrollment for the current user in ``product_id``.
 
-    The course must already have at least one release; otherwise
-    HTTP 409 ``CannotEnrollInUnreleasedCourse``. The enrollment
-    captures the latest release id at signup time (strict
-    pinning).
+    The single public self-enroll entry point — replaces the legacy
+    course-scoped path. Accepts any product type that advertises
+    student enrollment (today: ``course`` only). The product must
+    already be ``PUBLISHED``; drafts and archived products refuse
+    with 409 ``CannotEnrollInUnpublishedProduct``. Admin grants
+    (internal-only) go through a different handler and may target
+    any status.
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected enroll command handler.
-        auth: Injected authenticator that validates the access cookie.
-        course_id: Target course UUID, parsed from the URL path.
+        product_id: Target product's UUID, parsed from the URL path.
 
     Returns:
-        ``201 Created`` with the new enrollment's UUID.
+        ``201 Created`` with :class:`CreatedEnrollmentSchema`
+        carrying the new enrollment's UUID.
 
     Raises:
-        InvalidTokenError: HTTP 401.
-        EntityNotFoundError: HTTP 404.
-        ProductDoesNotSupportError: Product is a webinar, not a course;
-            HTTP 409.
-        AlreadyEnrolledError: HTTP 409.
-        CannotEnrollInUnreleasedCourseError: Course has no
-            releases yet; HTTP 409.
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: No product with the given id; HTTP 404.
+        CannotEnrollInUnpublishedProductError: Product status is
+            not ``PUBLISHED``; HTTP 409 with body carrying the
+            offending status.
+        CannotEnrollInPrivateProductError: Product visibility is
+            ``PRIVATE`` (invite-only); HTTP 409. Access is only
+            granted through an accepted gift/invite.
+        CannotEnrollInUnreleasedCourseError: Product is a course
+            with no releases yet; HTTP 409.
+        ProductDoesNotSupportError: Product type does not advertise
+            ``HAS_COURSE_ENROLLMENT``; HTTP 409.
+        AlreadyEnrolledError: Caller already has an enrollment in
+            this product; HTTP 409.
     """
     ctx = await auth.authenticate(request)
     enrollment_id = await interactor.run(
-        EnrollStudentInCourseCommand(
+        EnrollIntoProductCommand(
             student_id=ctx.user_id,
-            product_id=ProductID(course_id),
+            product_id=ProductID(product_id),
         ),
     )
-    return CreatedCourseEnrollmentSchema(oid=enrollment_id)
+    return CreatedEnrollmentSchema(oid=enrollment_id)
+
+
+# ===================== Course-enrollment routes ======================== #
 
 
 @course_router.get(

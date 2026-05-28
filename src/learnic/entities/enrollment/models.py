@@ -21,6 +21,7 @@ from learnic.entities.enrollment.enums import (
     EnrollmentStatus,
 )
 from learnic.entities.enrollment.errors import (
+    CannotRepinRevokedEnrollmentError,
     EnrollmentDoesNotSupportError,
 )
 from learnic.entities.enrollment.ids import EnrollmentID
@@ -85,6 +86,25 @@ class Enrollment(BaseEntity[EnrollmentID]):
     def revoke(self) -> None:
         """Revoke this enrollment (author/admin action)."""
         self.status = EnrollmentStatus.REVOKED
+
+    def repin_to_release(self, new_release_id: CourseReleaseID) -> None:
+        """Move the pinned release on a course enrollment.
+
+        Author/admin action. Only ACTIVE enrollments may be
+        re-pinned — a REVOKED enrollment has no access to begin
+        with, so silently moving its pin would either expose
+        content the student no longer has access to, or be a
+        no-op once they re-enroll. Caller is expected to verify
+        the new release belongs to the same product.
+        """
+        self.require_supports(EnrollmentCapability.HAS_RELEASE_PIN)
+        if self.status is not EnrollmentStatus.ACTIVE:
+            raise CannotRepinRevokedEnrollmentError(
+                enrollment_id=self.oid,
+                status=self.status.value,
+            )
+        assert isinstance(self.details, CourseEnrollmentDetails)  # noqa: S101
+        self.details.release_id = new_release_id
 
     @classmethod
     def create_course(

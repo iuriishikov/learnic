@@ -18,6 +18,9 @@ class NotificationKind(StrEnum):
     NEW_LOGIN = "new_login"
     STORAGE_QUOTA_WARNING = "storage_quota_warning"
     STORAGE_QUOTA_ENFORCED = "storage_quota_enforced"
+    GIFT_RECEIVED = "gift_received"
+    GIFT_ACCEPTED = "gift_accepted"
+    GIFT_DECLINED = "gift_declined"
 
 
 class NotificationCategory(StrEnum):

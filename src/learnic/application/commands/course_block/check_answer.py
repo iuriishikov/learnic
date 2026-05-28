@@ -106,7 +106,7 @@ class CheckBlockAnswerCommandHandler:
         if product is None or not product.supports(
             ProductCapability.HAS_COURSE_CONTENT,
         ):
-            # Same hiding policy as ``GetMyCourseContentQueryHandler``:
+            # Same hiding policy as ``GetCourseContentQueryHandler``:
             # non-course products are surfaced as 404, not 409.
             raise EntityNotFoundError(data.block_id)
 

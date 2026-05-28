@@ -30,11 +30,12 @@ class DeleteProductCommand:
 class DeleteProductCommandHandler:
     """Hard-deletes a product, allowed only while it is still in draft.
 
-    Once a product has been published (or later archived/banned),
+    Once a product has been published (or later archived),
     it likely has cohorts/enrollments hanging off it and removing
     it would erase commercial history. Authors must archive
-    instead — admin tooling will be added later for permanent
-    removal of archived products.
+    instead — permanent removal of any product regardless of
+    status is an admin-only operation
+    (``AdminDeleteCourseCommandHandler``).
     """
 
     def __init__(

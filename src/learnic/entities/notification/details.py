@@ -7,6 +7,7 @@ from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 
@@ -90,6 +91,49 @@ class AccessRevokedDetails(NotificationDetails):
     collaboration_id: ProductCollaborationID
     product_id: ProductID
     revoker_id: UserID
+
+
+@dataclass(slots=True)
+class GiftReceivedDetails(NotificationDetails):
+    """Body for the ``gift_received`` notification.
+
+    Sent to the user who was gifted product access. ``gift_id`` is
+    enough to render the Accept/Decline actions in the panel — they
+    POST to ``/gifts/{id}/accept`` / ``/gifts/{id}/decline``.
+    ``product_id`` is denormalised so the panel can show the product
+    name without a follow-up fetch.
+    """
+
+    gift_id: ProductGiftID
+    product_id: ProductID
+
+
+@dataclass(slots=True)
+class GiftAcceptedDetails(NotificationDetails):
+    """Body for the ``gift_accepted`` notification.
+
+    Sent to the gifter when the recipient accepts. Carries
+    ``recipient_id`` so the panel can render the accepting user's
+    avatar and name.
+    """
+
+    gift_id: ProductGiftID
+    product_id: ProductID
+    recipient_id: UserID
+
+
+@dataclass(slots=True)
+class GiftDeclinedDetails(NotificationDetails):
+    """Body for the ``gift_declined`` notification.
+
+    Sent to the gifter when the recipient declines a pending gift.
+    Carries ``decliner_id`` so the panel can render the declining
+    user's avatar and name.
+    """
+
+    gift_id: ProductGiftID
+    product_id: ProductID
+    decliner_id: UserID
 
 
 @dataclass(slots=True)

@@ -48,9 +48,9 @@ from learnic.application.common.persistence.course_release import (
     ReleaseLessonView,
     ReleaseModuleView,
 )
-from learnic.application.queries.course_content.get_for_student import (
-    GetMyCourseContentQuery,
-    GetMyCourseContentQueryHandler,
+from learnic.application.queries.course_content.get import (
+    GetCourseContentQuery,
+    GetCourseContentQueryHandler,
 )
 from learnic.application.queries.course_release.get_content import (
     GetCourseReleaseContentQuery,
@@ -788,51 +788,56 @@ async def get_release_content(
 
 @student_router.get(
     "/{course_id}/content",
-    summary="Read the course content I'm enrolled in",
-    operation_id="getMyCourseContent",
-    dependencies=_AUTH_SECURITY,
+    summary="Read course content (own enrollment or latest published)",
+    operation_id="getCourseContent",
     response_model=PublicCourseReleaseContentSchema,
-    error_map=AUTHENTICATED_MAP | {EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
-async def get_my_content(
+async def get_content(
     request: Request,
-    interactor: FromDishka[GetMyCourseContentQueryHandler],
+    interactor: FromDishka[GetCourseContentQueryHandler],
     auth: FromDishka[Authenticator],
     course_id: Annotated[UUID, _COURSE_ID_PATH],
 ) -> PublicCourseReleaseContentSchema:
-    """Return the pinned-release content for the calling student.
+    """Return course content for the current viewer.
 
-    Resolves the student's enrollment for ``product_id`` and
-    serves the snapshot tree of their pinned release. Strict
-    pinning — students see whatever release they enrolled into,
-    even if newer releases exist. Refunded enrollments are
-    treated as no access (HTTP 404).
+    Public endpoint — the access cookie is read opportunistically
+    via :meth:`Authenticator.authenticate_optional`. The resolution
+    matrix is:
 
-    The blocks in the response are projected through the **public**
-    schema set: correct answers for interactive blocks are stripped
-    server-side. To check a submission or reveal an answer, see
-    ``POST .../release-blocks/{block_id}/check`` and ``.../reveal``.
+    * Caller has an ``ACTIVE`` enrollment for this course → their
+      **pinned** release. Strict pinning still holds; students do
+      not auto-upgrade.
+    * Anyone else (anonymous, signed-in but not enrolled, refunded /
+      revoked enrollments) viewing a ``PUBLISHED`` course → the
+      **latest** release of the product.
+    * Anything else (product missing, not a course, or in a
+      non-``PUBLISHED`` state with no active enrollment) → 404.
+
+    Blocks are projected through the **public** schema set:
+    correct answers for interactive blocks are stripped
+    server-side. Check / reveal endpoints still require an active
+    enrollment.
 
     Args:
-        request: Source of the access cookie.
+        request: Source of the access cookie (optional).
         interactor: Injected handler.
-        auth: Injected authenticator.
+        auth: Injected authenticator (used opportunistically).
         course_id: Course product UUID.
 
     Returns:
         :class:`PublicCourseReleaseContentSchema` — student-safe
-        projection of the pinned-release tree.
+        projection of the chosen release tree.
 
     Raises:
-        InvalidTokenError: HTTP 401.
         EntityNotFoundError: HTTP 404 — product missing, product
-            not a course, no active enrollment for the caller, or
-            the pinned release is gone.
+            not a course, or no release is available to this
+            viewer under the rules above.
     """
-    ctx = await auth.authenticate(request)
+    ctx = await auth.authenticate_optional(request)
     view = await interactor.run(
-        GetMyCourseContentQuery(
-            actor_id=ctx.user_id,
+        GetCourseContentQuery(
+            actor_id=ctx.user_id if ctx is not None else None,
             product_id=ProductID(course_id),
         ),
     )

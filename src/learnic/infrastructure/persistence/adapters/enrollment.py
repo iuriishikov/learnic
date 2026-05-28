@@ -137,6 +137,25 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         result = await self._session.execute(stmt)
         return result.scalar() is not None
 
+    @override
+    async def update_course_details(self, enrollment: Enrollment) -> None:
+        assert enrollment.kind is EnrollmentKind.COURSE  # noqa: S101
+        assert isinstance(  # noqa: S101
+            enrollment.details,
+            CourseEnrollmentDetails,
+        )
+        cd = enrollment_course_details_table
+        stmt = (
+            sa.update(cd)
+            .where(cd.c.enrollment_id == enrollment.oid)
+            .values(
+                release_id=enrollment.details.release_id,
+                progress_percent=enrollment.details.progress.value,
+                completed_at=enrollment.details.completed_at,
+            )
+        )
+        await self._session.execute(stmt)
+
 
 def _select_view() -> sa.Select[Any]:
     cd = enrollment_course_details_table

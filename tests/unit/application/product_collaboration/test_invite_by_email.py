@@ -71,6 +71,10 @@ def _build_handler(
         event_bus=fake_event_bus,
         notifications=fake_notifications,
         security=security_config,
+        # The generic per-user email cap is exercised in its own unit
+        # test; here it's a no-op so these tests stay focused on the
+        # invite-specific daily cap.
+        email_rate_limiter=AsyncMock(),
     )
 
 
@@ -91,6 +95,7 @@ def _command(
                 scope_id=None,
             ),
         ],
+        actor_ip=None,
     )
 
 

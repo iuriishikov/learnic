@@ -41,6 +41,7 @@ from learnic.application.common.notifications.publisher import (
 from learnic.application.common.persistence.billing import (
     AuthorActiveFilesReader,
     FileUsageReader,
+    GlobalSchedulerLock,
     StorageQuotaBreachGateway,
 )
 from learnic.application.common.persistence.transaction import (
@@ -58,6 +59,13 @@ from learnic.entities.notification.models import Notification
 from learnic.entities.user.models import UserID
 
 _logger = logging.getLogger(__name__)
+
+# Cluster-wide key for the daily reconcile pass. Hardens the
+# handler against accidentally-scaled scheduler deployments: a
+# duplicate tick lands as a second TaskIQ task, the worker enters
+# this handler, fails ``try_acquire`` immediately, and exits. The
+# legitimate single replica scenario is unaffected.
+_RECONCILE_LOCK_KEY: Final = "storage_quota_reconcile"
 
 
 @dataclass(slots=True, frozen=True)
@@ -98,6 +106,7 @@ class ReconcileStorageQuotasCommandHandler:
         author_files: AuthorActiveFilesReader,
         file_uploads: FileUploadService,
         publisher: NotificationPublisher,
+        scheduler_lock: GlobalSchedulerLock,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
@@ -107,11 +116,21 @@ class ReconcileStorageQuotasCommandHandler:
         self._author_files: Final = author_files
         self._file_uploads: Final = file_uploads
         self._publisher: Final = publisher
+        self._scheduler_lock: Final = scheduler_lock
 
     async def run(
         self,
         data: ReconcileStorageQuotasCommand,  # noqa: ARG002
     ) -> ReconcileSummary:
+        if not await self._scheduler_lock.try_acquire(_RECONCILE_LOCK_KEY):
+            _logger.info("storage_quota_reconcile.skipped_already_running")
+            return _MutableSummary().frozen()
+        try:
+            return await self._run_locked()
+        finally:
+            await self._scheduler_lock.release(_RECONCILE_LOCK_KEY)
+
+    async def _run_locked(self) -> ReconcileSummary:
         usage = await self._file_usage.usage_by_all_authors()
         open_breaches = {
             b.user_id: b for b in await self._breaches.all_open()

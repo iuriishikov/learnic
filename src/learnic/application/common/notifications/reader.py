@@ -10,6 +10,7 @@ from learnic.entities.notification.ids import NotificationID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 
@@ -57,6 +58,20 @@ class NotificationReader(Protocol):
         collaboration changes status (accept / decline / revoke) so
         the panel re-renders the embedded snapshot without a
         full-list refetch.
+        """
+        ...
+
+    async def list_gift_received_for_gift(
+        self,
+        recipient_id: UserID,
+        gift_id: ProductGiftID,
+    ) -> tuple[NotificationView, ...]:
+        """Return every ``gift_received`` view for ``(recipient, gift)``.
+
+        Used by :class:`NotificationPublisher` to republish the
+        recipient's gift card after the underlying gift changes
+        status (accept / decline / revoke) so the panel re-renders
+        the embedded snapshot without a full-list refetch.
         """
         ...
 

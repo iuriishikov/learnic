@@ -4,6 +4,7 @@ from typing import Final, final
 
 from learnic.application.commands.auth.common import TokenPair
 from learnic.application.common.errors import (
+    AccountBannedError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
 )
@@ -57,6 +58,8 @@ class LoginCommandHandler:
             raise InvalidCredentialsError
         if not self._hasher.verify(RawPassword(data.password), user.password_hash):
             raise InvalidCredentialsError
+        if user.is_banned:
+            raise AccountBannedError(user.oid)
         if not user.email_verified:
             raise EmailNotVerifiedError
 

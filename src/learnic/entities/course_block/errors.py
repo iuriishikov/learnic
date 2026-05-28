@@ -152,3 +152,14 @@ class TooManyCollageItemsError(FieldError):
     """Raised when a photo collage exceeds ``PHOTO_COLLAGE_MAX_ITEMS``."""
 
     limit: int
+
+
+class CollageItemsMismatchError(FieldError):
+    """Raised when a reorder payload doesn't cover the block's items exactly.
+
+    The reorder operation requires the ``ordered_ids`` argument to be
+    a permutation of the block's existing item ids — same set, no
+    additions, no omissions. Anything else is ambiguous (is the SPA
+    trying to drop an item? add one? the dedicated endpoints exist
+    for that) and surfaces here.
+    """

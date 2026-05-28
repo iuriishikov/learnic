@@ -25,6 +25,15 @@ from learnic.application.common.notifications.kind_spec import (
 from learnic.infrastructure.notifications.specs.access_revoked import (
     AccessRevokedSpec,
 )
+from learnic.infrastructure.notifications.specs.gift_accepted import (
+    GiftAcceptedSpec,
+)
+from learnic.infrastructure.notifications.specs.gift_declined import (
+    GiftDeclinedSpec,
+)
+from learnic.infrastructure.notifications.specs.gift_received import (
+    GiftReceivedSpec,
+)
 from learnic.infrastructure.notifications.specs.invite_accepted import (
     InviteAcceptedSpec,
 )
@@ -55,12 +64,18 @@ def default_registry() -> NotificationKindRegistry:
         NewLoginSpec(),
         StorageQuotaWarningSpec(),
         StorageQuotaEnforcedSpec(),
+        GiftReceivedSpec(),
+        GiftAcceptedSpec(),
+        GiftDeclinedSpec(),
     ]
     return NotificationKindRegistry(specs)
 
 
 __all__ = [
     "AccessRevokedSpec",
+    "GiftAcceptedSpec",
+    "GiftDeclinedSpec",
+    "GiftReceivedSpec",
     "InviteAcceptedSpec",
     "InviteDeclinedSpec",
     "InviteSentSpec",

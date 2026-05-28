@@ -65,6 +65,7 @@ def _row_to_view(
         oid=ProductID(row.oid),
         type=row.type,
         status=row.status,
+        visibility=row.visibility,
         name=row.name,
         description=row.description,
         total_duration_in_hours=row.total_duration_in_hours,
@@ -99,6 +100,7 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.c.oid,
         products_table.c.type,
         products_table.c.status,
+        products_table.c.visibility,
         products_table.c.name,
         products_table.c.description,
         products_table.c.total_duration_in_hours,
@@ -203,26 +205,38 @@ class ProductReaderAlchemy(ProductReader):
         tags_by_id = await self._tags_by_product([ProductID(row.oid)])
         return _row_to_view(row, tags_by_id.get(ProductID(row.oid), []))
 
-    @override
-    async def accessible_to(
+    def _accessible_to_predicate(
         self,
         user_id: UserID,
-        pagination: Pagination,
-    ) -> list[ProductView]:
+    ) -> sa.ColumnElement[bool]:
+        """Predicate isolating products the caller may access.
+
+        Shared by ``accessible_to`` / ``accessible_to_count`` and the
+        ``search_accessible_to*`` pair so the membership rule lives in
+        one place. The set is "author OR active collaborator" — see
+        :class:`CollaborationStatus` for the exclusion of
+        ``PENDING_INVITE`` and ``REVOKED``.
+        """
         active_collab_product_ids = sa.select(
             product_collaborations_table.c.product_id,
         ).where(
             product_collaborations_table.c.collaborator_id == user_id,
             product_collaborations_table.c.status == CollaborationStatus.ACTIVE.value,
         )
+        return sa.or_(
+            products_table.c.author_id == user_id,
+            products_table.c.oid.in_(active_collab_product_ids),
+        )
+
+    @override
+    async def accessible_to(
+        self,
+        user_id: UserID,
+        pagination: Pagination,
+    ) -> list[ProductView]:
         stmt = (
             _select_with_joins()
-            .where(
-                sa.or_(
-                    products_table.c.author_id == user_id,
-                    products_table.c.oid.in_(active_collab_product_ids),
-                ),
-            )
+            .where(self._accessible_to_predicate(user_id))
             # ``oid`` tie-breaker keeps pagination stable when many
             # rows share the same ``created_at`` (bulk imports,
             # seed scripts, multi-row INSERTs — all stamp the same
@@ -238,6 +252,15 @@ class ProductReaderAlchemy(ProductReader):
         )
         rows = list((await self._session.execute(stmt)).all())
         return await self._rows_to_views(rows)
+
+    @override
+    async def accessible_to_count(self, user_id: UserID) -> int:
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(products_table)
+            .where(self._accessible_to_predicate(user_id))
+        )
+        return (await self._session.scalar(stmt)) or 0
 
     @override
     async def published(
@@ -280,15 +303,22 @@ class ProductReaderAlchemy(ProductReader):
         sa.ColumnElement[bool],
     ]:
         """Lower-case the query, lock the trigram threshold, build
-        the shared tsquery + WHERE predicate used by both
-        ``search_published`` and ``search_published_count``.
+        the shared tsquery + free-text WHERE predicate.
 
-        Returns ``(query_lower, tsq, predicate)``. ``predicate`` is
-        ``status=published AND (tsv @@ tsq OR text %> query_lower)``.
+        Returns ``(query_lower, tsq, search_predicate)``. The
+        predicate matches the free-text half only —
+        ``tsv @@ tsq OR text %> query_lower`` — with **no** status
+        or access filter attached. Callers compose it with their
+        own scope predicate via ``sa.and_(...)``:
+
+        * ``search_published*`` adds ``status=PUBLISHED``.
+        * ``search_accessible_to*`` adds the author-or-active-
+          collaborator predicate (any product status).
+
         Side effect: issues ``SET LOCAL
         pg_trgm.word_similarity_threshold = 0.4`` against the
-        current session — both callers must run inside the same
-        transaction as their follow-up query.
+        current session — every caller must run inside the same
+        transaction as its follow-up query.
         """
         # `search_text` is stored already lower-cased by the trigger,
         # so we lower the incoming query too — trigram operators
@@ -326,20 +356,17 @@ class ProductReaderAlchemy(ProductReader):
         tsq = sa.func.websearch_to_tsquery(
             russian_regconfig, query_lower,
         )
-        predicate = sa.and_(
-            products_table.c.status == ProductStatus.PUBLISHED.value,
-            sa.or_(
-                products_table.c.search_vector.op("@@")(tsq),
-                # ``search_text %> query`` ≡
-                # ``word_similarity(query, search_text) >
-                # pg_trgm.word_similarity_threshold`` (default
-                # 0.6). Indexed by the GIN ``gin_trgm_ops``
-                # index when the indexed column is on the
-                # left of ``%>``.
-                products_table.c.search_text.op("%>")(query_lower),
-            ),
+        search_predicate = sa.or_(
+            products_table.c.search_vector.op("@@")(tsq),
+            # ``search_text %> query`` ≡
+            # ``word_similarity(query, search_text) >
+            # pg_trgm.word_similarity_threshold`` (default
+            # 0.6). Indexed by the GIN ``gin_trgm_ops``
+            # index when the indexed column is on the
+            # left of ``%>``.
+            products_table.c.search_text.op("%>")(query_lower),
         )
-        return query_lower, tsq, predicate
+        return query_lower, tsq, search_predicate
 
     @override
     async def search_published(
@@ -347,7 +374,7 @@ class ProductReaderAlchemy(ProductReader):
         query: str,
         pagination: Pagination,
     ) -> list[ProductView]:
-        query_lower, tsq, predicate = await (
+        query_lower, tsq, search_predicate = await (
             self._prepare_search_predicates(query)
         )
         rank_ts = sa.func.ts_rank_cd(
@@ -365,7 +392,10 @@ class ProductReaderAlchemy(ProductReader):
         stmt = (
             _select_with_joins()
             .add_columns(rank_ts, rank_trgm)
-            .where(predicate)
+            .where(
+                products_table.c.status == ProductStatus.PUBLISHED.value,
+                search_predicate,
+            )
             # tsvector (morphology + weights) carries twice the
             # weight of trigram (typos/transliteration) — exact /
             # near-exact word matches dominate, fuzziness fills
@@ -387,18 +417,76 @@ class ProductReaderAlchemy(ProductReader):
 
     @override
     async def search_published_count(self, query: str) -> int:
-        # Reuses the exact same WHERE predicate as
+        # Reuses the exact same free-text predicate as
         # ``search_published`` (built via the shared
         # ``_prepare_search_predicates`` helper) so the count
         # always matches what the paginated list returns. The
         # tsquery + threshold setup live in the same transaction.
-        _query_lower, _tsq, predicate = await (
+        _query_lower, _tsq, search_predicate = await (
             self._prepare_search_predicates(query)
         )
         stmt = (
             sa.select(sa.func.count())
             .select_from(products_table)
-            .where(predicate)
+            .where(
+                products_table.c.status == ProductStatus.PUBLISHED.value,
+                search_predicate,
+            )
+        )
+        return (await self._session.scalar(stmt)) or 0
+
+    @override
+    async def search_accessible_to(
+        self,
+        user_id: UserID,
+        query: str,
+        pagination: Pagination,
+    ) -> list[ProductView]:
+        query_lower, tsq, search_predicate = await (
+            self._prepare_search_predicates(query)
+        )
+        rank_ts = sa.func.ts_rank_cd(
+            products_table.c.search_vector, tsq,
+        ).label("rank_ts")
+        rank_trgm = sa.func.word_similarity(
+            query_lower, products_table.c.search_text,
+        ).label("rank_trgm")
+        stmt = (
+            _select_with_joins()
+            .add_columns(rank_ts, rank_trgm)
+            .where(
+                self._accessible_to_predicate(user_id),
+                search_predicate,
+            )
+            .order_by(
+                (
+                    rank_ts * sa.literal(2.0) + rank_trgm
+                ).desc(),
+                products_table.c.created_at.desc(),
+                products_table.c.oid.desc(),
+            )
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+        )
+        rows = list((await self._session.execute(stmt)).all())
+        return await self._rows_to_views(rows)
+
+    @override
+    async def search_accessible_to_count(
+        self,
+        user_id: UserID,
+        query: str,
+    ) -> int:
+        _query_lower, _tsq, search_predicate = await (
+            self._prepare_search_predicates(query)
+        )
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(products_table)
+            .where(
+                self._accessible_to_predicate(user_id),
+                search_predicate,
+            )
         )
         return (await self._session.scalar(stmt)) or 0
 

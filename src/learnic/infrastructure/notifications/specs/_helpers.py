@@ -22,11 +22,13 @@ from typing import Any
 from learnic.application.common.formatting import build_full_name, mask_email
 from learnic.application.common.notifications.views import (
     CollaborationSnapshotView,
+    GiftSnapshotView,
     ProductRefView,
 )
 from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
+from learnic.entities.product_gift.enums import GiftStatus
 from learnic.entities.user.models import UserID
 
 
@@ -106,6 +108,34 @@ def deserialize_collaboration(
     )
 
 
+def serialize_gift(
+    snapshot: GiftSnapshotView | None,
+) -> dict[str, Any] | None:
+    if snapshot is None:
+        return None
+    return {
+        "status": snapshot.status.value,
+        "accepted_at": _isoformat(snapshot.accepted_at),
+        "declined_at": _isoformat(snapshot.declined_at),
+        "revoked_at": _isoformat(snapshot.revoked_at),
+        "invite_expires_at": _isoformat(snapshot.invite_expires_at),
+    }
+
+
+def deserialize_gift(
+    data: dict[str, Any] | None,
+) -> GiftSnapshotView | None:
+    if data is None:
+        return None
+    return GiftSnapshotView(
+        status=GiftStatus(data["status"]),
+        accepted_at=_parse_iso(data.get("accepted_at")),
+        declined_at=_parse_iso(data.get("declined_at")),
+        revoked_at=_parse_iso(data.get("revoked_at")),
+        invite_expires_at=_parse_iso(data.get("invite_expires_at")),
+    )
+
+
 # ----------------------------- WS wire --------------------------------- #
 
 
@@ -129,6 +159,20 @@ def product_to_ws(product: ProductRefView) -> dict[str, Any]:
 
 def collaboration_to_ws(
     snapshot: CollaborationSnapshotView | None,
+) -> dict[str, Any] | None:
+    if snapshot is None:
+        return None
+    return {
+        "status": snapshot.status.value,
+        "accepted_at": _isoformat(snapshot.accepted_at),
+        "declined_at": _isoformat(snapshot.declined_at),
+        "revoked_at": _isoformat(snapshot.revoked_at),
+        "invite_expires_at": _isoformat(snapshot.invite_expires_at),
+    }
+
+
+def gift_to_ws(
+    snapshot: GiftSnapshotView | None,
 ) -> dict[str, Any] | None:
     if snapshot is None:
         return None

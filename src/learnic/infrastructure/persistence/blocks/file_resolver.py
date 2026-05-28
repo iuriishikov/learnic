@@ -6,8 +6,12 @@ that may carry file ids in two shapes:
 
 * ``file_block_file_id`` / ``video_file_block_file_id`` — direct FK
   columns selected via subtype-table JOINs.
-* ``photo_collage_items`` — a JSONB array of ``{"file_id": "<uuid>",
-  "caption": "..."}`` items.
+* ``photo_collage_items`` — a list of ``{"oid": "<uuid>", "file_id":
+  "<uuid>|null", "caption": "<str>|null"}`` dicts. On the release
+  side this is loaded verbatim from the JSONB column; on the draft
+  side the readers compose it from ``photo_collage_items_table``
+  rows before dispatching to the registry so a single payload shape
+  feeds both code paths.
 
 The reader walks every row once with :func:`collect_file_ids`,
 issues a single ``IN`` query against ``files`` with
@@ -30,14 +34,16 @@ from learnic.entities.file.ids import FileID
 from learnic.infrastructure.persistence.models.file import files_table
 
 
-def collect_file_ids(rows: list[sa.Row[Any]]) -> set[FileID]:
+def collect_file_ids(rows: list[Any]) -> set[FileID]:
     """Return every file id referenced by a list of block rows.
 
     Drains the three file-bearing shapes (``file``, ``video_file``,
     ``photo_collage``) without dispatching by ``row.type`` — rows for
-    non-file block types have ``NULL`` in the FK columns and ``None``
-    in ``photo_collage_items`` thanks to the OUTER JOIN, so the
-    accumulator naturally skips them.
+    non-file block types have ``NULL`` in the FK columns. The
+    ``photo_collage_items`` attribute is attached by the readers as a
+    proxy field on collage rows only; non-collage rows lack it
+    entirely (the draft SELECT no longer carries the JSONB column),
+    so :func:`getattr` with a ``None`` default skips them cleanly.
     """
     ids: set[FileID] = set()
     for row in rows:
@@ -47,7 +53,7 @@ def collect_file_ids(rows: list[sa.Row[Any]]) -> set[FileID]:
         vfid = row.video_file_block_file_id
         if vfid is not None:
             ids.add(FileID(vfid))
-        items = row.photo_collage_items
+        items = getattr(row, "photo_collage_items", None)
         if items is None:
             continue
         for item in items:

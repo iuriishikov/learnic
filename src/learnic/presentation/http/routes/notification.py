@@ -69,6 +69,7 @@ from learnic.entities.notification.enums import (
 )
 from learnic.entities.notification.ids import NotificationID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
+from learnic.entities.product_gift.enums import GiftStatus
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
@@ -357,6 +358,77 @@ class StorageQuotaEnforcedDetailsSchema(BaseModel):
     )
 
 
+class GiftSnapshotSchema(BaseModel):
+    """Live snapshot of the gift referenced by a gift card.
+
+    Hydrated by the reader through a join with ``product_gifts``.
+    The SPA uses :attr:`status` (plus timestamps) as the single
+    source of truth for the Accept / Decline UI state — a reload
+    picks up the latest values, so local component state never has
+    to remember whether the gift was already resolved. ``None`` when
+    the gift row was purged by the nightly expiry sweep; treat as
+    ``unavailable``.
+    """
+
+    status: GiftStatus
+    accepted_at: datetime | None
+    declined_at: datetime | None
+    revoked_at: datetime | None
+    invite_expires_at: datetime | None
+
+
+class GiftReceivedDetailsSchema(BaseModel):
+    """Body of a `gift_received` notification.
+
+    Sent to the user who was gifted product access. The card renders
+    Accept / Decline actions that POST to ``/gifts/{id}/accept`` and
+    ``/gifts/{id}/decline``. Use `gift.status` to derive the initial
+    button state across reloads.
+    """
+
+    type: Literal["gift_received"] = Field(
+        default="gift_received",
+        description="Discriminator.",
+    )
+    gift_id: UUID
+    product: ProductRefSchema
+    gift: GiftSnapshotSchema | None
+
+
+class GiftAcceptedDetailsSchema(BaseModel):
+    """Body of a `gift_accepted` notification.
+
+    Sent to the gifter when the recipient accepts. `recipient`
+    carries the accepting user for display.
+    """
+
+    type: Literal["gift_accepted"] = Field(
+        default="gift_accepted",
+        description="Discriminator.",
+    )
+    gift_id: UUID
+    product: ProductRefSchema
+    recipient: UserRefSchema
+    gift: GiftSnapshotSchema | None
+
+
+class GiftDeclinedDetailsSchema(BaseModel):
+    """Body of a `gift_declined` notification.
+
+    Sent to the gifter when the recipient declines a pending gift.
+    `decliner` carries the declining user for display.
+    """
+
+    type: Literal["gift_declined"] = Field(
+        default="gift_declined",
+        description="Discriminator.",
+    )
+    gift_id: UUID
+    product: ProductRefSchema
+    decliner: UserRefSchema
+    gift: GiftSnapshotSchema | None
+
+
 NotificationDetailsSchema = Annotated[
     InviteSentDetailsSchema
     | InviteAcceptedDetailsSchema
@@ -364,7 +436,10 @@ NotificationDetailsSchema = Annotated[
     | AccessRevokedDetailsSchema
     | NewLoginDetailsSchema
     | StorageQuotaWarningDetailsSchema
-    | StorageQuotaEnforcedDetailsSchema,
+    | StorageQuotaEnforcedDetailsSchema
+    | GiftReceivedDetailsSchema
+    | GiftAcceptedDetailsSchema
+    | GiftDeclinedDetailsSchema,
     Field(discriminator="type"),
 ]
 

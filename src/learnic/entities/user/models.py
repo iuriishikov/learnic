@@ -28,6 +28,8 @@ class User(BaseEntity[UserID]):
     password_hash: PasswordHash
     email_verified: bool
     is_verified: bool = False
+    is_admin: bool = False
+    is_banned: bool = False
     description: UserDescription | None = None
     avatar_file_id: FileID | None = None
     cover_file_id: FileID | None = None
@@ -56,6 +58,26 @@ class User(BaseEntity[UserID]):
 
     def mark_email_verified(self) -> None:
         self.email_verified = True
+
+    def grant_admin(self) -> None:
+        """Promote the user to a platform administrator.
+
+        Idempotent: granting admin to an already-admin user is a
+        no-op. Admin is a global, all-or-nothing capability for this
+        MVP — there is no per-permission admin role.
+        """
+        self.is_admin = True
+
+    def ban(self) -> None:
+        """Mark the user as banned from the platform.
+
+        Idempotent. Flipping the flag is not enough on its own —
+        the caller (``BanUserCommandHandler``) must also revoke the
+        user's refresh-token families so in-flight access tokens are
+        rejected; ``LoginCommandHandler`` blocks fresh logins for
+        banned users.
+        """
+        self.is_banned = True
 
     def set_avatar(self, file_id: FileID) -> FileID | None:
         """Attach ``file_id`` as avatar, returning the previous one (if any)."""

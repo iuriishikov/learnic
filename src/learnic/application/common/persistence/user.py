@@ -55,6 +55,15 @@ class UserReader(Protocol):
 
     async def with_id(self, oid: UserID) -> UserView | None: ...
 
+    async def is_admin(self, oid: UserID) -> bool | None:
+        """Return the user's platform-admin flag, or ``None`` if absent.
+
+        ``None`` distinguishes "no such user" from a real ``False`` so
+        the caller can map a vanished account to a 404 rather than
+        silently reporting "not an admin".
+        """
+        ...
+
     async def search_by_name(
         self,
         tokens: tuple[str, ...],

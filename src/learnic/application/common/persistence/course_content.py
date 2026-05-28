@@ -157,10 +157,16 @@ class VideoFileBlockView:
 class CollageItemView:
     """One photo inside a :class:`PhotoCollageBlockView`.
 
+    ``oid`` is the stable item identity used by the granular
+    add/remove/reorder/caption endpoints on the draft side. The
+    release-side reader carries the same field — items in the JSONB
+    snapshot copy their draft id verbatim so URL bookmarks in
+    release-time discussion threads remain meaningful.
     ``file`` is nullable for the same reason as the block-level FK:
     a deleted backing file leaves the item as a placeholder.
     """
 
+    oid: str
     file: FileView | None
     caption: str | None
 
@@ -223,3 +229,22 @@ class CourseContentReader(Protocol):
     """Read-side queries for course content draft and (later) releases."""
 
     async def get_draft(self, product_id: ProductID) -> CourseDraftView: ...
+
+    async def with_block_id(
+        self,
+        block_id: LessonBlockID,
+    ) -> tuple[ProductID, LessonBlockView] | None:
+        """Return ``(product_id, view)`` for a single block, or ``None``.
+
+        The ``product_id`` is the block's denormalised owning product —
+        callers need it to scope authorisation (``AuthzTarget.for_product``)
+        without an extra DB round-trip up the aggregate tree.
+
+        Args:
+            block_id: Target block's id.
+
+        Returns:
+            ``(product_id, LessonBlockView)`` when the block exists,
+            otherwise ``None``.
+        """
+        ...

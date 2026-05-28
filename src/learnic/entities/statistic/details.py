@@ -45,3 +45,40 @@ class ProductViewDetails(StatisticDetails):
 
     product_id: ProductID
     referrer: str | None
+
+
+@dataclass(slots=True)
+class RegistrationDetails(StatisticDetails):
+    """Body for the ``registration`` statistic.
+
+    Recorded once when a user account is created. The new user is
+    the actor on the parent row, so there is no type-specific
+    column to carry — the event's value is the actor + timestamp,
+    which together drive the registrations-over-time series.
+    """
+
+
+@dataclass(slots=True)
+class EnrollmentDetails(StatisticDetails):
+    """Body for the ``enrollment`` statistic.
+
+    Recorded when a student is enrolled into a product through any
+    path (self-enroll, accepted gift, admin grant). The enrolling
+    student is the actor on the parent row; ``product_id`` is the
+    course they joined, so enrollments can be broken down per
+    product.
+    """
+
+    product_id: ProductID
+
+
+@dataclass(slots=True)
+class SiteVisitDetails(StatisticDetails):
+    """Body for the ``site_visit`` statistic.
+
+    Recorded when an authenticated user loads the app (one row per
+    user per UTC day, enforced by the spec's dedup key). Carries no
+    type-specific column — the actor + day are the whole signal,
+    and DAU / MAU are ``COUNT(DISTINCT actor_id)`` over the parent
+    rows for the relevant window.
+    """

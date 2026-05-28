@@ -60,6 +60,7 @@ from learnic.infrastructure.persistence.models.course_block import (
     lesson_blocks_table,
     multi_choice_blocks_table,
     photo_collage_blocks_table,
+    photo_collage_items_table,
     rutube_video_blocks_table,
     single_choice_blocks_table,
     text_input_blocks_table,
@@ -253,6 +254,111 @@ class _LessonsSnapshotPhase(_RowMappingPhase):
         }
 
 
+async def _load_release_collage_items_payload(
+    session: AsyncSession,
+    rows: Sequence[sa.Row[Any]],
+) -> dict[uuid.UUID, list[dict[str, Any]]]:
+    """Batch-load draft items for the collage rows in the snapshot SELECT.
+
+    Returns ``{block_id: [item dict, ...]}`` keyed by the draft block
+    id; ``[item dict, ...]`` is the canonical ``{"oid", "file_id",
+    "caption"}`` payload list ready to be persisted into the release
+    side's JSONB column. ``oid`` is copied verbatim from the draft
+    item — release-time snapshot identity equals draft identity so
+    URL bookmarks tied to a specific photo survive the snapshot.
+    """
+    from learnic.entities.course_block.enums import (  # local import to avoid cycle  # noqa: E501, PLC0415
+        BlockType,
+    )
+
+    collage_ids = [
+        row.oid
+        for row in rows
+        if (
+            row.type
+            if isinstance(row.type, BlockType)
+            else BlockType(row.type)
+        )
+        is BlockType.PHOTO_COLLAGE
+    ]
+    if not collage_ids:
+        return {}
+    stmt = (
+        sa.select(
+            photo_collage_items_table.c.oid,
+            photo_collage_items_table.c.block_id,
+            photo_collage_items_table.c.file_id,
+            photo_collage_items_table.c.caption,
+        )
+        .where(photo_collage_items_table.c.block_id.in_(collage_ids))
+        .order_by(
+            photo_collage_items_table.c.block_id.asc(),
+            photo_collage_items_table.c.position.asc(),
+        )
+    )
+    items_rows = (await session.execute(stmt)).all()
+    out: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for row in items_rows:
+        out.setdefault(row.block_id, []).append(
+            {
+                "oid": str(row.oid),
+                "file_id": (
+                    str(row.file_id) if row.file_id is not None else None
+                ),
+                "caption": row.caption,
+            },
+        )
+    return out
+
+
+class _RowWithCollageItems:
+    """Read-only proxy exposing ``photo_collage_items`` on a snapshot row.
+
+    Same shim used by the gateway / draft reader — see those modules
+    for the broader rationale.
+    """
+
+    __slots__ = ("_row", "_items")
+
+    def __init__(
+        self,
+        row: sa.Row[Any],
+        items: list[dict[str, Any]],
+    ) -> None:
+        self._row = row
+        self._items = items
+
+    @property
+    def photo_collage_items(self) -> list[dict[str, Any]]:
+        return self._items
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._row, name)
+
+
+def _attach_release_collage_items(
+    rows: Sequence[sa.Row[Any]],
+    items_by_block: dict[uuid.UUID, list[dict[str, Any]]],
+) -> list[Any]:
+    from learnic.entities.course_block.enums import (  # local import to avoid cycle  # noqa: E501, PLC0415
+        BlockType,
+    )
+
+    out: list[Any] = []
+    for row in rows:
+        block_type = (
+            row.type
+            if isinstance(row.type, BlockType)
+            else BlockType(row.type)
+        )
+        if block_type is not BlockType.PHOTO_COLLAGE:
+            out.append(row)
+            continue
+        items = items_by_block.get(row.oid, [])
+        out.append(_RowWithCollageItems(row, items))
+    return out
+
+
 class _BlocksSnapshotPhase(_SnapshotPhase):
     """Block phase is two-stage: parent row + per-type subtype row.
 
@@ -271,20 +377,35 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
         release: CourseRelease,
         prior_maps: dict[str, _IdMap],
     ) -> _IdMap:
-        rows = (await session.execute(self._select(release))).all()
+        rows = list((await session.execute(self._select(release))).all())
         if not rows:
             return {}
 
-        mapping: _IdMap = {row.oid: uuid.uuid4() for row in rows}
+        # Photo-collage items live in a child table on the draft side
+        # but are persisted as a denormalised JSONB array on the
+        # release side. Load each collage's items once and stash them
+        # on a per-row proxy so the registry's existing
+        # ``_photo_collage_release_insert_value`` reads them under
+        # the same attribute name it expects on the release reader
+        # path.
+        collage_payload = await _load_release_collage_items_payload(
+            session,
+            rows,
+        )
+        attached_rows = _attach_release_collage_items(rows, collage_payload)
+
+        mapping: _IdMap = {row.oid: uuid.uuid4() for row in attached_rows}
         await session.execute(
             sa.insert(course_release_blocks_table),
             [
                 self._parent_value(row, mapping[row.oid], release, prior_maps)
-                for row in rows
+                for row in attached_rows
             ],
         )
 
-        for table, values in self._partition_subtypes(rows, mapping).items():
+        for table, values in self._partition_subtypes(
+            attached_rows, mapping,
+        ).items():
             if values:
                 await session.execute(sa.insert(table), values)
         return mapping
@@ -332,9 +453,6 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 ),
                 video_file_blocks_table.c.title.label(
                     "video_file_block_title",
-                ),
-                photo_collage_blocks_table.c["items"].label(
-                    "photo_collage_items",
                 ),
                 photo_collage_blocks_table.c.title.label(
                     "photo_collage_title",

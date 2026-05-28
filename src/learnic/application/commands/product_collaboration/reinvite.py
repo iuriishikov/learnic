@@ -7,6 +7,9 @@ from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
 )
+from learnic.application.common.email.rate_limit import (
+    EmailSendRateLimiter,
+)
 from learnic.application.common.errors import (
     CollaborationAlreadyExistsError,
     EmailInviteRateLimitExceededError,
@@ -52,6 +55,7 @@ from learnic.entities.user.models import UserID
 class ReinviteCollaboratorCommand:
     actor_id: UserID
     source_collaboration_id: ProductCollaborationID
+    actor_ip: str | None
 
 
 @final
@@ -88,6 +92,7 @@ class ReinviteCollaboratorCommandHandler:
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
         security: SecurityPolicies,
+        email_rate_limiter: EmailSendRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -98,6 +103,7 @@ class ReinviteCollaboratorCommandHandler:
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
         self._security: Final = security
+        self._email_rate_limiter: Final = email_rate_limiter
 
     async def run(
         self,
@@ -143,8 +149,14 @@ class ReinviteCollaboratorCommandHandler:
         else:
             raise EntityNotFoundError(data.source_collaboration_id)
         await self._collab_saver.save(collab)
-        await self._transaction.commit()
         target_email = await self._resolve_email(collab)
+        if target_email is not None:
+            await self._email_rate_limiter.register(
+                actor_id=data.actor_id,
+                recipient=target_email,
+                ip=data.actor_ip,
+            )
+        await self._transaction.commit()
         if target_email is not None:
             base = self._security.frontend_base_url.rstrip("/")
             link = (

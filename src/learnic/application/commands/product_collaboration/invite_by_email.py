@@ -11,6 +11,9 @@ from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
 )
+from learnic.application.common.email.rate_limit import (
+    EmailSendRateLimiter,
+)
 from learnic.application.common.errors import (
     CannotInviteOwnerError,
     CollaborationAlreadyExistsError,
@@ -65,6 +68,7 @@ class InviteCollaboratorByEmailCommand:
     product_id: ProductID
     target_email: str
     grants: list[GrantSpec]
+    actor_ip: str | None
 
 
 @final
@@ -103,6 +107,7 @@ class InviteCollaboratorByEmailCommandHandler:
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
         security: SecurityPolicies,
+        email_rate_limiter: EmailSendRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -116,6 +121,7 @@ class InviteCollaboratorByEmailCommandHandler:
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
         self._security: Final = security
+        self._email_rate_limiter: Final = email_rate_limiter
 
     async def run(
         self,
@@ -188,6 +194,11 @@ class InviteCollaboratorByEmailCommandHandler:
             token=token,
         )
         await self._collab_saver.save(collab)
+        await self._email_rate_limiter.register(
+            actor_id=data.actor_id,
+            recipient=email.value,
+            ip=data.actor_ip,
+        )
         await self._transaction.commit()
         base = self._security.frontend_base_url.rstrip("/")
         link = (

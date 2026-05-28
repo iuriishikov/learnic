@@ -15,7 +15,7 @@ from learnic.entities.product.ids import ProductID
 from learnic.infrastructure.persistence.models.course_block import (
     file_blocks_table,
     lesson_blocks_table,
-    photo_collage_blocks_table,
+    photo_collage_items_table,
     video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.file import files_table
@@ -31,6 +31,12 @@ class FilesMapperAlchemy(FilesGateway):
         stmt = sa.select(File).where(files_table.c.oid == oid)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @override
+    async def delete(self, oid: FileID) -> None:
+        await self._session.execute(
+            sa.delete(files_table).where(files_table.c.oid == oid),
+        )
 
 
 class FilesReaderAlchemy(FilesReader):
@@ -118,26 +124,21 @@ class FilesReaderAlchemy(FilesReader):
                 video_file_blocks_table.c.file_id.is_not(None),
             )
         )
-        item_elem = sa.func.jsonb_array_elements(
-            photo_collage_blocks_table.c["items"],
-        ).table_valued(sa.column("value", sa.dialects.postgresql.JSONB))
+        # Collage items now live in a child table — straight join.
         collage_path = (
             sa.select(
-                sa.cast(
-                    item_elem.c.value["file_id"].astext,
-                    sa.Uuid,
-                ).label("file_id"),
+                photo_collage_items_table.c.file_id.label("file_id"),
             )
             .select_from(
-                photo_collage_blocks_table.join(
+                photo_collage_items_table.join(
                     lesson_blocks_table,
                     lesson_blocks_table.c.oid
-                    == photo_collage_blocks_table.c.oid,
-                ).join(item_elem, sa.true()),
+                    == photo_collage_items_table.c.block_id,
+                ),
             )
             .where(
                 lesson_blocks_table.c.product_id == product_id,
-                item_elem.c.value["file_id"].astext.is_not(None),
+                photo_collage_items_table.c.file_id.is_not(None),
             )
         )
         cover_path = (

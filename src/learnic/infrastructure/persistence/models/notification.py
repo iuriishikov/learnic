@@ -438,6 +438,147 @@ notification_storage_quota_enforced_table = sa.Table(
 )
 
 
+notification_gift_received_table = sa.Table(
+    "notification_gift_received",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "gift_id",
+        sa.Uuid,
+        sa.ForeignKey("product_gifts.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_gift_received_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.GIFT_RECEIVED.value}'",
+        name="ck_notif_gift_received_kind",
+    ),
+)
+
+
+notification_gift_accepted_table = sa.Table(
+    "notification_gift_accepted",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "gift_id",
+        sa.Uuid,
+        sa.ForeignKey("product_gifts.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "recipient_id",
+        sa.Uuid,
+        sa.ForeignKey("users.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_gift_accepted_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.GIFT_ACCEPTED.value}'",
+        name="ck_notif_gift_accepted_kind",
+    ),
+)
+
+
+notification_gift_declined_table = sa.Table(
+    "notification_gift_declined",
+    mapper_registry.metadata,
+    sa.Column(
+        "notification_id",
+        sa.Uuid,
+        primary_key=True,
+    ),
+    sa.Column(
+        "kind",
+        sa.Enum(
+            NotificationKind,
+            name="notification_kind",
+            values_callable=_enum_values,
+            create_type=False,
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "gift_id",
+        sa.Uuid,
+        sa.ForeignKey("product_gifts.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "product_id",
+        sa.Uuid,
+        sa.ForeignKey("products.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "decliner_id",
+        sa.Uuid,
+        sa.ForeignKey("users.oid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.ForeignKeyConstraint(
+        ["notification_id", "kind"],
+        ["notifications.oid", "notifications.kind"],
+        ondelete="CASCADE",
+        name="fk_notif_gift_declined_parent",
+    ),
+    sa.CheckConstraint(
+        f"kind = '{NotificationKind.GIFT_DECLINED.value}'",
+        name="ck_notif_gift_declined_kind",
+    ),
+)
+
+
 _mapped = False
 
 

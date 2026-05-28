@@ -5,6 +5,7 @@ from dishka.integrations.fastapi import FromDishka
 from fastapi import Depends, Path, Query, Request, UploadFile, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import Self
 
 from learnic.application.commands.user.avatar.remove import (
     RemoveUserAvatarCommand,
@@ -68,9 +69,18 @@ from learnic.application.queries.user.get import (
     GetUserQuery,
     GetUserQueryHandler,
 )
+from learnic.application.queries.user.get_admin_status import (
+    GetMyAdminStatusQuery,
+    GetMyAdminStatusQueryHandler,
+)
 from learnic.application.queries.user.search import (
     SearchUsersQuery,
     SearchUsersQueryHandler,
+)
+from learnic.application.queries.user.top_teachers import (
+    GetTopTeachersQuery,
+    GetTopTeachersQueryHandler,
+    TopTeacherOutput,
 )
 from learnic.entities.user.constants import (
     DESCRIPTION_MAX_LEN,
@@ -93,6 +103,7 @@ from learnic.presentation.http.common.errors.rules import (
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
+    FileSchema,
     UploadedFileSchema,
     UserSchema,
     UserSummarySchema,
@@ -356,6 +367,153 @@ async def search(
     return [UserSummarySchema.from_view(view) for view in views]
 
 
+class TopTeacherSchema(BaseModel):
+    """One row of the ``GET /users/top-teachers`` popularity ranking.
+
+    A lightweight public projection: the user's id, canonical
+    ``Last First Patronymic`` display name, verified badge, optional
+    avatar thumbnail, and the two ranking metrics. Like
+    :class:`UserSummarySchema` it omits ``email`` and ``description`` —
+    this is open discovery content. ``student_count`` is the number of
+    distinct active students across the user's published products;
+    ``published_product_count`` is how many products they have
+    published. Both are ``0`` for a user who has taught nothing — every
+    registered user appears in the ranking, not only teachers.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "full_name": "Lovelace Ada",
+                    "is_verified": True,
+                    "avatar": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 184_320,
+                        "url": "https://s3.example.com/avatars/...",
+                    },
+                    "student_count": 1280,
+                    "published_product_count": 7,
+                },
+            ],
+        },
+    )
+
+    oid: UUID = Field(
+        description="Teacher's stable identifier (UUID v4).",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+    full_name: str = Field(
+        description=(
+            "Display name in the canonical Russian-style "
+            "`Last First Patronymic` order. Whitespace-trimmed; "
+            "missing patronymic collapses to `Last First`."
+        ),
+        min_length=1,
+        examples=["Lovelace Ada"],
+    )
+    is_verified: bool = Field(
+        description=(
+            "Whether the platform has granted the user the public "
+            "\"verified\" badge."
+        ),
+        examples=[True, False],
+    )
+    avatar: FileSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved avatar file with a short-lived presigned URL, "
+            "or `null` when no avatar is attached. The URL expires; "
+            "re-fetch the ranking to get a fresh one."
+        ),
+    )
+    student_count: int = Field(
+        description=(
+            "Number of distinct students with an active enrollment "
+            "across the user's published products. A student enrolled "
+            "in several of the user's courses counts once; revoked "
+            "enrollments are excluded. `0` for a user with no students. "
+            "Primary ranking key."
+        ),
+        ge=0,
+        examples=[1280],
+    )
+    published_product_count: int = Field(
+        description=(
+            "How many products the user has published (`0` if none). "
+            "Secondary ranking key, used to break ties on "
+            "`student_count`."
+        ),
+        ge=0,
+        examples=[7],
+    )
+
+    @classmethod
+    def from_output(cls, view: TopTeacherOutput) -> Self:
+        """Build the schema from a ``GetTopTeachersQueryHandler`` row.
+
+        Pydantic does the heavy lifting through ``from_attributes=True``;
+        the nested :class:`FileView` maps onto :class:`FileSchema`
+        automatically.
+        """
+        return cls.model_validate(view)
+
+
+@router.get(
+    "/top-teachers",
+    summary="List top teachers ranked by number of students",
+    operation_id="getTopTeachers",
+    response_model=list[TopTeacherSchema],
+)
+async def top_teachers(
+    interactor: FromDishka[GetTopTeachersQueryHandler],
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
+        examples=[20],
+    ),
+) -> list[TopTeacherSchema]:
+    """Return the platform's users ranked by student count.
+
+    Powers the public "top teachers" discovery rail. Every registered
+    user is ranked; only banned accounts are excluded. Rows are ordered
+    by distinct active-student count descending, then by
+    published-product count descending, then by name for a stable page.
+    Users with zero students (including those who have published nothing)
+    still appear at the tail, so the endpoint doubles as a full user
+    directory.
+
+    Authentication is **not** required — this is open discovery content,
+    the same stance as ``GET /users/{user_id}/products``.
+
+    Args:
+        interactor: Injected top-teachers query handler.
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        List of :class:`TopTeacherSchema`, ordered most-popular first.
+        Empty only when the platform has no (non-banned) users.
+    """
+    views = await interactor.run(
+        GetTopTeachersQuery(
+            pagination=Pagination(limit=limit, offset=offset),
+        ),
+    )
+    return [TopTeacherSchema.from_output(view) for view in views]
+
+
 @router.get(
     "/{user_id}",
     summary="Get a user's public profile",
@@ -411,6 +569,63 @@ async def get(
             ),
         )
     return UserSchema.from_view(view)
+
+
+class AdminStatusSchema(BaseModel):
+    """Response for ``GET /users/me/admin-status``."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"is_admin": False}]},
+    )
+
+    is_admin: bool = Field(
+        description=(
+            "Whether the authenticated caller is a platform "
+            "administrator. The SPA uses this to decide whether to "
+            "surface the admin area; the `/admin/*` endpoints still "
+            "enforce it server-side regardless."
+        ),
+        examples=[False],
+    )
+
+
+@router.get(
+    "/me/admin-status",
+    summary="Check whether the current user is an administrator",
+    operation_id="getMyAdminStatus",
+    response_model=AdminStatusSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_MAP,
+)
+async def get_my_admin_status(
+    request: Request,
+    interactor: FromDishka[GetMyAdminStatusQueryHandler],
+    auth: FromDishka[Authenticator],
+) -> AdminStatusSchema:
+    """Return whether the authenticated caller is a platform admin.
+
+    Authenticated but **not** admin-gated on purpose: a regular user
+    must be able to learn they are *not* an admin (a ``200`` with
+    ``is_admin: false``) instead of receiving a ``403``. Admin status
+    is granted out-of-band via the ``grant-admin`` CLI.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected admin-status query handler.
+        auth: Injected authenticator that validates the access cookie.
+
+    Returns:
+        ``200 OK`` with :class:`AdminStatusSchema`.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        EntityNotFoundError: Authenticated user vanished; HTTP 404.
+    """
+    ctx = await auth.authenticate(request)
+    result = await interactor.run(
+        GetMyAdminStatusQuery(user_id=ctx.user_id),
+    )
+    return AdminStatusSchema(is_admin=result.is_admin)
 
 
 @router.put(
@@ -868,9 +1083,9 @@ async def get_products(
 ) -> list[ProductSchema]:
     """Return ``user_id``'s published products, newest first.
 
-    Powers the public profile page's "products" rail. Drafts,
-    archived, and banned products are excluded — only ``PUBLISHED``
-    rows are visible. An unknown ``user_id`` simply returns an empty
+    Powers the public profile page's "products" rail. Drafts and
+    archived products are excluded — only ``PUBLISHED`` rows are
+    visible. An unknown ``user_id`` simply returns an empty
     list rather than 404 so the rail renders an empty state without
     breaking the rest of the profile page.
 

@@ -21,6 +21,9 @@ from learnic.infrastructure.persistence.models.product import (
     map_product_qa_table,
     map_product_table,
 )
+from learnic.infrastructure.persistence.models.email_sending import (
+    map_email_sending_table,
+)
 from learnic.infrastructure.persistence.models.notification import (
     map_notification_table,
 )
@@ -30,6 +33,9 @@ from learnic.infrastructure.persistence.models.push_subscription import (
 from learnic.infrastructure.persistence.models.product_collaboration import (
     map_collaboration_grant_table,
     map_product_collaboration_table,
+)
+from learnic.infrastructure.persistence.models.product_gift import (
+    map_product_gift_table,
 )
 from learnic.infrastructure.persistence.models.role import map_role_table
 from learnic.infrastructure.persistence.models.statistic import (
@@ -47,6 +53,7 @@ from learnic.infrastructure.persistence.models.user_experience import (
 from learnic.infrastructure.persistence.models.user_social_link import (
     map_user_social_link_table,
 )
+from learnic.presentation.http.routes.admin import router as admin_router
 from learnic.presentation.http.routes.auth import router as auth_router
 from learnic.presentation.http.routes.course_content import (
     router as course_content_router,
@@ -71,6 +78,10 @@ from learnic.presentation.http.routes.product_collaboration import (
     collab_router as collaboration_router,
     me_router as my_collaborations_router,
     product_router as product_collaboration_router,
+)
+from learnic.presentation.http.routes.product_gift import (
+    gift_router,
+    product_router as product_gift_router,
 )
 from learnic.presentation.http.routes.notification import (
     router as notification_router,
@@ -103,6 +114,9 @@ from learnic.presentation.http.routes.tag import (
     product_tags_router,
     tag_router,
 )
+from learnic.presentation.http.routes.product_cursors_ws import (
+    router as product_cursors_ws_router,
+)
 from learnic.presentation.http.routes.product_ws import (
     router as product_ws_router,
 )
@@ -128,6 +142,7 @@ def setup_configs() -> Configs:
 def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(root_router)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(user_router)
     app.include_router(user_experiences_router)
     app.include_router(my_user_experiences_router)
@@ -138,6 +153,7 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(my_products_router)
     app.include_router(product_qa_router)
     app.include_router(product_ws_router)
+    app.include_router(product_cursors_ws_router)
     app.include_router(course_enrollment_router)
     app.include_router(my_enrollments_router)
     app.include_router(course_content_router)
@@ -151,6 +167,8 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(product_collaboration_router)
     app.include_router(collaboration_router)
     app.include_router(my_collaborations_router)
+    app.include_router(product_gift_router)
+    app.include_router(gift_router)
     app.include_router(notification_router)
     app.include_router(notification_ws_router)
     app.include_router(notification_preferences_router)
@@ -185,8 +203,10 @@ def setup_map_tables() -> None:
     map_tag_table()
     map_product_collaboration_table()
     map_collaboration_grant_table()
+    map_product_gift_table()
     map_notification_table()
     map_push_subscription_table()
     map_statistic_table()
     map_subscription_table()
     map_storage_quota_breach_table()
+    map_email_sending_table()

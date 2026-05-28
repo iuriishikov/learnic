@@ -15,6 +15,7 @@ from learnic.entities.course_block.constants import (
 )
 from learnic.entities.course_block.enums import BlockType
 from learnic.entities.course_block.errors import (
+    CollageItemsMismatchError,
     CorrectOptionNotInOptionsError,
     CorrectOptionsNotSubsetError,
     DuplicateAcceptedAnswerError,
@@ -31,7 +32,11 @@ from learnic.entities.course_block.errors import (
     TooFewCollageItemsError,
     TooManyCollageItemsError,
 )
-from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
+from learnic.entities.course_block.ids import (
+    ChoiceOptionID,
+    CollageItemID,
+    LessonBlockID,
+)
 from learnic.entities.course_block.value_objects import (
     AcceptedAnswer,
     BlockTitle,
@@ -734,12 +739,16 @@ class VideoFileBlock(BaseEntity[LessonBlockID]):
 class CollageItem:
     """One photo inside a :class:`PhotoCollageBlock`.
 
-    ``file_id`` is nullable to survive backing-file deletion (same
-    rationale as the parent block). ``caption`` is optional — a
-    short hand-written note shown under the photo; anything longer
-    belongs in an adjacent HTML block.
+    ``oid`` is a stable domain-generated UUID — the item lives in its
+    own ``photo_collage_items`` row on the draft side, so granular
+    edits (add / remove / reorder / caption) can address it by id
+    instead of by position. ``file_id`` is nullable to survive
+    backing-file deletion (same rationale as the parent block).
+    ``caption`` is optional — a short hand-written note shown under
+    the photo; anything longer belongs in an adjacent HTML block.
     """
 
+    oid: CollageItemID
     file_id: FileID | None
     caption: CollageCaption | None = None
 
@@ -756,13 +765,16 @@ def _validate_collage_items(items: list[CollageItem]) -> None:
 class PhotoCollageBlock(BaseEntity[LessonBlockID]):
     """A draft photo-collage block inside a lesson.
 
-    A non-empty ordered list of :class:`CollageItem` (file + optional
-    caption). Items are stored verbatim in a JSONB column at the
-    persistence boundary — same denormalised rationale as
-    :class:`CodeBlock`'s ``tabs`` — so the application layer never
-    queries inside the array. The "each item is an image" invariant
-    (content-type prefix ``image/``) is enforced by the command
-    handler at construction time.
+    A non-empty ordered list of :class:`CollageItem` (id + file +
+    optional caption). Items are persisted as separate rows in the
+    ``photo_collage_items`` child table on the draft side, so
+    granular edits (add / remove / reorder / caption) address one
+    photo by its stable ``oid``. The "each item is an image"
+    invariant (content-type prefix ``image/``) is enforced by the
+    command handler at construction time. Release snapshots
+    continue to store items denormalised inside a JSONB column;
+    the snapshotter assembles that JSONB from the new draft
+    rows at snapshot time.
     """
 
     lesson_id: CourseLessonID
@@ -780,9 +792,90 @@ class PhotoCollageBlock(BaseEntity[LessonBlockID]):
     def type(self) -> BlockType:
         return BlockType.PHOTO_COLLAGE
 
-    def replace_items(self, new_items: list[CollageItem]) -> None:
-        _validate_collage_items(new_items)
-        self.items = new_items
+    def add_item(
+        self,
+        file_id: FileID,
+        caption: CollageCaption | None = None,
+    ) -> CollageItem:
+        """Append a new item with a freshly-minted :class:`CollageItemID`.
+
+        Raises :class:`TooManyCollageItemsError` if the addition would
+        push the count over ``PHOTO_COLLAGE_MAX_ITEMS``. Returns the
+        newly-created item so the caller can surface its oid back to
+        the API client.
+        """
+        candidate = list(self.items)
+        item = CollageItem(
+            oid=CollageItemID(uuid.uuid4()),
+            file_id=file_id,
+            caption=caption,
+        )
+        candidate.append(item)
+        _validate_collage_items(candidate)
+        self.items = candidate
+        return item
+
+    def remove_item(self, item_id: CollageItemID) -> FileID | None:
+        """Drop the item with the given ``oid``.
+
+        Returns the file id freed by the removal (or ``None`` if the
+        item had no backing file — placeholder rows survive backing-
+        file deletion). Raises :class:`TooFewCollageItemsError` if
+        the removal would push the count below
+        ``PHOTO_COLLAGE_MIN_ITEMS``. Raises
+        :class:`CollageItemsMismatchError` if ``item_id`` is not on
+        the block — this is an application-layer EntityNotFound on
+        the route, but at the domain layer we keep all collage-item
+        identity errors in the same field-error family.
+        """
+        index = next(
+            (i for i, it in enumerate(self.items) if it.oid == item_id),
+            -1,
+        )
+        if index < 0:
+            raise CollageItemsMismatchError()
+        candidate = list(self.items)
+        removed = candidate.pop(index)
+        _validate_collage_items(candidate)
+        self.items = candidate
+        return removed.file_id
+
+    def reorder_items(self, ordered_ids: list[CollageItemID]) -> None:
+        """Reorder existing items by id.
+
+        ``ordered_ids`` must be a permutation of the block's current
+        item ids — same multiset, no additions, no omissions.
+        Anything else raises :class:`CollageItemsMismatchError`;
+        add/remove flows have their own dedicated commands.
+        """
+        existing_ids = [it.oid for it in self.items]
+        if sorted(ordered_ids) != sorted(existing_ids):
+            raise CollageItemsMismatchError()
+        by_id = {it.oid: it for it in self.items}
+        self.items = [by_id[oid] for oid in ordered_ids]
+
+    def update_item_caption(
+        self,
+        item_id: CollageItemID,
+        caption: CollageCaption | None,
+    ) -> None:
+        """Replace one item's caption (or clear it if ``caption`` is None).
+
+        Raises :class:`CollageItemsMismatchError` if no item carries
+        ``item_id``.
+        """
+        index = next(
+            (i for i, it in enumerate(self.items) if it.oid == item_id),
+            -1,
+        )
+        if index < 0:
+            raise CollageItemsMismatchError()
+        current = self.items[index]
+        self.items[index] = CollageItem(
+            oid=current.oid,
+            file_id=current.file_id,
+            caption=caption,
+        )
 
     def update_title(self, new_title: BlockTitle | None) -> None:
         self.title = new_title

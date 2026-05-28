@@ -2,15 +2,18 @@ from collections.abc import Mapping
 from typing import Final, final
 
 from learnic.application.common.enrollment.strategies import (
-    CourseEnrollmentTarget,
     EnrollmentStrategy,
     EnrollmentTarget,
 )
 from learnic.application.common.errors import AlreadyEnrolledError
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.statistics.collector import (
+    StatisticsCollector,
+)
 from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.entities.enrollment.ids import EnrollmentID
 from learnic.entities.product.ids import ProductID
+from learnic.entities.statistic.models import Statistic
 from learnic.entities.user.models import UserID
 
 
@@ -49,9 +52,11 @@ class EnrollmentService:
         self,
         strategies: Mapping[EnrollmentKind, EnrollmentStrategy],
         transaction: Transaction,
+        statistics: StatisticsCollector,
     ) -> None:
         self._strategies: Final = strategies
         self._transaction: Final = transaction
+        self._statistics: Final = statistics
 
     async def enroll(
         self,
@@ -64,20 +69,14 @@ class EnrollmentService:
             raise AlreadyEnrolledError(target.parent_id, student_id)
         enrollment = await strategy.enroll(student_id, target)
         await self._transaction.commit()
-        return enrollment.oid
-
-    async def enroll_in_course(
-        self,
-        student_id: UserID,
-        product_id: ProductID,
-    ) -> EnrollmentID:
-        """Convenience: enroll a student into a course product.
-
-        Thin wrapper that builds the :class:`CourseEnrollmentTarget`
-        so internal callers (other application services, scripts,
-        admin grants) do not have to import strategy targets.
-        """
-        return await self.enroll(
-            student_id=student_id,
-            target=CourseEnrollmentTarget(product_id=product_id),
+        # Single choke point for every enrollment flow (self-enroll,
+        # accepted gift, admin grant), so recording here counts them
+        # all. Fire-and-forget and post-commit — a failed stat never
+        # affects the committed enrollment.
+        await self._statistics.record(
+            Statistic.for_enrollment(
+                actor_id=student_id,
+                product_id=ProductID(target.parent_id),
+            ),
         )
+        return enrollment.oid

@@ -100,6 +100,30 @@ class ProductCollaborationGateway(Protocol):
         """
         ...
 
+    async def delete_expired_pending_invites(
+        self,
+        expires_before: datetime,
+    ) -> int:
+        """Delete ``PENDING_INVITE`` rows past their ``invite_expires_at``.
+
+        Used by ``PurgeExpiredInvitesCommandHandler`` as a periodic
+        sweep: acceptance only validates the TTL at call time and
+        never cleans up, so expired pending rows accumulate and
+        keep the partial unique index on
+        ``(product_id, invited_email)`` for pending invites
+        occupied. The strict ``invite_expires_at < expires_before``
+        bound matches the validation logic on
+        :meth:`ProductCollaboration.accept` exactly — rows that
+        would still be acceptable are never touched.
+
+        Grant rows are removed transitively through the FK
+        ``collaboration_grants.collaboration_id`` (``ON DELETE
+        CASCADE``); no separate cleanup is needed. Returns the
+        number of deleted parent rows so the caller can log the
+        sweep size.
+        """
+        ...
+
 
 class ProductCollaborationSaver(Protocol):
     """Write-side persistence for :class:`ProductCollaboration` grants.

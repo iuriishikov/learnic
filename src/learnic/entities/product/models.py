@@ -9,7 +9,11 @@ from learnic.entities.product.capabilities import (
     PRODUCT_TYPE_CAPABILITIES,
     ProductCapability,
 )
-from learnic.entities.product.enums import ProductStatus, ProductType
+from learnic.entities.product.enums import (
+    ProductStatus,
+    ProductType,
+    ProductVisibility,
+)
 from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.value_objects import (
@@ -37,6 +41,7 @@ class Product(BaseEntity[ProductID]):
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    visibility: ProductVisibility = ProductVisibility.PUBLIC
     description: ProductDescription | None = None
     total_duration_in_hours: DurationHours | None = None
     cover_file_id: FileID | None = None
@@ -87,6 +92,15 @@ class Product(BaseEntity[ProductID]):
             return
         self.status = ProductStatus.PUBLISHED
         self.published_at = datetime.now(timezone.utc)
+
+    def change_visibility(self, visibility: ProductVisibility) -> None:
+        """Set the product's discovery visibility (public ⇄ private).
+
+        Idempotent: re-applying the current visibility is a no-op the
+        caller can detect by comparing before/after to decide whether
+        to emit a change event.
+        """
+        self.visibility = visibility
 
     def archive(self) -> None:
         self.status = ProductStatus.ARCHIVED

@@ -68,6 +68,18 @@ users_table = sa.Table(
         server_default=sa.false(),
     ),
     sa.Column(
+        "is_admin",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
+        "is_banned",
+        sa.Boolean(),
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
         "description",
         sa.Text(),
         nullable=True,
@@ -143,6 +155,8 @@ def map_user_table() -> None:
             ),
             "email_verified": users_table.c.email_verified,
             "is_verified": users_table.c.is_verified,
+            "is_admin": users_table.c.is_admin,
+            "is_banned": users_table.c.is_banned,
             "description": composite(
                 UserDescription.of_optional,
                 users_table.c.description,

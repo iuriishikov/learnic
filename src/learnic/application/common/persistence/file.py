@@ -111,6 +111,22 @@ class FilesGateway(Protocol):
 
     async def with_id(self, oid: FileID) -> File | None: ...
 
+    async def delete(self, oid: FileID) -> None:
+        """Hard-delete the file row.
+
+        ``ON DELETE CASCADE`` on ``file_blocks.file_id`` and
+        ``video_file_blocks.file_id`` drops dependent rows in the
+        same statement. Photo-collage references live in a JSONB
+        array with no FK and must be cleaned up separately by the
+        caller (see
+        :class:`PurgeFileFromStorageCommandHandler`).
+
+        Called by the S3-purge worker after the blob is removed,
+        so the row's audit metadata stays around for the short
+        window between soft-delete and physical erase.
+        """
+        ...
+
 
 class FilesReader(Protocol):
     """Read-side queries returning :class:`FileMeta` projections."""

@@ -114,6 +114,31 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
         result = await self._session.execute(stmt)
         return int(result.scalar_one())
 
+    @override
+    async def delete_expired_pending_invites(
+        self,
+        expires_before: datetime,
+    ) -> int:
+        # ``invite_expires_at`` is non-null for every PENDING_INVITE
+        # row by construction (model invariant), but the explicit
+        # ``is_not(None)`` keeps the predicate well-defined even if
+        # a future migration ever loosens that, and lets Postgres
+        # use the partial index without pulling NULL rows.
+        # Grants cascade through the FK ``ON DELETE CASCADE`` on
+        # ``collaboration_grants.collaboration_id``.
+        stmt = sa.delete(product_collaborations_table).where(
+            product_collaborations_table.c.status
+            == CollaborationStatus.PENDING_INVITE.value,
+            product_collaborations_table.c.invite_expires_at.is_not(None),
+            product_collaborations_table.c.invite_expires_at < expires_before,
+        )
+        result = await self._session.execute(stmt)
+        # ``CursorResult.rowcount`` at runtime; the ``getattr`` matches
+        # ``token_denylist`` / ``notification`` adapters and dodges the
+        # ``Result[Any]`` static type that lacks the attribute.
+        rowcount: int | None = getattr(result, "rowcount", None)
+        return rowcount or 0
+
     async def _load_grants(
         self,
         collaboration_id: ProductCollaborationID,

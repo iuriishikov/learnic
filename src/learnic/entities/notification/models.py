@@ -7,6 +7,9 @@ from learnic.entities.common.base_entity import BaseEntity
 from learnic.entities.billing.ids import PlanCode
 from learnic.entities.notification.details import (
     AccessRevokedDetails,
+    GiftAcceptedDetails,
+    GiftDeclinedDetails,
+    GiftReceivedDetails,
     InviteAcceptedDetails,
     InviteDeclinedDetails,
     InviteSentDetails,
@@ -25,6 +28,7 @@ from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
+from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.user.models import UserID
 
 
@@ -161,6 +165,85 @@ class Notification(BaseEntity[NotificationID]):
                 collaboration_id=collaboration_id,
                 product_id=product_id,
                 revoker_id=revoker_id,
+            ),
+        )
+
+    @classmethod
+    def for_gift_received(
+        cls,
+        *,
+        recipient_id: UserID,
+        actor_id: UserID,
+        gift_id: ProductGiftID,
+        product_id: ProductID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.GIFT_RECEIVED,
+            category=NotificationCategory.LEARNING,
+            actor_id=actor_id,
+            created_at=moment,
+            read_at=None,
+            details=GiftReceivedDetails(
+                gift_id=gift_id,
+                product_id=product_id,
+            ),
+        )
+
+    @classmethod
+    def for_gift_accepted(
+        cls,
+        *,
+        recipient_id: UserID,
+        actor_id: UserID,
+        gift_id: ProductGiftID,
+        product_id: ProductID,
+        gift_recipient_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.GIFT_ACCEPTED,
+            category=NotificationCategory.TEACHING,
+            actor_id=actor_id,
+            created_at=moment,
+            read_at=None,
+            details=GiftAcceptedDetails(
+                gift_id=gift_id,
+                product_id=product_id,
+                recipient_id=gift_recipient_id,
+            ),
+        )
+
+    @classmethod
+    def for_gift_declined(
+        cls,
+        *,
+        recipient_id: UserID,
+        actor_id: UserID,
+        gift_id: ProductGiftID,
+        product_id: ProductID,
+        decliner_id: UserID,
+        now: datetime | None = None,
+    ) -> Self:
+        moment = now or datetime.now(timezone.utc)
+        return cls(
+            oid=NotificationID(uuid.uuid4()),
+            recipient_id=recipient_id,
+            kind=NotificationKind.GIFT_DECLINED,
+            category=NotificationCategory.TEACHING,
+            actor_id=actor_id,
+            created_at=moment,
+            read_at=None,
+            details=GiftDeclinedDetails(
+                gift_id=gift_id,
+                product_id=product_id,
+                decliner_id=decliner_id,
             ),
         )
 

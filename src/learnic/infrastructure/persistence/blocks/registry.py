@@ -43,7 +43,11 @@ from learnic.application.common.persistence.course_content import (
 )
 from learnic.application.common.persistence.file import FileView
 from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import ChoiceOptionID, LessonBlockID
+from learnic.entities.course_block.ids import (
+    ChoiceOptionID,
+    CollageItemID,
+    LessonBlockID,
+)
 from learnic.entities.course_block.models import (
     ChoiceOption,
     CodeBlock,
@@ -603,9 +607,20 @@ def _video_file_release_insert_value(
 # ============================== Photo Collage ============================== #
 
 
-def _jsonb_to_collage_items(raw: Any) -> list[CollageItem]:
+def collage_items_payload_to_domain(raw: Any) -> list[CollageItem]:
+    """Decode a list of item dicts into domain :class:`CollageItem`.
+
+    Shape is the canonical ``{"oid", "file_id", "caption"}`` triple
+    used in BOTH the release JSONB snapshot AND the draft-side
+    composition assembled by :class:`CourseContentReaderAlchemy` /
+    :class:`LessonBlockGatewayAlchemy` before dispatch (those callers
+    re-shape rows from ``photo_collage_items_table`` into this dict
+    form so the registry stays one code path across draft and
+    release).
+    """
     return [
         CollageItem(
+            oid=CollageItemID(uuid.UUID(item["oid"])),
             file_id=FileID(uuid.UUID(item["file_id"]))
             if item.get("file_id") is not None
             else None,
@@ -617,7 +632,7 @@ def _jsonb_to_collage_items(raw: Any) -> list[CollageItem]:
     ]
 
 
-def _jsonb_to_collage_item_views(
+def collage_items_payload_to_views(
     raw: Any,
     files: Mapping[FileID, FileView],
 ) -> list[CollageItemView]:
@@ -630,6 +645,7 @@ def _jsonb_to_collage_item_views(
             file_view = None
         items.append(
             CollageItemView(
+                oid=item["oid"],
                 file=file_view,
                 caption=item.get("caption"),
             ),
@@ -648,7 +664,7 @@ def _photo_collage_row_to_entity(
         position=common.position,
         created_at=common.created_at,
         updated_at=common.updated_at,
-        items=_jsonb_to_collage_items(row.photo_collage_items),
+        items=collage_items_payload_to_domain(row.photo_collage_items),
         title=(
             BlockTitle(row.photo_collage_title)
             if row.photo_collage_title is not None
@@ -665,7 +681,7 @@ def _photo_collage_row_to_view(
         type=BlockType.PHOTO_COLLAGE,
         oid=LessonBlockID(row.oid),
         position=row.position,
-        items=_jsonb_to_collage_item_views(row.photo_collage_items, files),
+        items=collage_items_payload_to_views(row.photo_collage_items, files),
         title=row.photo_collage_title,
     )
 

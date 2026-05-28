@@ -103,6 +103,7 @@ from learnic.presentation.http.common.errors.rules import (
     COLLABORATION_INVITE_MAP,
     COLLABORATION_MUTATION_MAP,
 )
+from learnic.presentation.http.common.device import client_ip
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import UserRefSchema
 
@@ -631,6 +632,8 @@ async def invite_by_email(
             already exists; HTTP 409.
         EmailInviteRateLimitExceededError: Caller has already issued
             the per-day limit of email invitations; HTTP 429.
+        EmailSendRateLimitExceededError: Caller hit the cross-flow
+            per-user outbound-email cap; HTTP 429.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -640,6 +643,7 @@ async def invite_by_email(
             product_id=ProductID(product_id),
             target_email=payload.email,
             grants=[g.to_spec() for g in payload.grants],
+            actor_ip=client_ip(request),
         ),
     )
     return CreatedCollaborationSchema(oid=oid)
@@ -927,12 +931,16 @@ async def revoke(
         OperationNotAllowedInStatusError: Collaboration is in a status
             where ``revoke`` is forbidden (already terminal); HTTP 409
             via ``OPERATION_NOT_ALLOWED_IN_STATUS_RULE``.
+        EmailSendRateLimitExceededError: Caller hit the cross-flow
+            per-user outbound-email cap (the revoked collaborator is
+            notified by email); HTTP 429.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
         RevokeCollaborationCommand(
             actor_id=ctx.user_id,
             collaboration_id=ProductCollaborationID(collaboration_id),
+            actor_ip=client_ip(request),
         ),
     )
 
@@ -980,6 +988,8 @@ async def reinvite(
             invite already exists for the same target; HTTP 409.
         EmailInviteRateLimitExceededError: Email rate cap reached;
             HTTP 429.
+        EmailSendRateLimitExceededError: Caller hit the cross-flow
+            per-user outbound-email cap; HTTP 429.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -987,6 +997,7 @@ async def reinvite(
         ReinviteCollaboratorCommand(
             actor_id=ctx.user_id,
             source_collaboration_id=ProductCollaborationID(collaboration_id),
+            actor_ip=client_ip(request),
         ),
     )
     return CreatedCollaborationSchema(oid=oid)

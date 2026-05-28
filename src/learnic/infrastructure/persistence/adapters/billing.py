@@ -21,6 +21,7 @@ from learnic.application.common.persistence.billing import (
     AuthorActiveFilesReader,
     AuthorFileRef,
     FileUsageReader,
+    GlobalSchedulerLock,
     StorageQuotaBreachGateway,
     StorageQuotaLock,
     SubscriptionGateway,
@@ -34,7 +35,7 @@ from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.course_block import (
     file_blocks_table,
     lesson_blocks_table,
-    photo_collage_blocks_table,
+    photo_collage_items_table,
     video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.file import files_table
@@ -119,9 +120,9 @@ class FileUsageReaderAlchemy(FileUsageReader):
     is paid for once. Soft-deleted files are excluded via the
     ``files.deleted_at IS NULL`` predicate.
 
-    Collage items live as a JSONB array; expand them with
-    ``jsonb_array_elements`` and cast ``file_id`` to ``uuid`` for the
-    join.
+    Collage items live in their own ``photo_collage_items`` table
+    (one row per photo), so the collage path is a straight join —
+    no JSONB expansion needed.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -164,32 +165,26 @@ class FileUsageReaderAlchemy(FileUsageReader):
                 video_file_blocks_table.c.file_id.is_not(None),
             )
         )
-        # Collage path: expand JSONB items, cast file_id text to uuid.
-        item_elem = sa.func.jsonb_array_elements(
-            photo_collage_blocks_table.c["items"],
-        ).table_valued(sa.column("value", sa.dialects.postgresql.JSONB))
+        # Collage path: items now live in a child table, so it's a
+        # straight join — `photo_collage_items.block_id` lines up with
+        # `lesson_blocks.oid` via the photo-collage subtype's PK.
         collage_path = (
             sa.select(
-                sa.cast(
-                    item_elem.c.value["file_id"].astext,
-                    sa.Uuid,
-                ).label("file_id"),
+                photo_collage_items_table.c.file_id.label("file_id"),
             )
             .select_from(
-                photo_collage_blocks_table.join(
+                photo_collage_items_table.join(
                     lesson_blocks_table,
                     lesson_blocks_table.c.oid
-                    == photo_collage_blocks_table.c.oid,
-                )
-                .join(
+                    == photo_collage_items_table.c.block_id,
+                ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
-                )
-                .join(item_elem, sa.true()),
+                ),
             )
             .where(
                 products_table.c.author_id == user_id,
-                item_elem.c.value["file_id"].astext.is_not(None),
+                photo_collage_items_table.c.file_id.is_not(None),
             )
         )
         referenced_file_ids = sa.union_all(
@@ -246,30 +241,22 @@ class FileUsageReaderAlchemy(FileUsageReader):
             )
             .where(video_file_blocks_table.c.file_id.is_not(None))
         )
-        item_elem = sa.func.jsonb_array_elements(
-            photo_collage_blocks_table.c["items"],
-        ).table_valued(sa.column("value", sa.dialects.postgresql.JSONB))
         collage_path = (
             sa.select(
                 products_table.c.author_id.label("author_id"),
-                sa.cast(
-                    item_elem.c.value["file_id"].astext,
-                    sa.Uuid,
-                ).label("file_id"),
+                photo_collage_items_table.c.file_id.label("file_id"),
             )
             .select_from(
-                photo_collage_blocks_table.join(
+                photo_collage_items_table.join(
                     lesson_blocks_table,
                     lesson_blocks_table.c.oid
-                    == photo_collage_blocks_table.c.oid,
-                )
-                .join(
+                    == photo_collage_items_table.c.block_id,
+                ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
-                )
-                .join(item_elem, sa.true()),
+                ),
             )
-            .where(item_elem.c.value["file_id"].astext.is_not(None))
+            .where(photo_collage_items_table.c.file_id.is_not(None))
         )
         per_author_file = (
             sa.union_all(file_path, video_path, collage_path)
@@ -383,31 +370,23 @@ class AuthorActiveFilesReaderAlchemy(AuthorActiveFilesReader):
                 video_file_blocks_table.c.file_id.is_not(None),
             )
         )
-        item_elem = sa.func.jsonb_array_elements(
-            photo_collage_blocks_table.c["items"],
-        ).table_valued(sa.column("value", sa.dialects.postgresql.JSONB))
         collage_path = (
             sa.select(
-                sa.cast(
-                    item_elem.c.value["file_id"].astext,
-                    sa.Uuid,
-                ).label("file_id"),
+                photo_collage_items_table.c.file_id.label("file_id"),
             )
             .select_from(
-                photo_collage_blocks_table.join(
+                photo_collage_items_table.join(
                     lesson_blocks_table,
                     lesson_blocks_table.c.oid
-                    == photo_collage_blocks_table.c.oid,
-                )
-                .join(
+                    == photo_collage_items_table.c.block_id,
+                ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
-                )
-                .join(item_elem, sa.true()),
+                ),
             )
             .where(
                 products_table.c.author_id == user_id,
-                item_elem.c.value["file_id"].astext.is_not(None),
+                photo_collage_items_table.c.file_id.is_not(None),
             )
         )
         referenced_file_ids = sa.union_all(
@@ -436,6 +415,42 @@ class AuthorActiveFilesReaderAlchemy(AuthorActiveFilesReader):
             )
             for row in rows
         ]
+
+
+class GlobalSchedulerLockAlchemy(GlobalSchedulerLock):
+    """Postgres ``pg_try_advisory_lock`` / ``pg_advisory_unlock``.
+
+    Session-level (NOT xact-scoped) so the lock survives the
+    multiple intermediate commits a scheduled handler typically
+    performs. Key string is hashed to a stable 64-bit integer via
+    ``hashtextextended`` so callers can use human-readable
+    identifiers (``"storage_quota_reconcile"``) without picking
+    bigint magic numbers.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session: Final = session
+
+    @override
+    async def try_acquire(self, key: str) -> bool:
+        result = await self._session.execute(
+            sa.text(
+                "SELECT pg_try_advisory_lock("
+                "hashtextextended(:k, 0))",
+            ),
+            {"k": key},
+        )
+        return bool(result.scalar())
+
+    @override
+    async def release(self, key: str) -> None:
+        await self._session.execute(
+            sa.text(
+                "SELECT pg_advisory_unlock("
+                "hashtextextended(:k, 0))",
+            ),
+            {"k": key},
+        )
 
 
 class StorageQuotaLockAlchemy(StorageQuotaLock):

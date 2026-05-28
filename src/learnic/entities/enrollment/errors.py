@@ -21,3 +21,17 @@ class EnrollmentDoesNotSupportError(DomainError):
     enrollment_id: object
     enrollment_kind: str
     capability: str
+
+
+class CannotRepinRevokedEnrollmentError(DomainError):
+    """Raised when re-pinning is attempted on a non-ACTIVE enrollment.
+
+    Revoked enrollments have no access to course content, so
+    moving them to a different release would either expose
+    content the student no longer has access to, or be a silent
+    no-op once they re-enroll. Authors must restore access first
+    (a future un-revoke flow) before changing the pinned release.
+    """
+
+    enrollment_id: object
+    status: str
