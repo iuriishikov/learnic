@@ -777,7 +777,14 @@ from learnic.infrastructure.persistence.adapters.notification_preferences import
 from learnic.infrastructure.persistence.adapters.push_subscription import (
     PushSubscriptionGatewayAlchemy,
 )
-from learnic.infrastructure.push.sender_pywebpush import PywebpushSender
+from learnic.infrastructure.push.sender_webpush import (
+    PushHttpClient,
+    WebPushSender,
+)
+from learnic.infrastructure.push.vapid import (
+    VapidPublicKey,
+    application_server_key,
+)
 from learnic.infrastructure.persistence.adapters.product_collaboration import (
     ProductCollaborationMapperAlchemy,
     ProductCollaborationReaderAlchemy,
@@ -1300,7 +1307,25 @@ class TasksProvider(Provider):
 class PushProvider(Provider):
     scope = Scope.APP
 
-    sender = provide(PywebpushSender, provides=PushSender)
+    @provide
+    async def http_client(self) -> AsyncIterator[PushHttpClient]:
+        # Explicit timeout is the whole point of this client: a stalled
+        # push service must not block the worker indefinitely.
+        client = httpx.AsyncClient(timeout=10.0)
+        try:
+            yield PushHttpClient(client)
+        finally:
+            await client.aclose()
+
+    @provide
+    def vapid_public_key(self, config: WebPushConfig) -> VapidPublicKey:
+        # Derived from the private key — single source of truth, so the
+        # served key can never drift from the one the backend signs with.
+        return VapidPublicKey(
+            application_server_key(config.vapid_private_key),
+        )
+
+    sender = provide(WebPushSender, provides=PushSender)
 
 
 class RedisProvider(Provider):

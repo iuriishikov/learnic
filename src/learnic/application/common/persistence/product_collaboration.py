@@ -58,6 +58,22 @@ class ProductCollaborationGateway(Protocol):
         oid: ProductCollaborationID,
     ) -> ProductCollaboration | None: ...
 
+    async def with_id_for_update(
+        self,
+        oid: ProductCollaborationID,
+    ) -> ProductCollaboration | None:
+        """Like :meth:`with_id` but locks the row ``FOR UPDATE``.
+
+        Used by state-transition handlers (accept) so the
+        ``PENDING_INVITE`` guard and the status flip are serialized
+        across replicas: a second concurrent accept blocks here,
+        then re-reads the now-``ACTIVE`` row and is rejected by
+        ``require_op`` (``OperationNotAllowedInStatusError``) instead
+        of double-firing the accept fan-out. The lock is held until
+        the handler commits.
+        """
+        ...
+
     async def active_for_product_and_user(
         self,
         product_id: ProductID,

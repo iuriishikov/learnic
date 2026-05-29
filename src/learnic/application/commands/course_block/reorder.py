@@ -70,6 +70,7 @@ class ReorderLessonBlocksCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
         existing_ids = {b.oid for b in existing}
         provided_ids = set(data.ordered_ids)

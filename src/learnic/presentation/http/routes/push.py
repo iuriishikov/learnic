@@ -34,7 +34,7 @@ from learnic.application.queries.push.list_my import (
     ListMyPushSubscriptionsQueryHandler,
 )
 from learnic.entities.push_subscription.models import PushSubscription
-from learnic.infrastructure.configs import WebPushConfig
+from learnic.infrastructure.push.vapid import VapidPublicKey
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
@@ -141,22 +141,26 @@ class WebPushSubscriptionsListSchema(BaseModel):
     response_model=VapidKeySchema,
 )
 async def vapid_public_key(
-    config: FromDishka[WebPushConfig],
+    public_key: FromDishka[VapidPublicKey],
 ) -> VapidKeySchema:
-    """Return the VAPID public key configured for this environment.
+    """Return the VAPID public key for this environment.
 
-    The frontend reads it once at app boot, decodes it, and feeds
-    it to ``PushManager.subscribe`` as ``applicationServerKey``.
-    Public on purpose — there's no secret value to protect; the
-    public key is by definition shared with browsers.
+    Derived at runtime from the configured VAPID private key (single
+    source of truth), so it always matches the key the backend signs
+    pushes with. The frontend reads it once at app boot, decodes it,
+    and feeds it to ``PushManager.subscribe`` as
+    ``applicationServerKey``. Public on purpose — there's no secret
+    value to protect; the public key is by definition shared with
+    browsers.
 
     Args:
-        config: Injected Web Push configuration.
+        public_key: Injected URL-safe Base64 application server key,
+            derived from the VAPID private key.
 
     Returns:
         :class:`VapidKeySchema` carrying the URL-safe Base64 key.
     """
-    return VapidKeySchema(public_key=config.vapid_public_key)
+    return VapidKeySchema(public_key=public_key)
 
 
 @me_router.post(

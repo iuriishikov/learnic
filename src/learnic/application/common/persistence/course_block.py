@@ -41,6 +41,21 @@ class LessonBlockGateway(Protocol):
         """Return all blocks of a lesson, ordered by position ascending."""
         ...
 
+    async def lock_for_lesson(self, lesson_id: CourseLessonID) -> None:
+        """Take a transaction-scoped advisory lock on ``lesson_id``.
+
+        Position assignment (``add_*``) and ``reorder`` read the
+        lesson's blocks, compute new ``position`` values, then write —
+        a check-then-act that two editors on different replicas can
+        interleave, producing colliding/duplicate positions or a lost
+        reorder. Call this FIRST in every position-mutating handler so
+        those operations serialize per lesson: a concurrent mutation
+        blocks here until the holder commits, then sees the updated
+        positions. Cross-lesson traffic is unaffected; the lock
+        auto-releases on COMMIT / ROLLBACK.
+        """
+        ...
+
     async def add_html(self, block: HtmlBlock) -> None: ...
 
     async def update_html(self, block: HtmlBlock) -> None: ...

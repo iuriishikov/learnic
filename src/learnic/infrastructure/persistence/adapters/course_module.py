@@ -20,6 +20,15 @@ class CourseModuleMapperAlchemy(CourseModuleGateway):
         self._session: Final = session
 
     @override
+    async def lock_for_product(self, product_id: ProductID) -> None:
+        await self._session.execute(
+            sa.text(
+                "SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))",
+            ),
+            {"k": str(product_id)},
+        )
+
+    @override
     async def with_id(
         self,
         oid: CourseModuleID,

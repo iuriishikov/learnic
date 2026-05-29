@@ -21,6 +21,7 @@ def _view(
 ) -> TopTeacherView:
     return TopTeacherView(
         oid=UserID(uuid.uuid4()),
+        email="ada@example.com",
         first_name="Ada",
         last_name="Lovelace",
         patronymic=None,
@@ -49,6 +50,8 @@ async def test_maps_view_fields_and_builds_full_name() -> None:
     assert out.oid == view.oid
     # Canonical Russian-style display order: Last First (no patronymic).
     assert out.full_name == "Lovelace Ada"
+    # Email is masked before leaving the application layer.
+    assert out.email == "a*****a@example.com"
     assert out.is_verified is True
     assert out.student_count == 42
     assert out.published_product_count == 3

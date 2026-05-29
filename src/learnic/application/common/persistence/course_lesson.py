@@ -20,6 +20,20 @@ class CourseLessonGateway(Protocol):
         """Return all lessons of a module, ordered by position ascending."""
         ...
 
+    async def lock_for_module(self, module_id: CourseModuleID) -> None:
+        """Take a transaction-scoped advisory lock on ``module_id``.
+
+        Serializes lesson position mutations (add / reorder / move)
+        within a module across replicas so concurrent editors cannot
+        compute colliding ``position`` values or clobber each other's
+        reorder. Call FIRST in every such handler; for ``move`` lock
+        only the target module (the source just loses a row and is
+        not renumbered — locking one module per move also keeps moves
+        deadlock-free). Auto-released on COMMIT / ROLLBACK. See
+        :meth:`LessonBlockGateway.lock_for_lesson`.
+        """
+        ...
+
     async def delete(self, lesson: CourseLesson) -> None: ...
 
     async def reorder(

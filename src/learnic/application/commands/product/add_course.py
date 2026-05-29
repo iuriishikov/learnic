@@ -9,6 +9,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.application.common.security.html import HtmlSanitizer
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.entities.common.limits import PRODUCT_LIMIT
 from learnic.entities.file.ids import FileID
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
@@ -65,6 +66,9 @@ class AddCourseProductCommandHandler:
         self._file_uploads: Final = file_uploads
 
     async def run(self, data: AddCourseProductCommand) -> ProductID:
+        PRODUCT_LIMIT.ensure(
+            await self._product_reader.count_for_author(data.author_id),
+        )
         name = ProductTitle(data.name)
         if await self._product_reader.name_exists(
             data.author_id,

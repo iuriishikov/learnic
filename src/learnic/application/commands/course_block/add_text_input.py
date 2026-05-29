@@ -19,6 +19,7 @@ from learnic.application.common.persistence.transaction import Transaction
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import TextInputBlock
 from learnic.entities.course_block.value_objects import AcceptedAnswer
+from learnic.entities.common.limits import LESSON_BLOCK_LIMIT
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -74,7 +75,9 @@ class AddTextInputBlockCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
+        LESSON_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
 
         block = TextInputBlock.create(

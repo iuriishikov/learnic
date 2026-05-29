@@ -30,6 +30,14 @@ class PresenceTrackerRedis(PresenceTracker):
     Edge transitions (first connection in / last connection out) are
     published to the injected :class:`PresenceEventBus`. Subsequent
     connections of an already-online user produce no events.
+
+    The prune + (de)register + recount runs in a single MULTI/EXEC
+    pipeline so the edge decision is atomic across concurrent
+    connections and replicas — no duplicate ONLINE and no missed
+    OFFLINE from a racing connect/disconnect. The PUBLISH itself
+    happens just after EXEC; making the publish of two simultaneous
+    cross-replica transitions strictly ordered would require doing it
+    inside the script (a Lua ``EVAL`` that ends with ``PUBLISH``).
     """
 
     def __init__(self, redis: Redis, event_bus: PresenceEventBus) -> None:
@@ -38,10 +46,22 @@ class PresenceTrackerRedis(PresenceTracker):
 
     @override
     async def mark_online(self, user_id: UserID, conn_id: str) -> None:
-        was_online = await self.is_online(user_id)
-        await self._redis.zadd(_key(user_id), {conn_id: time.time()})
-        await self._redis.expire(_key(user_id), _KEY_TTL_SECONDS)
-        if not was_online:
+        now = time.time()
+        cutoff = now - PRESENCE_TTL_SECONDS
+        key = _key(user_id)
+        # Prune + add + recount in one MULTI/EXEC so the edge decision
+        # is atomic: two connections racing (possibly on different
+        # replicas) cannot both observe an empty set and both publish
+        # ONLINE, and a concurrent last-disconnect cannot make us
+        # miscount. ``count_after - added`` is the live count that
+        # existed BEFORE this connection was added.
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.zremrangebyscore(key, 0, cutoff)
+            pipe.zadd(key, {conn_id: now})
+            pipe.zcard(key)
+            pipe.expire(key, _KEY_TTL_SECONDS)
+            _, added, count_after, _ = await pipe.execute()
+        if count_after - added == 0:
             await self._event_bus.publish(
                 PresenceEvent(
                     user_id=user_id,
@@ -52,8 +72,18 @@ class PresenceTrackerRedis(PresenceTracker):
 
     @override
     async def mark_offline(self, user_id: UserID, conn_id: str) -> None:
-        await self._redis.zrem(_key(user_id), conn_id)
-        if not await self.is_online(user_id):
+        now = time.time()
+        cutoff = now - PRESENCE_TTL_SECONDS
+        key = _key(user_id)
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.zrem(key, conn_id)
+            pipe.zremrangebyscore(key, 0, cutoff)
+            pipe.zcard(key)
+            removed, _, count_after = await pipe.execute()
+        # Only the connection that actually removed a live member and
+        # left the set empty announces OFFLINE — guards a phantom or
+        # duplicate disconnect against publishing a spurious event.
+        if removed and count_after == 0:
             await self._event_bus.publish(
                 PresenceEvent(
                     user_id=user_id,

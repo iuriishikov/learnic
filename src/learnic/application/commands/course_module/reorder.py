@@ -62,6 +62,7 @@ class ReorderCourseModulesCommandHandler:
             Permission.EDIT_MODULES,
         )
 
+        await self._module_gateway.lock_for_product(data.product_id)
         existing = await self._module_gateway.for_product(data.product_id)
         existing_ids = {m.oid for m in existing}
         provided_ids = set(data.ordered_ids)

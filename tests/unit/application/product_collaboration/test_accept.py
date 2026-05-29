@@ -36,7 +36,7 @@ async def test_accept_by_user_invite(
     existing_collab: ProductCollaboration,
     invitee_user: User,
 ) -> None:
-    fake_collab_gateway.with_id.return_value = existing_collab
+    fake_collab_gateway.with_id_for_update.return_value = existing_collab
     fake_user_gateway.with_id.return_value = invitee_user
 
     handler = AcceptCollaborationInviteCommandHandler(
@@ -68,7 +68,7 @@ async def test_accept_rejects_wrong_user(
     existing_collab: ProductCollaboration,
     invitee_user: User,
 ) -> None:
-    fake_collab_gateway.with_id.return_value = existing_collab
+    fake_collab_gateway.with_id_for_update.return_value = existing_collab
     # actor != collaborator_id
     other = User(
         oid=UserID(uuid.uuid4()),
@@ -123,7 +123,7 @@ async def test_accept_email_invite_requires_email_match(
         ],
         token=token,
     )
-    fake_collab_gateway.with_id.return_value = collab
+    fake_collab_gateway.with_id_for_update.return_value = collab
     other_email_user = User(
         oid=UserID(uuid.uuid4()),
         email=Email("someone-else@example.com"),
@@ -161,7 +161,7 @@ async def test_404_when_collaboration_missing(
     fake_event_bus: AsyncMock,
     fake_notifications: AsyncMock,
 ) -> None:
-    fake_collab_gateway.with_id.return_value = None
+    fake_collab_gateway.with_id_for_update.return_value = None
 
     handler = AcceptCollaborationInviteCommandHandler(
         transaction=fake_transaction,

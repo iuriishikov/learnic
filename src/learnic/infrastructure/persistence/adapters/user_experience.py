@@ -120,3 +120,12 @@ class UserExperienceReaderAlchemy(UserExperienceReader):
             )
             for row in rows
         ]
+
+    @override
+    async def count_for_user(self, user_id: UserID) -> int:
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(user_experiences_table)
+            .where(user_experiences_table.c.user_id == user_id)
+        )
+        return (await self._session.execute(stmt)).scalar_one()

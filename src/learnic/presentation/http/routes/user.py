@@ -103,8 +103,8 @@ from learnic.presentation.http.common.errors.rules import (
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
-    FileSchema,
     UploadedFileSchema,
+    UserBaseSchema,
     UserSchema,
     UserSummarySchema,
 )
@@ -367,18 +367,16 @@ async def search(
     return [UserSummarySchema.from_view(view) for view in views]
 
 
-class TopTeacherSchema(BaseModel):
+class TopTeacherSchema(UserBaseSchema):
     """One row of the ``GET /users/top-teachers`` popularity ranking.
 
-    A lightweight public projection: the user's id, canonical
-    ``Last First Patronymic`` display name, verified badge, optional
-    avatar thumbnail, and the two ranking metrics. Like
-    :class:`UserSummarySchema` it omits ``email`` and ``description`` —
-    this is open discovery content. ``student_count`` is the number of
-    distinct active students across the user's published products;
-    ``published_product_count`` is how many products they have
-    published. Both are ``0`` for a user who has taught nothing — every
-    registered user appears in the ranking, not only teachers.
+    Extends :class:`UserBaseSchema` (id, canonical display name, masked
+    login email, verified badge, avatar thumbnail) with the two ranking
+    metrics. ``student_count`` is the number of distinct active students
+    across the user's published products; ``published_product_count``
+    is how many products they have published. Both are ``0`` for a user
+    who has taught nothing — every registered user appears in the
+    ranking, not only teachers.
     """
 
     model_config = ConfigDict(
@@ -388,6 +386,7 @@ class TopTeacherSchema(BaseModel):
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
                     "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
                     "is_verified": True,
                     "avatar": {
                         "oid": "11111111-2222-3333-4444-555555555555",
@@ -402,34 +401,6 @@ class TopTeacherSchema(BaseModel):
         },
     )
 
-    oid: UUID = Field(
-        description="Teacher's stable identifier (UUID v4).",
-        examples=["550e8400-e29b-41d4-a716-446655440000"],
-    )
-    full_name: str = Field(
-        description=(
-            "Display name in the canonical Russian-style "
-            "`Last First Patronymic` order. Whitespace-trimmed; "
-            "missing patronymic collapses to `Last First`."
-        ),
-        min_length=1,
-        examples=["Lovelace Ada"],
-    )
-    is_verified: bool = Field(
-        description=(
-            "Whether the platform has granted the user the public "
-            "\"verified\" badge."
-        ),
-        examples=[True, False],
-    )
-    avatar: FileSchema | None = Field(
-        default=None,
-        description=(
-            "Resolved avatar file with a short-lived presigned URL, "
-            "or `null` when no avatar is attached. The URL expires; "
-            "re-fetch the ranking to get a fresh one."
-        ),
-    )
     student_count: int = Field(
         description=(
             "Number of distinct students with an active enrollment "

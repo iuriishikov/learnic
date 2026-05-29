@@ -156,6 +156,63 @@ class RateLimitedTranslator(ErrorTranslator[RateLimitedResponseModel]):
         )
 
 
+class ResourceLimitResponseModel(BaseModel):
+    """Response for a per-parent count cap being hit (HTTP 409).
+
+    Carries the ``resource`` that is full and its ``limit`` so the SPA
+    can render a precise "max N reached" message and disable the
+    relevant create action without parsing free-form text.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "error": "ResourceLimitReached",
+                    "resource": "lesson_block",
+                    "limit": 200,
+                },
+            ],
+        },
+    )
+
+    error: str = Field(
+        description='Always the literal string `"ResourceLimitReached"`.',
+        examples=["ResourceLimitReached"],
+    )
+    resource: str = Field(
+        description=(
+            "Stable key of the capped resource from the "
+            "`LimitedResource` set (e.g. `lesson_block`, `product`, "
+            "`user_experience`)."
+        ),
+        examples=["lesson_block"],
+    )
+    limit: int = Field(
+        description="Maximum number of this resource allowed per parent.",
+        examples=[200],
+    )
+
+
+class ResourceLimitTranslator(ErrorTranslator[ResourceLimitResponseModel]):
+    """``{"error": "ResourceLimitReached", "resource": str, "limit": int}``."""
+
+    @property
+    @override
+    def error_response_model_cls(
+        self,
+    ) -> type[ResourceLimitResponseModel]:
+        return ResourceLimitResponseModel
+
+    @override
+    def from_error(self, err: Exception) -> ResourceLimitResponseModel:
+        return ResourceLimitResponseModel(
+            error=_strip_error_suffix(type(err).__name__),
+            resource=str(getattr(err, "resource", "")),
+            limit=int(getattr(err, "limit", 0)),
+        )
+
+
 class EntityNotFoundResponseModel(BaseModel):
     """Response for a missing aggregate lookup."""
 

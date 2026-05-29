@@ -72,6 +72,14 @@ class ProductReader(Protocol):
 
     async def with_id(self, oid: ProductID) -> ProductView | None: ...
 
+    async def count_for_author(self, author_id: UserID) -> int:
+        """Return how many products ``author_id`` owns, any status.
+
+        Counts drafts, published and archived alike — every row
+        occupies storage, so the abuse cap is on the total.
+        """
+        ...
+
     async def accessible_to(
         self,
         user_id: UserID,

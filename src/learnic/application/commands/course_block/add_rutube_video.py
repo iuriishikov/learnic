@@ -24,6 +24,7 @@ from learnic.entities.course_block.value_objects import (
     RutubeVideoID,
     VideoTitle,
 )
+from learnic.entities.common.limits import LESSON_BLOCK_LIMIT
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -79,7 +80,9 @@ class AddRutubeVideoBlockCommandHandler:
         external_id = RutubeVideoID.from_url(data.rutube_url)
         title = VideoTitle(data.title) if data.title is not None else None
 
+        await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
+        LESSON_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
 
         block = RutubeVideoBlock.create(

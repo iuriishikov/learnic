@@ -67,6 +67,7 @@ class AddCourseModuleCommandHandler:
         )
         product.require_supports(ProductCapability.HAS_COURSE_CONTENT)
 
+        await self._module_gateway.lock_for_product(data.product_id)
         existing = await self._module_gateway.for_product(data.product_id)
         next_position = max((m.position for m in existing), default=-1) + 1
 

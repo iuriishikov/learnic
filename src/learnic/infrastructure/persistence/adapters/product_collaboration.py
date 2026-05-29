@@ -55,6 +55,22 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
         return collab
 
     @override
+    async def with_id_for_update(
+        self,
+        oid: ProductCollaborationID,
+    ) -> ProductCollaboration | None:
+        stmt = (
+            sa.select(ProductCollaboration)
+            .where(product_collaborations_table.c.oid == oid)
+            .with_for_update()
+        )
+        collab = (await self._session.execute(stmt)).scalar_one_or_none()
+        if collab is None:
+            return None
+        collab.grants = await self._load_grants(collab.oid)
+        return collab
+
+    @override
     async def active_for_product_and_user(
         self,
         product_id: ProductID,

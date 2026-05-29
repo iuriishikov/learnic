@@ -50,3 +50,7 @@ class UserExperienceReader(Protocol):
         self,
         user_id: UserID,
     ) -> list[UserExperienceView]: ...
+
+    async def count_for_user(self, user_id: UserID) -> int:
+        """Return how many experience entries ``user_id`` has."""
+        ...

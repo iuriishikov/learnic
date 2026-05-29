@@ -28,11 +28,13 @@ class TopTeacherView:
 
     Name parts mirror :class:`UserSummaryView`; the avatar is resolved
     to a :class:`FileMeta` so the caller can mint a thumbnail URL
-    without a follow-up round-trip. ``email`` / ``description`` are
-    deliberately absent — this is a public discovery projection.
+    without a follow-up round-trip. ``email`` is the raw login address —
+    the query handler masks it before it leaves the application layer;
+    ``description`` stays out as it is not part of this projection.
     """
 
     oid: UserID
+    email: str
     first_name: str
     last_name: str
     patronymic: str | None

@@ -8,6 +8,10 @@ from learnic.application.common.persistence.transaction import (
     Transaction,
 )
 from learnic.application.common.persistence.user import UserGateway
+from learnic.application.common.persistence.user_experience import (
+    UserExperienceReader,
+)
+from learnic.entities.common.limits import USER_EXPERIENCE_LIMIT
 from learnic.entities.user.models import UserID
 from learnic.entities.user_experience.ids import UserExperienceID
 from learnic.entities.user_experience.models import UserExperience
@@ -43,10 +47,12 @@ class AddUserExperienceCommandHandler:
         transaction: Transaction,
         entity_saver: EntitySaver,
         user_gateway: UserGateway,
+        experience_reader: UserExperienceReader,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
         self._user_gateway: Final = user_gateway
+        self._experience_reader: Final = experience_reader
 
     async def run(
         self,
@@ -55,6 +61,9 @@ class AddUserExperienceCommandHandler:
         user = await self._user_gateway.with_id(data.user_id)
         if user is None:
             raise EntityNotFoundError(data.user_id)
+        USER_EXPERIENCE_LIMIT.ensure(
+            await self._experience_reader.count_for_user(data.user_id),
+        )
         experience = UserExperience.create(
             user_id=data.user_id,
             title=ExperienceTitle(data.title),

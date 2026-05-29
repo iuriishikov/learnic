@@ -136,41 +136,21 @@ class UploadedFileSchema(BaseModel):
     )
 
 
-class UserSchema(BaseModel):
-    """Public user profile.
+class UserBaseSchema(BaseModel):
+    """Shared identity fields for every public user projection.
 
-    The user's identity is exposed as a single ``full_name`` string
-    (``Last First Patronymic``) plus a ``email`` masked through the
-    canonical ``f*****d@domain.com`` form so the API never returns a
-    plain address. ``avatar`` / ``cover`` are nested :class:`FileSchema`
-    objects with presigned URLs baked in — no follow-up file-fetch
-    endpoint needed.
+    Single source of truth for the fields common to
+    :class:`UserSchema` (full profile), :class:`UserSummarySchema`
+    (name-search hit), and ``TopTeacherSchema`` (popularity ranking):
+    the stable id, the canonical ``Last First Patronymic`` display
+    name, the masked login ``email``, the verified badge, and an
+    optional avatar thumbnail. Concrete schemas inherit these and add
+    their own fields. ``email`` is always masked (see
+    :func:`mask_email`) — none of these projections ever return a
+    plain login address.
     """
 
-    model_config = ConfigDict(
-        from_attributes=True,
-        json_schema_extra={
-            "examples": [
-                {
-                    "oid": "550e8400-e29b-41d4-a716-446655440000",
-                    "full_name": "Lovelace Ada",
-                    "email": "a*****a@example.com",
-                    "is_verified": True,
-                    "description": "<p>Mathematician.</p>",
-                    "avatar": {
-                        "oid": "11111111-2222-3333-4444-555555555555",
-                        "content_type": "image/jpeg",
-                        "size_bytes": 184_320,
-                        "url": (
-                            "https://s3.example.com/avatars/"
-                            "ada.jpg?X-Amz-Signature=..."
-                        ),
-                    },
-                    "cover": None,
-                },
-            ],
-        },
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     oid: UUID = Field(
         description="User's stable identifier (UUID v4).",
@@ -202,6 +182,51 @@ class UserSchema(BaseModel):
         ),
         examples=[True, False],
     )
+    avatar: FileSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved avatar file with a short-lived presigned URL, "
+            "or `null` when no avatar is attached. The URL expires; "
+            "re-fetch the resource to get a fresh one."
+        ),
+    )
+
+
+class UserSchema(UserBaseSchema):
+    """Public user profile returned by ``GET /users/{id}``.
+
+    Extends :class:`UserBaseSchema` with the full-profile fields: the
+    user-authored ``description``, the ``cover`` image, and the
+    optional ``website_url`` / ``portfolio_url`` / ``public_email``
+    contact links. The identity fields (id, name, masked email,
+    verified badge, avatar) come from the base.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
+                    "is_verified": True,
+                    "description": "<p>Mathematician.</p>",
+                    "avatar": {
+                        "oid": "11111111-2222-3333-4444-555555555555",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 184_320,
+                        "url": (
+                            "https://s3.example.com/avatars/"
+                            "ada.jpg?X-Amz-Signature=..."
+                        ),
+                    },
+                    "cover": None,
+                },
+            ],
+        },
+    )
+
     description: str | None = Field(
         description=(
             "User-authored profile description as sanitized HTML. "
@@ -211,14 +236,6 @@ class UserSchema(BaseModel):
         ),
         max_length=DESCRIPTION_MAX_LEN,
         examples=[None, "<p>Hello world.</p>"],
-    )
-    avatar: FileSchema | None = Field(
-        default=None,
-        description=(
-            "Resolved avatar file with a short-lived presigned URL, "
-            "or `null` when no avatar is attached. The URL expires; "
-            "re-fetch the user resource to get a fresh one."
-        ),
     )
     cover: FileSchema | None = Field(
         default=None,
@@ -269,15 +286,14 @@ class UserSchema(BaseModel):
         return cls.model_validate(view)
 
 
-class UserSummarySchema(BaseModel):
+class UserSummarySchema(UserBaseSchema):
     """Lightweight user projection returned by name search.
 
-    Like :class:`UserSchema` it omits ``description`` — the search
-    endpoint is general-purpose, so private fields stay private.
-    ``cover_url`` is also omitted because callers display a single
-    thumbnail per hit, not a full profile card. ``email`` is **not**
-    surfaced at all here, even masked, because the search endpoint
-    must not let an attacker enumerate registered addresses.
+    Adds nothing to :class:`UserBaseSchema`: a search hit is exactly
+    the shared identity projection — id, canonical display name,
+    masked login email, verified badge, and avatar thumbnail. The
+    full profile (description, cover, contact links) is only returned
+    by ``GET /users/{id}`` via :class:`UserSchema`.
     """
 
     model_config = ConfigDict(
@@ -287,6 +303,7 @@ class UserSummarySchema(BaseModel):
                 {
                     "oid": "550e8400-e29b-41d4-a716-446655440000",
                     "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
                     "is_verified": True,
                     "avatar": {
                         "oid": "11111111-2222-3333-4444-555555555555",
@@ -297,37 +314,6 @@ class UserSummarySchema(BaseModel):
                 },
             ],
         },
-    )
-
-    oid: UUID = Field(
-        description="User's stable identifier (UUID v4).",
-        examples=["550e8400-e29b-41d4-a716-446655440000"],
-    )
-    full_name: str = Field(
-        description=(
-            "Display name in the canonical Russian-style "
-            "`Last First Patronymic` order. Whitespace-trimmed; "
-            "missing patronymic collapses to `Last First`."
-        ),
-        min_length=1,
-        max_length=_FULL_NAME_MAX_LEN,
-        examples=["Lovelace Ada"],
-    )
-    is_verified: bool = Field(
-        description=(
-            "Whether the platform has granted the user the public "
-            "\"verified\" badge — surfaced as a brand-coloured "
-            "checkmark on the avatar across the SPA."
-        ),
-        examples=[True, False],
-    )
-    avatar: FileSchema | None = Field(
-        default=None,
-        description=(
-            "Resolved avatar file with a short-lived presigned URL, "
-            "or `null` when no avatar is attached. The URL expires; "
-            "re-issue the search to get a fresh one."
-        ),
     )
 
     @classmethod

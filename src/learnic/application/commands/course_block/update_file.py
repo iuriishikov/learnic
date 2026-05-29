@@ -86,11 +86,15 @@ class UpdateFileBlockCommandHandler:
         )
 
         if data.data is not None and data.content_type is not None:
-            await self._entitlement.ensure_can_upload(
-                product.author_id,
-                len(data.data),
-            )
             previous_file_id = block.file_id
+            freed_bytes = await self._file_uploads.previous_file_size(
+                previous_file_id,
+            )
+            await self._entitlement.ensure_can_replace_upload(
+                product.author_id,
+                added_bytes=len(data.data),
+                freed_bytes=freed_bytes,
+            )
             new_file = await self._file_uploads.upload(
                 data.data,
                 data.content_type,

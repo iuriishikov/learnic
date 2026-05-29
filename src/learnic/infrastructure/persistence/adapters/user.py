@@ -143,6 +143,7 @@ class UserReaderAlchemy(UserReader):
 
         stmt = sa.select(
             users_table.c.oid,
+            users_table.c.email,
             users_table.c.first_name,
             users_table.c.last_name,
             users_table.c.patronymic,
@@ -192,6 +193,7 @@ class UserReaderAlchemy(UserReader):
         return [
             UserSummaryView(
                 oid=UserID(row.oid),
+                email=row.email,
                 first_name=row.first_name,
                 last_name=row.last_name,
                 patronymic=row.patronymic,

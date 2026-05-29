@@ -44,9 +44,11 @@ from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
 )
+from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_OWNER_FIELD_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
+    RESOURCE_LIMIT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
@@ -355,7 +357,8 @@ async def list_for_user(
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=CreatedUserExperienceSchema,
-    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP
+    | {ResourceLimitReachedError: RESOURCE_LIMIT_RULE},
 )
 async def add(
     request: Request,

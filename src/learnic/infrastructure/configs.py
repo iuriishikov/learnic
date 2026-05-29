@@ -98,12 +98,13 @@ class WebPushConfig(BaseSettings):
     """VAPID identity for outgoing Web Push deliveries.
 
     The keypair is generated once per environment with
-    ``vapid --gen`` (or any compliant tool) and committed to the
-    secrets store; ``public_key`` is a URL-safe Base64 raw EC point
-    on the P-256 curve. The frontend reads the public key via
-    ``GET /web-push/vapid-public-key`` to subscribe; the backend uses
-    the private key to sign each push request to the browser
-    vendor's push service.
+    ``vapid --gen`` (or any compliant tool); only the PEM-encoded
+    private key is stored here. The matching public key — the
+    browser's ``applicationServerKey``, served by
+    ``GET /web-push/vapid-public-key`` — is derived from this private
+    key at runtime, so the public value can never drift from the
+    private one. The backend signs each push request with the private
+    key; the frontend subscribes with the derived public key.
 
     ``subject`` is the contact identifier required by the VAPID
     spec — typically a ``mailto:`` URL of the on-call address.
@@ -114,7 +115,6 @@ class WebPushConfig(BaseSettings):
         env_prefix="WEBPUSH_", env_file=".env", extra="ignore"
     )
 
-    vapid_public_key: str = ""
     vapid_private_key: str = ""
     vapid_subject: str = "mailto:noreply@learnic.local"
 

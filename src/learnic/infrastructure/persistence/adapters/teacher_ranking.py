@@ -62,6 +62,7 @@ class TeacherRankingReaderAlchemy(TeacherRankingReader):
         stmt = (
             sa.select(
                 users_table.c.oid,
+                users_table.c.email,
                 users_table.c.first_name,
                 users_table.c.last_name,
                 users_table.c.patronymic,
@@ -103,6 +104,7 @@ class TeacherRankingReaderAlchemy(TeacherRankingReader):
             .where(users_table.c.is_banned.is_(False))
             .group_by(
                 users_table.c.oid,
+                users_table.c.email,
                 users_table.c.first_name,
                 users_table.c.last_name,
                 users_table.c.patronymic,
@@ -128,6 +130,7 @@ class TeacherRankingReaderAlchemy(TeacherRankingReader):
         return [
             TopTeacherView(
                 oid=UserID(row.oid),
+                email=row.email,
                 first_name=row.first_name,
                 last_name=row.last_name,
                 patronymic=row.patronymic,

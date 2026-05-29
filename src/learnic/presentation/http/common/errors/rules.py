@@ -34,6 +34,7 @@ from learnic.application.common.errors import (
     RoleNameAlreadyTakenError,
 )
 from learnic.entities.common.errors import FieldError
+from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.entities.product_collaboration.errors import (
     OperationNotAllowedInStatusError,
 )
@@ -51,17 +52,28 @@ from learnic.presentation.http.common.errors.translators import (
     FieldErrorTranslator,
     NamedErrorTranslator,
     RateLimitedTranslator,
+    ResourceLimitTranslator,
 )
 
 _named: Final = NamedErrorTranslator()
 _field: Final = FieldErrorTranslator()
 _not_found: Final = EntityNotFoundTranslator()
 _rate_limited: Final = RateLimitedTranslator()
+_resource_limit: Final = ResourceLimitTranslator()
 
 FIELD_ERROR_RULE: Final[Rule] = rule(
     status=HTTPStatus.UNPROCESSABLE_ENTITY,
     translator=_field,
 )
+
+RESOURCE_LIMIT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_resource_limit,
+)
+"""409 with body ``{"error": "ResourceLimitReached", "resource": str,
+"limit": int}`` — a per-parent count cap (blocks per lesson, products
+per author, experiences per user, …) was hit. Not a 429: retrying
+won't help until something is deleted."""
 
 ENTITY_NOT_FOUND_RULE: Final[Rule] = rule(
     status=HTTPStatus.NOT_FOUND,
@@ -255,6 +267,7 @@ AUTHENTICATED_OWNER_FIELD_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_WITH_FIELD_MAP,
     NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
     InsufficientPermissionsError: INSUFFICIENT_PERMISSIONS_RULE,
+    ResourceLimitReachedError: RESOURCE_LIMIT_RULE,
 }
 
 CANNOT_INVITE_OWNER_RULE: Final[Rule] = rule(
@@ -359,6 +372,7 @@ COLLABORATION_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_WITH_FIELD_MAP,
     NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
     InviteEmailMismatchError: INVITE_EMAIL_MISMATCH_RULE,
+    OperationNotAllowedInStatusError: OPERATION_NOT_ALLOWED_IN_STATUS_RULE,
 }
 
 # ------------------------------- gifts --------------------------------- #

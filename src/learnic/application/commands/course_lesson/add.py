@@ -71,6 +71,7 @@ class AddCourseLessonCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        await self._lesson_gateway.lock_for_module(data.module_id)
         existing = await self._lesson_gateway.for_module(data.module_id)
         next_position = max((lsn.position for lsn in existing), default=-1) + 1
 

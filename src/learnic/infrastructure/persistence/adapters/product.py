@@ -263,6 +263,15 @@ class ProductReaderAlchemy(ProductReader):
         return (await self._session.scalar(stmt)) or 0
 
     @override
+    async def count_for_author(self, author_id: UserID) -> int:
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(products_table)
+            .where(products_table.c.author_id == author_id)
+        )
+        return (await self._session.scalar(stmt)) or 0
+
+    @override
     async def published(
         self,
         pagination: Pagination,

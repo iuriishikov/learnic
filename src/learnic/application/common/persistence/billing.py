@@ -150,10 +150,12 @@ class GlobalSchedulerLock(Protocol):
     a transaction-scoped one because handlers like
     :class:`ReconcileStorageQuotasCommandHandler` commit several
     times inside one run — a xact-lock would release on the first
-    commit and leave the rest of the pass unprotected. The lock
-    is automatically released when the session is closed (worker
-    exits) even if ``release`` is not called explicitly, so a
-    crashed worker does not hold the lock forever.
+    commit and leave the rest of the pass unprotected. The lock is
+    held on a dedicated connection for the whole acquire→release
+    window (NOT the request session, whose connection returns to the
+    pool on every commit and would strand the lock), and is freed
+    automatically if that connection drops (worker crash), so a
+    crashed worker never holds the lock forever.
     """
 
     async def try_acquire(self, key: str) -> bool:

@@ -67,7 +67,9 @@ class AcceptCollaborationInAppCommandHandler:
         self,
         data: AcceptCollaborationInAppCommand,
     ) -> None:
-        collab = await self._collab_gateway.with_id(data.collaboration_id)
+        collab = await self._collab_gateway.with_id_for_update(
+            data.collaboration_id,
+        )
         if collab is None:
             raise EntityNotFoundError(data.collaboration_id)
         actor = await self._user_gateway.with_id(data.actor_id)

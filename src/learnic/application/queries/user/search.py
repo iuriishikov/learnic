@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from typing import Final, final
 
-from learnic.application.common.formatting import build_full_name
+from learnic.application.common.formatting import (
+    build_full_name,
+    mask_email,
+)
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.file import FileView
 from learnic.application.common.persistence.user import UserReader
@@ -28,18 +31,20 @@ class SearchUsersQuery:
 
 @dataclass(slots=True, frozen=True)
 class UserSummaryOutput:
-    """Single search hit. Email is intentionally absent.
+    """Single search hit.
 
     ``full_name`` collapses the user's name fields into the
     canonical Russian-style display name (``Last First Patronymic``)
     so callers can render a result row without re-joining the parts
-    themselves. ``avatar`` carries a resolved :class:`FileView` with
-    a short-lived presigned URL; Pydantic schemas auto-map it
-    through ``from_attributes=True``.
+    themselves. ``email`` is already masked via :func:`mask_email`,
+    so the projection never carries a plain address. ``avatar``
+    carries a resolved :class:`FileView` with a short-lived presigned
+    URL; Pydantic schemas auto-map it through ``from_attributes=True``.
     """
 
     oid: UserID
     full_name: str
+    email: str
     is_verified: bool
     avatar: FileView | None
 
@@ -69,6 +74,7 @@ class SearchUsersQueryHandler:
                 full_name=build_full_name(
                     view.first_name, view.last_name, view.patronymic
                 ),
+                email=mask_email(view.email),
                 is_verified=view.is_verified,
                 avatar=await FileView.of_optional(
                     view.avatar, self._file_storage,

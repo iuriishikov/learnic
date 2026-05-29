@@ -84,6 +84,7 @@ class MoveCourseLessonCommandHandler:
         if target_module.oid == lesson.module_id:
             return  # no-op
 
+        await self._lesson_gateway.lock_for_module(target_module.oid)
         target_lessons = await self._lesson_gateway.for_module(
             target_module.oid,
         )

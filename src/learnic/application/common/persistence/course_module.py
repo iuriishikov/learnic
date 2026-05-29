@@ -20,6 +20,17 @@ class CourseModuleGateway(Protocol):
         """Return all modules of a course, ordered by position ascending."""
         ...
 
+    async def lock_for_product(self, product_id: ProductID) -> None:
+        """Take a transaction-scoped advisory lock on ``product_id``.
+
+        Serializes module position mutations (add / reorder) within a
+        course across replicas so concurrent editors cannot compute
+        colliding ``position`` values or clobber each other's reorder.
+        Call FIRST in every such handler. Auto-released on COMMIT /
+        ROLLBACK. See :meth:`LessonBlockGateway.lock_for_lesson`.
+        """
+        ...
+
     async def delete(self, module: CourseModule) -> None: ...
 
     async def reorder(

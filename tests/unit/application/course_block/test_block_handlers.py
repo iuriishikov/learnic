@@ -57,6 +57,7 @@ from learnic.entities.course_block.errors import (
 )
 from learnic.entities.course_block.models import (
     CodeBlock,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     RutubeVideoBlock,
@@ -590,6 +591,7 @@ async def test_delete_block_calls_gateway(
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
     fake_block_gateway: AsyncMock,
+    fake_file_uploads: MagicMock,
     fake_event_bus: AsyncMock,
     course_product: Product,
     html_block: HtmlBlock,
@@ -602,6 +604,7 @@ async def test_delete_block_calls_gateway(
         authorizer=fake_authorizer,
         product_gateway=fake_product_gateway,
         block_gateway=fake_block_gateway,
+        file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
     )
     await handler.run(
@@ -611,6 +614,8 @@ async def test_delete_block_calls_gateway(
         ),
     )
     fake_block_gateway.delete.assert_awaited_once_with(html_block.oid)
+    # A non-file block holds no backing file to purge.
+    fake_file_uploads.soft_delete_previous.assert_not_called()
     fake_transaction.commit.assert_awaited_once()
 
 
@@ -619,6 +624,7 @@ async def test_delete_block_missing_raises(
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
     fake_block_gateway: AsyncMock,
+    fake_file_uploads: MagicMock,
     fake_event_bus: AsyncMock,
     author_id: UserID,
 ) -> None:
@@ -628,6 +634,7 @@ async def test_delete_block_missing_raises(
         authorizer=fake_authorizer,
         product_gateway=fake_product_gateway,
         block_gateway=fake_block_gateway,
+        file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
     )
     with pytest.raises(EntityNotFoundError):
@@ -637,6 +644,46 @@ async def test_delete_block_missing_raises(
                 block_id=LessonBlockID(uuid.uuid4()),
             ),
         )
+    fake_block_gateway.delete.assert_not_called()
+
+
+async def test_delete_file_block_purges_backing_file(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_file_uploads: MagicMock,
+    fake_event_bus: AsyncMock,
+    course_product: Product,
+    file_block: FileBlock,
+    author_id: UserID,
+) -> None:
+    # Deleting a file-backed block must soft-delete + enqueue an S3
+    # purge of the file it exclusively held, otherwise the blob is
+    # orphaned and storage is never reclaimed.
+    fake_block_gateway.with_id.return_value = file_block
+    fake_product_gateway.with_id.return_value = course_product
+
+    handler = DeleteLessonBlockCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        block_gateway=fake_block_gateway,
+        file_uploads=fake_file_uploads,
+        event_bus=fake_event_bus,
+    )
+    await handler.run(
+        DeleteLessonBlockCommand(
+            actor_id=author_id,
+            block_id=file_block.oid,
+        ),
+    )
+
+    fake_block_gateway.delete.assert_awaited_once_with(file_block.oid)
+    fake_file_uploads.soft_delete_previous.assert_awaited_once_with(
+        file_block.file_id,
+    )
+    fake_transaction.commit.assert_awaited_once()
 
 
 # ---- add_code ----
@@ -715,9 +762,7 @@ async def test_add_code_block_rejects_unsupported_language(
             AddCodeBlockCommand(
                 actor_id=author_id,
                 lesson_id=CourseLessonID(course_lesson.oid),
-                tabs=(
-                    CodeTabInput(label="", source="x", language="haskell"),
-                ),
+                tabs=(CodeTabInput(label="", source="x", language="haskell"),),
             ),
         )
     fake_block_gateway.add_code.assert_not_awaited()

@@ -104,6 +104,30 @@ class FileUploadService:
         await self._transaction.flush()
         return file
 
+    async def previous_file_size(
+        self,
+        previous_file_id: FileID | None,
+    ) -> int:
+        """Return the live size in bytes of the file being replaced.
+
+        Replace-semantic block handlers call this to credit
+        ``freed_bytes`` in the quota pre-check
+        (:meth:`EntitlementService.ensure_can_replace_upload`) so a
+        same-size or smaller swap is not double-counted against the
+        owner's cap.
+
+        Mirrors :meth:`soft_delete_previous`'s liveness guard: a
+        ``None`` id, a missing row, or an already-soft-deleted file
+        frees nothing — none of those are counted in current usage —
+        so each reports ``0``.
+        """
+        if previous_file_id is None:
+            return 0
+        previous_file = await self._files_gateway.with_id(previous_file_id)
+        if previous_file is None or previous_file.is_deleted:
+            return 0
+        return previous_file.size_bytes.value
+
     async def soft_delete_previous(
         self,
         previous_file_id: FileID | None,

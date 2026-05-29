@@ -151,6 +151,7 @@ from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
 )
+from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.presentation.http.common.errors.rules import (
     ALREADY_ENROLLED_RULE,
     AUTHENTICATED_OWNER_FIELD_MAP,
@@ -164,6 +165,7 @@ from learnic.presentation.http.common.errors.rules import (
     PRODUCT_NAME_TAKEN_RULE,
     PRODUCT_NOT_ARCHIVED_RULE,
     PRODUCT_NOT_IN_DRAFT_RULE,
+    RESOURCE_LIMIT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.tag import TagSchema
@@ -508,7 +510,10 @@ _CoverField = Annotated[
     dependencies=_AUTH_SECURITY,
     response_model=CreatedProductSchema,
     error_map=AUTHENTICATED_WITH_FIELD_MAP
-    | {ProductNameAlreadyTakenError: PRODUCT_NAME_TAKEN_RULE},
+    | {
+        ProductNameAlreadyTakenError: PRODUCT_NAME_TAKEN_RULE,
+        ResourceLimitReachedError: RESOURCE_LIMIT_RULE,
+    },
 )
 async def add_course(
     request: Request,

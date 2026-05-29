@@ -1,18 +1,24 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from learnic.entities.course_block.ids import CollageItemID
 from learnic.entities.course_block.models import (
     ChoiceOption,
     CodeBlock,
     CodeTab,
+    CollageItem,
+    FileBlock,
     HtmlBlock,
     KatexBlock,
     MultiChoiceBlock,
+    PhotoCollageBlock,
     RutubeVideoBlock,
     SingleChoiceBlock,
     TextInputBlock,
+    VideoFileBlock,
 )
 from learnic.entities.course_block.value_objects import (
     AcceptedAnswer,
@@ -28,6 +34,14 @@ from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.course_lesson.models import CourseLesson
 from learnic.entities.course_lesson.value_objects import LessonTitle
 from learnic.entities.course_module.ids import CourseModuleID
+from learnic.entities.file.ids import FileID
+from learnic.entities.file.models import File
+from learnic.entities.file.value_objects import (
+    ContentType,
+    FileSize,
+    StorageBucket,
+    StorageName,
+)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle
@@ -220,4 +234,86 @@ def text_input_block(course_lesson: CourseLesson) -> TextInputBlock:
         case_sensitive=False,
         trim_whitespace=True,
         position=6,
+    )
+
+
+@pytest.fixture
+def fake_file_uploads() -> MagicMock:
+    """Stub ``FileUploadService`` for file-backed block handlers.
+
+    ``upload`` returns a fresh ``File`` whose ``size_bytes`` mirror
+    the uploaded payload, so callers get a real ``oid`` to link and
+    the size is consistent with ``len(data)``. The other methods are
+    bare awaitables so tests can assert (non-)invocation.
+    """
+
+    def _build_file(
+        data: bytes,
+        content_type: str,
+        uploaded_by: UserID,
+    ) -> File:
+        return File(
+            oid=FileID(uuid.uuid4()),
+            storage_name=StorageName(str(uuid.uuid4())),
+            bucket=StorageBucket("test-bucket"),
+            content_type=ContentType(content_type),
+            size_bytes=FileSize(len(data)),
+            uploaded_by=uploaded_by,
+            uploaded_at=datetime.now(timezone.utc),
+            deleted_at=None,
+        )
+
+    svc = MagicMock()
+    svc.upload = AsyncMock(side_effect=_build_file)
+    svc.soft_delete_previous = AsyncMock()
+    svc.previous_file_size = AsyncMock(return_value=0)
+    return svc
+
+
+@pytest.fixture
+def fake_entitlement() -> AsyncMock:
+    """Stub ``EntitlementService`` — both quota gates are no-ops.
+
+    Tests that exercise the over-quota path set
+    ``ensure_can_upload.side_effect`` (or the replace variant) to a
+    ``StorageQuotaExceededError`` per case.
+    """
+    svc = AsyncMock()
+    svc.ensure_can_upload = AsyncMock()
+    svc.ensure_can_replace_upload = AsyncMock()
+    return svc
+
+
+@pytest.fixture
+def file_block(course_lesson: CourseLesson) -> FileBlock:
+    return FileBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        file_id=FileID(uuid.uuid4()),
+        position=0,
+    )
+
+
+@pytest.fixture
+def video_file_block(course_lesson: CourseLesson) -> VideoFileBlock:
+    return VideoFileBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        file_id=FileID(uuid.uuid4()),
+        position=0,
+    )
+
+
+@pytest.fixture
+def photo_collage_block(course_lesson: CourseLesson) -> PhotoCollageBlock:
+    return PhotoCollageBlock.create(
+        lesson_id=CourseLessonID(course_lesson.oid),
+        product_id=course_lesson.product_id,
+        items=[
+            CollageItem(
+                oid=CollageItemID(uuid.uuid4()),
+                file_id=FileID(uuid.uuid4()),
+            ),
+        ],
+        position=0,
     )

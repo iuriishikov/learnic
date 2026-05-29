@@ -22,6 +22,7 @@ from learnic.application.common.security.html import HtmlSanitizer
 from learnic.entities.course_block.ids import LessonBlockID
 from learnic.entities.course_block.models import HtmlBlock
 from learnic.entities.course_block.value_objects import HtmlContent
+from learnic.entities.common.limits import LESSON_BLOCK_LIMIT
 from learnic.entities.course_lesson.ids import CourseLessonID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
@@ -69,7 +70,9 @@ class AddHtmlBlockCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
+        LESSON_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
 
         sanitized = self._html_sanitizer.sanitize(data.html)

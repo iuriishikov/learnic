@@ -28,13 +28,15 @@ class UserView:
 class UserSummaryView:
     """Lightweight user projection used by name search.
 
-    Excludes ``email`` and ``description`` deliberately — see the
-    privacy stance documented on :class:`UserSchema`. The reader still
+    Carries the user's raw login ``email`` so the query handler can
+    mask it before it leaves the application layer; ``description``
+    stays out as it is not part of this projection. The reader also
     resolves the avatar so the caller can display a recognizable
     thumbnail without a follow-up round-trip.
     """
 
     oid: UserID
+    email: str
     first_name: str
     last_name: str
     patronymic: str | None

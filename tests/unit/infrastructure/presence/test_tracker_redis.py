@@ -74,6 +74,28 @@ class TestMarkOnline:
         ttl = await redis_client.ttl(_key(user_id))
         assert ttl > 0
 
+    async def test_reconnect_after_only_entry_went_stale_publishes_online(
+        self,
+        tracker: PresenceTrackerRedis,
+        user_id: UserID,
+        redis_client: Redis,
+        fake_event_bus: AsyncMock,
+    ) -> None:
+        # The only existing connection is stale (heartbeat lapsed): a
+        # fresh connection is a real OFFLINE->ONLINE edge. The atomic
+        # prune+recount must treat the stale-only set as empty.
+        stale = time.time() - PRESENCE_TTL_SECONDS - 1
+        await redis_client.zadd(_key(user_id), {"stale": stale})
+
+        await tracker.mark_online(user_id, "conn-1")
+
+        assert await tracker.is_online(user_id) is True
+        fake_event_bus.publish.assert_awaited_once()
+        assert (
+            fake_event_bus.publish.await_args.args[0].status
+            is PresenceStatus.ONLINE
+        )
+
 
 class TestMarkOffline:
     async def test_makes_single_connection_user_offline(
@@ -127,6 +149,23 @@ class TestMarkOffline:
         # must not crash and must not change state
         await tracker.mark_offline(user_id, "phantom")
         assert await tracker.is_online(user_id) is False
+
+    async def test_phantom_disconnect_while_online_does_not_publish(
+        self,
+        tracker: PresenceTrackerRedis,
+        user_id: UserID,
+        fake_event_bus: AsyncMock,
+    ) -> None:
+        # A disconnect for a connection that was never registered must
+        # not emit OFFLINE while a real connection is still live — the
+        # removed-a-live-member guard prevents the spurious event.
+        await tracker.mark_online(user_id, "conn-1")
+        fake_event_bus.publish.reset_mock()
+
+        await tracker.mark_offline(user_id, "phantom")
+
+        assert await tracker.is_online(user_id) is True
+        fake_event_bus.publish.assert_not_awaited()
 
 
 class TestHeartbeat:

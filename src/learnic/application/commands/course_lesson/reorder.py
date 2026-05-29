@@ -65,6 +65,7 @@ class ReorderCourseLessonsCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        await self._lesson_gateway.lock_for_module(data.module_id)
         existing = await self._lesson_gateway.for_module(data.module_id)
         existing_ids = {lsn.oid for lsn in existing}
         provided_ids = set(data.ordered_ids)
