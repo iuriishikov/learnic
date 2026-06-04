@@ -52,23 +52,23 @@ class SubscriptionReader(Protocol):
 
 
 class FileUsageReader(Protocol):
-    """Aggregate storage usage attributable to a course author.
+    """Aggregate storage usage attributable to a note author.
 
     Counts the size of files referenced by ANY of the three
     file-backed block types (file / video-file / photo-collage)
-    inside courses authored by ``user_id``. Files referenced from
+    inside notes authored by ``user_id``. Files referenced from
     multiple blocks are counted once — the underlying storage cost
     is paid once, the quota mirrors that.
     """
 
-    async def bytes_used_by_course_author(self, user_id: UserID) -> int: ...
+    async def bytes_used_by_note_author(self, user_id: UserID) -> int: ...
 
     async def usage_by_all_authors(self) -> dict[UserID, int]:
         """Return ``{author_id: bytes_used}`` for every author with usage.
 
         Pre-aggregated in SQL so the reconciliation job avoids
         N+1: it processes every author with at least one
-        deduplicated, non-soft-deleted file in their courses in a
+        deduplicated, non-soft-deleted file in their notes in a
         single round-trip. Authors with zero usage are absent from
         the result (no breach is possible for them).
         """
@@ -121,7 +121,7 @@ class StorageQuotaBreachGateway(Protocol):
 class AuthorActiveFilesReader(Protocol):
     """Read-side projection of an author's live files for LIFO eviction.
 
-    Returns files referenced from courses authored by ``user_id``,
+    Returns files referenced from notes authored by ``user_id``,
     ordered by ``uploaded_at`` descending (newest first), filtered
     to ``deleted_at IS NULL``. The reconciliation job walks the
     iterator until ``cumulative_size >= over_bytes`` and stops —

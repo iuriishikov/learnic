@@ -5,7 +5,7 @@ from typing import Protocol
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.file import FileMeta
 from learnic.application.common.persistence.tag import TagView
-from learnic.application.common.persistence.user_ref import UserRefView
+from learnic.application.common.persistence.user import UserView
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
@@ -33,7 +33,7 @@ class ProductView:
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    author: UserRefView
+    author: UserView
     cover: FileMeta | None
     tags: list[TagView]
     published_at: datetime | None
@@ -99,7 +99,7 @@ class ProductReader(Protocol):
         Mirrors ``accessible_to(...)``'s membership predicate (author
         OR active collaborator, any product status) without
         pagination so the SPA can drive numbered page controls on
-        the "my courses" view.
+        the "my notes" view.
         """
         ...
 
@@ -130,7 +130,7 @@ class ProductReader(Protocol):
 
         Mirrors ``search_accessible_to(...)``'s WHERE filter without
         pagination so the SPA can render numbered page controls on
-        the search-mode "my courses" view.
+        the search-mode "my notes" view.
         """
         ...
 

@@ -12,15 +12,15 @@ class EnrollmentKind(StrEnum):
     ``EnrollmentDetails`` subclass.
     """
 
-    COURSE = "course"
+    NOTE = "note"
 
 
 class EnrollmentStatus(StrEnum):
     """Lifecycle states for an enrollment.
 
     ``ACTIVE`` is the normal state. ``REVOKED`` is set by an
-    author/admin action and removes access. Course-completion
-    lives on ``CourseEnrollmentDetails.completed_at`` (orthogonal
+    author/admin action and removes access. Note-completion
+    lives on ``NoteEnrollmentDetails.completed_at`` (orthogonal
     to access state) — a completed enrollment is still ACTIVE.
     """
 

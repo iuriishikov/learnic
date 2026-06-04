@@ -11,6 +11,7 @@ from learnic.application.common.persistence.admin_metrics import (
     MetricPoint,
 )
 from learnic.entities.statistic.enums import StatisticType
+from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.statistic import (
     statistics_table,
 )
@@ -42,6 +43,15 @@ class AdminMetricsReaderAlchemy(AdminMetricsReader):
         metric: AdminMetric,
         since: datetime,
     ) -> list[MetricPoint]:
+        if metric is AdminMetric.NEW_PRODUCTS:
+            return await self._new_products_daily(since)
+        return await self._event_daily(metric, since)
+
+    async def _event_daily(
+        self,
+        metric: AdminMetric,
+        since: datetime,
+    ) -> list[MetricPoint]:
         stat_type, distinct_actors = _METRIC_SOURCE[metric]
         day = sa.cast(
             sa.func.timezone("UTC", statistics_table.c.created_at),
@@ -61,6 +71,31 @@ class AdminMetricsReaderAlchemy(AdminMetricsReader):
                 statistics_table.c.type == stat_type.value,
                 statistics_table.c.created_at >= since,
             )
+            .group_by(day)
+            .order_by(day)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [MetricPoint(day=row.day, count=row.total) for row in rows]
+
+    async def _new_products_daily(
+        self,
+        since: datetime,
+    ) -> list[MetricPoint]:
+        """Count ``products`` created per UTC day from ``since`` onward.
+
+        There is no product-creation event in the ``statistics`` log, so
+        this series comes straight off ``products.created_at``. Every
+        product counts the day it was created, regardless of its current
+        lifecycle status (draft / published / archived). Same UTC-day
+        bucketing and sparse-result contract as :meth:`_event_daily`.
+        """
+        day = sa.cast(
+            sa.func.timezone("UTC", products_table.c.created_at),
+            sa.Date,
+        ).label("day")
+        stmt = (
+            sa.select(day, sa.func.count().label("total"))
+            .where(products_table.c.created_at >= since)
             .group_by(day)
             .order_by(day)
         )

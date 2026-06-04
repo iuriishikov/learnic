@@ -207,10 +207,10 @@ class StorageQuotaExceededError(ApplicationError):
         self.limit_bytes = limit_bytes
 
 
-class CrossCourseLessonMoveError(ApplicationError):
-    """Raised when a lesson is moved to a module of a different course.
+class CrossNoteLessonMoveError(ApplicationError):
+    """Raised when a lesson is moved to a module of a different note.
 
-    Lessons carry a denormalised ``product_id``; cross-course moves
+    Lessons carry a denormalised ``product_id``; cross-note moves
     would invalidate it. Surfaces as HTTP 409.
     """
 
@@ -238,27 +238,27 @@ class InvalidReorderError(ApplicationError):
     """
 
 
-class CannotPublishCourseDirectlyError(ApplicationError):
-    """Raised when ``POST /products/{id}/publish`` is called for a course.
+class CannotPublishNoteDirectlyError(ApplicationError):
+    """Raised when ``POST /products/{id}/publish`` is called for a note.
 
-    Courses are published implicitly by creating their first
+    Notes are published implicitly by creating their first
     release; the standalone publish endpoint exists only for
     webinar products.
     """
 
     def __init__(self, product_id: object) -> None:
         super().__init__(
-            f"Course {product_id!r} must be published via release",
+            f"Note {product_id!r} must be published via release",
         )
         self.product_id = product_id
 
 
-class CannotEnrollInUnreleasedCourseError(ApplicationError):
-    """Raised when a student tries to enroll into a course with no releases."""
+class CannotEnrollInUnreleasedNoteError(ApplicationError):
+    """Raised when a student tries to enroll into a note with no releases."""
 
     def __init__(self, product_id: object) -> None:
         super().__init__(
-            f"Course {product_id!r} has no releases yet — cannot enroll",
+            f"Note {product_id!r} has no releases yet — cannot enroll",
         )
         self.product_id = product_id
 
@@ -290,7 +290,7 @@ class CannotEnrollInPrivateProductError(ApplicationError):
     refuses them, so the only way in is an accepted gift/invite (which
     enrolls through :class:`EnrollmentService` directly, bypassing this
     gate). Carries the offending product id so the SPA can render a
-    precise "this course is invite-only" message. Surfaces as HTTP 409.
+    precise "this note is invite-only" message. Surfaces as HTTP 409.
     """
 
     def __init__(self, product_id: object) -> None:
@@ -398,6 +398,19 @@ class RoleNameAlreadyTakenError(ApplicationError):
         self.name = name
 
 
+class BlogPostSlugAlreadyTakenError(ApplicationError):
+    """Raised when a blog-post slug is already used by another post.
+
+    Slugs are globally unique (they form the public post URL). Carries
+    ``slug`` for logging; clients see
+    ``{"error": "BlogPostSlugAlreadyTaken"}`` (HTTP 409).
+    """
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(f"Blog post slug {slug!r} is already taken")
+        self.slug = slug
+
+
 class InviteEmailMismatchError(ApplicationError):
     """Raised when an accept attempt comes from a different email.
 
@@ -503,7 +516,7 @@ class GiftAlreadyExistsError(ApplicationError):
 class ProductNotGiftableError(ApplicationError):
     """Raised when gifting a product whose type cannot be gifted.
 
-    Only course products support enrollment-as-a-gift today.
+    Only note products support enrollment-as-a-gift today.
     Surfaces as HTTP 409.
     """
 

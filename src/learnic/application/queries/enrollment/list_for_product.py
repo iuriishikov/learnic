@@ -24,11 +24,11 @@ class GetProductEnrollmentsQuery:
 
 @final
 class GetProductEnrollmentsQueryHandler:
-    """List course-type enrollments of a product.
+    """List note-type enrollments of a product.
 
     Caller needs ``READ_PRODUCT`` on the target product so owner
     and collaborators with that permission can see students.
-    Only course enrollments — webinar enrollments are listed per
+    Only note enrollments — webinar enrollments are listed per
     cohort via :class:`GetCohortEnrollmentsQueryHandler`.
     """
 

@@ -4,7 +4,11 @@ from typing import Final, final
 from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationReader,
-    ProductCollaborationView,
+)
+from learnic.application.common.storage.file_storage import FileStorage
+from learnic.application.queries.product_collaboration.list_for_product import (
+    ProductCollaborationOutput,
+    resolve_collaboration_output,
 )
 from learnic.entities.user.models import UserID
 
@@ -23,14 +27,23 @@ class ListMyCollaborationsQueryHandler:
     by ``actor_id``; users can always read their own collaborations.
     """
 
-    def __init__(self, reader: ProductCollaborationReader) -> None:
+    def __init__(
+        self,
+        reader: ProductCollaborationReader,
+        file_storage: FileStorage,
+    ) -> None:
         self._reader: Final = reader
+        self._file_storage: Final = file_storage
 
     async def run(
         self,
         data: ListMyCollaborationsQuery,
-    ) -> list[ProductCollaborationView]:
-        return await self._reader.for_user(
+    ) -> list[ProductCollaborationOutput]:
+        views = await self._reader.for_user(
             data.actor_id,
             data.pagination,
         )
+        return [
+            await resolve_collaboration_output(view, self._file_storage)
+            for view in views
+        ]

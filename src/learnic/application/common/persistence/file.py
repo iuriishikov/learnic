@@ -69,7 +69,7 @@ class FileView:
                 Defaults to one hour, matching the underlying
                 :meth:`FileStorage.presigned_get_url` default. Use a
                 larger value for long-lived editor sessions (e.g.
-                course-content drafts), a smaller value for one-shot
+                note-content drafts), a smaller value for one-shot
                 redirects.
 
         Returns:
@@ -142,7 +142,7 @@ class FilesReader(Protocol):
         without touching the database.
 
         Used by query handlers that need to enrich a deep tree of
-        domain objects (e.g. a course draft with many file-backed
+        domain objects (e.g. a note draft with many file-backed
         blocks) without an N+1 round-trip.
         """
         ...

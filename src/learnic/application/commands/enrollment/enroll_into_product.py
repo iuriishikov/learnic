@@ -3,7 +3,7 @@ from typing import Final, final
 
 from learnic.application.common.enrollment.service import EnrollmentService
 from learnic.application.common.enrollment.strategies import (
-    CourseEnrollmentTarget,
+    NoteEnrollmentTarget,
     EnrollmentTarget,
 )
 from learnic.application.common.errors import (
@@ -38,8 +38,8 @@ def _build_target(product: Product) -> EnrollmentTarget:
     module-load fail-fast for its own variants, this mirrors it on
     the type → target side.
     """
-    if product.type is ProductType.COURSE:
-        return CourseEnrollmentTarget(product_id=product.oid)
+    if product.type is ProductType.NOTE:
+        return NoteEnrollmentTarget(product_id=product.oid)
     raise AssertionError(  # pragma: no cover
         f"No enrollment target for product type {product.type.value!r}",
     )

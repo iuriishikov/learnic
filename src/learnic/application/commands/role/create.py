@@ -18,6 +18,7 @@ from learnic.application.common.product_events import (
     RoleCreatedPayload,
     publish_product_event,
 )
+from learnic.entities.common.limits import ROLE_LIMIT
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.errors import (
     CannotGrantPermissionsBeyondOwnSetError,
@@ -99,6 +100,9 @@ class CreateCustomRoleCommandHandler:
         )
         if existing is not None:
             raise RoleNameAlreadyTakenError(data.product_id, data.name)
+        ROLE_LIMIT.ensure(
+            await self._role_reader.count_for_product(data.product_id),
+        )
         # New custom role slots at the very bottom of the product's
         # current hierarchy so it cannot accidentally outrank existing
         # collaborators.

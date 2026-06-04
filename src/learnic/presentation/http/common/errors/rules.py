@@ -16,6 +16,7 @@ from fastapi_error_map import rule
 from fastapi_error_map.rules import Rule
 
 from learnic.application.common.errors import (
+    BlogPostSlugAlreadyTakenError,
     CannotEnrollInUnpublishedProductError,
     CannotGiftToOwnerError,
     CannotInviteOwnerError,
@@ -135,7 +136,7 @@ INVALID_REORDER_RULE: Final[Rule] = rule(
     translator=_named,
 )
 
-CROSS_COURSE_LESSON_MOVE_RULE: Final[Rule] = rule(
+CROSS_NOTE_LESSON_MOVE_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_named,
 )
@@ -163,12 +164,12 @@ STORAGE_QUOTA_EXCEEDED_RULE: Final[Rule] = rule(
 enough for the SPA to render "0.4 GB attempted on a 2 GB FREE plan,
 1.7 GB already used" and a clear upgrade CTA."""
 
-CANNOT_PUBLISH_COURSE_DIRECTLY_RULE: Final[Rule] = rule(
+CANNOT_PUBLISH_NOTE_DIRECTLY_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_named,
 )
 
-CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE: Final[Rule] = rule(
+CANNOT_ENROLL_IN_UNRELEASED_NOTE_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_named,
 )
@@ -180,7 +181,7 @@ CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE: Final[Rule] = rule(
 """Body shape: ``{"error": "CannotEnrollInUnpublishedProduct",
 "product_id": ..., "status": "draft"|"archived"}`` — the SPA
 can tell the user *why* the self-enroll was rejected (draft vs.
-archived) and decide whether to surface a "course not yet
+archived) and decide whether to surface a "note not yet
 available" CTA or hide the action entirely."""
 
 CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE: Final[Rule] = rule(
@@ -196,10 +197,10 @@ PRODUCT_DOES_NOT_SUPPORT_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,
     translator=_field,
 )
-"""Replaces the legacy ``NOT_A_COURSE_RULE`` / ``NOT_A_WEBINAR_RULE``.
+"""Replaces the legacy ``NOT_A_NOTE_RULE`` / ``NOT_A_WEBINAR_RULE``.
 
 Body shape: ``{"error": "ProductDoesNotSupport", "product_id": ...,
-"product_type": "course"|"webinar", "capability": "<capability>"}`` —
+"product_type": "note"|"webinar", "capability": "<capability>"}`` —
 the SPA can render a precise "this operation isn't available for X
 products" message without parsing free-form text.
 """
@@ -224,7 +225,7 @@ ENROLLMENT_DOES_NOT_SUPPORT_RULE: Final[Rule] = rule(
     translator=_field,
 )
 """Body shape: ``{"error": "EnrollmentDoesNotSupport",
-"enrollment_id": ..., "enrollment_kind": "course",
+"enrollment_id": ..., "enrollment_kind": "note",
 "capability": "<capability>"}`` — mirrors
 :data:`PRODUCT_DOES_NOT_SUPPORT_RULE` so the SPA can branch on
 which enrollment kind is missing which capability."""
@@ -251,6 +252,38 @@ ADMIN_MAP: Final[dict[type[Exception], int | Rule]] = {
     InvalidTokenError: INVALID_TOKEN_RULE,
     NotAdminError: NOT_ADMIN_RULE,
     EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+}
+
+# --------------------------------- blog -------------------------------- #
+
+BLOG_POST_SLUG_TAKEN_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+"""409 ``{"error": "BlogPostSlugAlreadyTaken"}`` — the requested slug
+is already used by another post (slugs form the public URL and are
+globally unique)."""
+
+BLOG_POST_STATUS_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_field,
+)
+"""409 ``{"error": "BlogPostStatusTransitionError", "status": "...",
+"operation": "publish"|"unpublish"}`` — an invalid lifecycle
+transition (publishing an already-published post, or unpublishing a
+draft)."""
+
+# Base preset for admin blog-post writes: admin auth (401/403), target
+# existence (404), plus value-object violations (422).
+BLOG_ADMIN_FIELD_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **ADMIN_MAP,
+    FieldError: FIELD_ERROR_RULE,
+}
+
+# Slug-mutating writes (create / change-slug) add the uniqueness 409.
+BLOG_ADMIN_SLUG_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **BLOG_ADMIN_FIELD_MAP,
+    BlogPostSlugAlreadyTakenError: BLOG_POST_SLUG_TAKEN_RULE,
 }
 
 INSUFFICIENT_PERMISSIONS_RULE: Final[Rule] = rule(
@@ -339,6 +372,7 @@ COLLABORATION_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
     EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
     EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
+    ResourceLimitReachedError: RESOURCE_LIMIT_RULE,
 }
 
 OPERATION_NOT_ALLOWED_IN_STATUS_RULE: Final[Rule] = rule(
@@ -392,7 +426,7 @@ PRODUCT_NOT_GIFTABLE_RULE: Final[Rule] = rule(
     translator=_field,
 )
 """409 with body ``{"error": "ProductNotGiftable", "product_id": ...,
-"product_type": "webinar"}`` — only course products can be gifted."""
+"product_type": "webinar"}`` — only note products can be gifted."""
 
 GIFT_TOKEN_ERROR_RULE: Final[Rule] = rule(
     status=HTTPStatus.CONFLICT,

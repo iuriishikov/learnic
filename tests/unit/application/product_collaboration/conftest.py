@@ -76,6 +76,7 @@ def fake_collab_gateway() -> AsyncMock:
     gw.with_id = AsyncMock(return_value=None)
     gw.active_for_product_and_user = AsyncMock(return_value=None)
     gw.pending_for_product_and_email = AsyncMock(return_value=None)
+    gw.count_active_or_pending_for_product = AsyncMock(return_value=0)
     gw.count_email_invites_by_actor_since = AsyncMock(return_value=0)
     gw.delete_expired_pending_invites = AsyncMock(return_value=0)
     return gw
@@ -162,7 +163,7 @@ def invitee_id() -> UserID:
 
 @pytest.fixture
 def product(author_id: UserID) -> Product:
-    return Product.create_course(
+    return Product.create_note(
         author_id=author_id,
         name=ProductTitle("Demo"),
     )

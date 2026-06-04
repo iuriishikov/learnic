@@ -109,7 +109,7 @@ class InviteGiftByEmailCommandHandler:
         product = await self._product_gateway.with_id(data.product_id)
         if product is None:
             raise EntityNotFoundError(data.product_id)
-        if product.type is not ProductType.COURSE:
+        if product.type is not ProductType.NOTE:
             raise ProductNotGiftableError(
                 data.product_id,
                 product.type.value,

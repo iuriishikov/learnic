@@ -46,18 +46,15 @@ from learnic.application.commands.product_gift.revoke import (
     RevokeGiftCommand,
     RevokeGiftCommandHandler,
 )
-from learnic.application.common.formatting import mask_email
 from learnic.application.common.pagination import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     Pagination,
 )
-from learnic.application.common.persistence.product_gift import (
-    ProductGiftView,
-)
 from learnic.application.queries.product_gift.get_gift import (
     GetGiftQuery,
     GetGiftQueryHandler,
+    ProductGiftOutput,
 )
 from learnic.application.queries.product_gift.list_for_product import (
     ListProductGiftsQuery,
@@ -81,7 +78,7 @@ from learnic.presentation.http.common.errors.rules import (
 )
 from learnic.presentation.http.common.device import client_ip
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
-from learnic.presentation.http.common.schemas import UserRefSchema
+from learnic.presentation.http.common.schemas import UserSchema
 
 product_router = ErrorAwareRouter(
     prefix="/products/{product_id}/gifts",
@@ -197,6 +194,8 @@ class GiftSchema(BaseModel):
                         ),
                         "full_name": "Lovelace Ada",
                         "email": "a*****a@example.com",
+                        "is_verified": False,
+                        "avatar": None,
                     },
                     "invited_email": None,
                     "status": "pending_invite",
@@ -206,6 +205,8 @@ class GiftSchema(BaseModel):
                         ),
                         "full_name": "Hopper Grace",
                         "email": "g*****r@example.com",
+                        "is_verified": True,
+                        "avatar": None,
                     },
                     "invite_expires_at": "2026-05-21T10:00:00+00:00",
                     "created_at": "2026-05-07T10:00:00+00:00",
@@ -220,10 +221,10 @@ class GiftSchema(BaseModel):
     oid: UUID
     product_id: UUID
     product_name: str
-    recipient: UserRefSchema | None
+    recipient: UserSchema | None
     invited_email: str | None
     status: GiftStatus
-    gifter: UserRefSchema
+    gifter: UserSchema
     invite_expires_at: datetime | None
     created_at: datetime
     accepted_at: datetime | None
@@ -231,23 +232,19 @@ class GiftSchema(BaseModel):
     revoked_at: datetime | None
 
     @classmethod
-    def from_view(cls, view: ProductGiftView) -> Self:
+    def from_output(cls, view: ProductGiftOutput) -> Self:
         return cls(
             oid=view.oid,
             product_id=view.product_id,
             product_name=view.product_name,
             recipient=(
-                UserRefSchema.from_view(view.recipient)
+                UserSchema.model_validate(view.recipient)
                 if view.recipient is not None
                 else None
             ),
-            invited_email=(
-                mask_email(view.invited_email)
-                if view.invited_email is not None
-                else None
-            ),
+            invited_email=view.invited_email,
             status=view.status,
-            gifter=UserRefSchema.from_view(view.gifter),
+            gifter=UserSchema.model_validate(view.gifter),
             invite_expires_at=view.invite_expires_at,
             created_at=view.created_at,
             accepted_at=view.accepted_at,
@@ -312,7 +309,7 @@ async def list_gifts(
             pagination=Pagination(limit=limit, offset=offset),
         ),
     )
-    return GiftListSchema(items=[GiftSchema.from_view(v) for v in views])
+    return GiftListSchema(items=[GiftSchema.from_output(v) for v in views])
 
 
 @product_router.post(
@@ -476,7 +473,7 @@ async def get_gift(
             gift_id=ProductGiftID(gift_id),
         ),
     )
-    return GiftSchema.from_view(view)
+    return GiftSchema.from_output(view)
 
 
 @gift_router.post(
@@ -496,7 +493,7 @@ async def accept_by_token(
 ) -> None:
     """Accept a gift using the token from the email link.
 
-    Creates the course enrollment for the accepting user and notifies
+    Creates the note enrollment for the accepting user and notifies
     the gifter.
 
     Args:

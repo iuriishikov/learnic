@@ -3,7 +3,7 @@ from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.errors import (
-    CannotPublishCourseDirectlyError,
+    CannotPublishNoteDirectlyError,
     EntityNotFoundError,
 )
 from learnic.application.common.persistence.product import ProductGateway
@@ -29,10 +29,10 @@ class PublishProductCommand:
 class PublishProductCommandHandler:
     """Marks a webinar product published.
 
-    Course products cannot be published via this endpoint —
+    Note products cannot be published via this endpoint —
     they are published implicitly by creating their first
-    release. Direct publish attempts on courses raise
-    :class:`CannotPublishCourseDirectlyError`.
+    release. Direct publish attempts on notes raise
+    :class:`CannotPublishNoteDirectlyError`.
     """
 
     def __init__(
@@ -56,8 +56,8 @@ class PublishProductCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.PUBLISH,
         )
-        if product.type is ProductType.COURSE:
-            raise CannotPublishCourseDirectlyError(data.product_id)
+        if product.type is ProductType.NOTE:
+            raise CannotPublishNoteDirectlyError(data.product_id)
         was_published = product.status is ProductStatus.PUBLISHED
         product.publish()
         await self._transaction.commit()

@@ -5,14 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.persistence.enrollment import (
-    CourseEnrollmentDetailsView,
+    NoteEnrollmentDetailsView,
     EnrollmentGateway,
     EnrollmentReader,
     EnrollmentView,
 )
-from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.details import (
-    CourseEnrollmentDetails,
+    NoteEnrollmentDetails,
     EnrollmentDetails,
 )
 from learnic.entities.enrollment.enums import (
@@ -25,7 +25,7 @@ from learnic.entities.enrollment.value_objects import ProgressPercent
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.enrollment import (
-    enrollment_course_details_table,
+    enrollment_note_details_table,
     enrollments_table,
 )
 
@@ -44,8 +44,8 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         self._session: Final = session
 
     async def _hydrate_details(self, enrollment: Enrollment) -> None:
-        if enrollment.kind is EnrollmentKind.COURSE:
-            enrollment.details = await self._load_course_details(
+        if enrollment.kind is EnrollmentKind.NOTE:
+            enrollment.details = await self._load_note_details(
                 enrollment.oid,
             )
             return
@@ -53,19 +53,19 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         # empty body so callers can still operate on the parent.
         enrollment.details = EnrollmentDetails()
 
-    async def _load_course_details(
+    async def _load_note_details(
         self,
         enrollment_id: EnrollmentID,
-    ) -> CourseEnrollmentDetails:
-        cd = enrollment_course_details_table
+    ) -> NoteEnrollmentDetails:
+        cd = enrollment_note_details_table
         stmt = sa.select(
             cd.c.release_id,
             cd.c.progress_percent,
             cd.c.completed_at,
         ).where(cd.c.enrollment_id == enrollment_id)
         row = (await self._session.execute(stmt)).one()
-        return CourseEnrollmentDetails(
-            release_id=CourseReleaseID(row.release_id),
+        return NoteEnrollmentDetails(
+            release_id=NoteReleaseID(row.release_id),
             progress=ProgressPercent(row.progress_percent),
             completed_at=row.completed_at,
         )
@@ -82,13 +82,13 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
                 enrolled_at=enrollment.enrolled_at,
             ),
         )
-        if enrollment.kind is EnrollmentKind.COURSE:
+        if enrollment.kind is EnrollmentKind.NOTE:
             assert isinstance(  # noqa: S101
                 enrollment.details,
-                CourseEnrollmentDetails,
+                NoteEnrollmentDetails,
             )
             await self._session.execute(
-                sa.insert(enrollment_course_details_table).values(
+                sa.insert(enrollment_note_details_table).values(
                     enrollment_id=enrollment.oid,
                     release_id=enrollment.details.release_id,
                     progress_percent=enrollment.details.progress.value,
@@ -138,13 +138,13 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
         return result.scalar() is not None
 
     @override
-    async def update_course_details(self, enrollment: Enrollment) -> None:
-        assert enrollment.kind is EnrollmentKind.COURSE  # noqa: S101
+    async def update_note_details(self, enrollment: Enrollment) -> None:
+        assert enrollment.kind is EnrollmentKind.NOTE  # noqa: S101
         assert isinstance(  # noqa: S101
             enrollment.details,
-            CourseEnrollmentDetails,
+            NoteEnrollmentDetails,
         )
-        cd = enrollment_course_details_table
+        cd = enrollment_note_details_table
         stmt = (
             sa.update(cd)
             .where(cd.c.enrollment_id == enrollment.oid)
@@ -158,7 +158,7 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
 
 
 def _select_view() -> sa.Select[Any]:
-    cd = enrollment_course_details_table
+    cd = enrollment_note_details_table
     return sa.select(
         enrollments_table.c.oid,
         enrollments_table.c.kind,
@@ -166,9 +166,9 @@ def _select_view() -> sa.Select[Any]:
         enrollments_table.c.student_id,
         enrollments_table.c.status,
         enrollments_table.c.enrolled_at,
-        cd.c.release_id.label("course_release_id"),
-        cd.c.progress_percent.label("course_progress_percent"),
-        cd.c.completed_at.label("course_completed_at"),
+        cd.c.release_id.label("note_release_id"),
+        cd.c.progress_percent.label("note_progress_percent"),
+        cd.c.completed_at.label("note_completed_at"),
     ).select_from(
         enrollments_table.outerjoin(
             cd,
@@ -179,16 +179,16 @@ def _select_view() -> sa.Select[Any]:
 
 def _row_to_view(row: sa.Row[Any]) -> EnrollmentView:
     kind = EnrollmentKind(row.kind)
-    details: CourseEnrollmentDetailsView | None = None
-    if kind is EnrollmentKind.COURSE:
-        details = CourseEnrollmentDetailsView(
+    details: NoteEnrollmentDetailsView | None = None
+    if kind is EnrollmentKind.NOTE:
+        details = NoteEnrollmentDetailsView(
             release_id=(
-                CourseReleaseID(row.course_release_id)
-                if row.course_release_id is not None
+                NoteReleaseID(row.note_release_id)
+                if row.note_release_id is not None
                 else None
             ),
-            progress_percent=row.course_progress_percent,
-            completed_at=row.course_completed_at,
+            progress_percent=row.note_progress_percent,
+            completed_at=row.note_completed_at,
         )
     return EnrollmentView(
         oid=EnrollmentID(row.oid),

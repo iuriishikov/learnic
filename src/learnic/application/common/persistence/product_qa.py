@@ -26,6 +26,16 @@ class ProductQAGateway(Protocol):
         product_id: ProductID,
     ) -> list[ProductQA]: ...
 
+    async def count_for_product(self, product_id: ProductID) -> int:
+        """Return how many Q&A entries ``product_id`` already has.
+
+        Used by ``AddProductQACommandHandler`` to enforce
+        :data:`PRODUCT_QA_LIMIT` — an abuse guard so the
+        unpaginated public ``GET /products/{id}/qa`` cannot be
+        inflated without bound.
+        """
+        ...
+
     async def delete(self, qa: ProductQA) -> None: ...
 
 

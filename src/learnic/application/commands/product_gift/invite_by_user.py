@@ -60,7 +60,7 @@ class InviteGiftByUserCommandHandler:
 
     Caller must hold ``MANAGE_RELEASES`` on the product (the same
     permission family that governs granting student access). The
-    product must be a ``COURSE`` and ``PUBLISHED``, the recipient
+    product must be a ``NOTE`` and ``PUBLISHED``, the recipient
     must not be the author, and there must be no existing pending /
     accepted gift for the same ``(product, user)`` pair. A fresh
     :class:`InviteToken` is generated; the recipient receives an
@@ -100,7 +100,7 @@ class InviteGiftByUserCommandHandler:
         product = await self._product_gateway.with_id(data.product_id)
         if product is None:
             raise EntityNotFoundError(data.product_id)
-        if product.type is not ProductType.COURSE:
+        if product.type is not ProductType.NOTE:
             raise ProductNotGiftableError(
                 data.product_id,
                 product.type.value,

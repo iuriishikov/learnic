@@ -6,34 +6,34 @@ from learnic.application.common.auth.authorizer import (
     AuthzTarget,
 )
 from learnic.application.common.errors import EntityNotFoundError
-from learnic.application.common.persistence.course_release import (
-    CourseReleaseGateway,
+from learnic.application.common.persistence.note_release import (
+    NoteReleaseGateway,
 )
 from learnic.application.common.persistence.enrollment import (
     EnrollmentGateway,
 )
 from learnic.application.common.persistence.transaction import Transaction
-from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.ids import EnrollmentID
 from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 
 
 @dataclass(slots=True, frozen=True)
-class RePinCourseEnrollmentCommand:
+class RePinNoteEnrollmentCommand:
     actor_id: UserID
     enrollment_id: EnrollmentID
-    release_id: CourseReleaseID
+    release_id: NoteReleaseID
 
 
 @final
-class RePinCourseEnrollmentCommandHandler:
-    """Move a course enrollment's pinned release.
+class RePinNoteEnrollmentCommandHandler:
+    """Move a note enrollment's pinned release.
 
     Caller needs ``MANAGE_RELEASES`` on the parent product (owner
     short-circuits inside the authorizer). The target release
     must belong to the same product as the enrollment — releases
-    of unrelated courses are not legal pins.
+    of unrelated notes are not legal pins.
 
     Strict pinning is the default policy: students never
     auto-upgrade. This endpoint is the explicit escape hatch for
@@ -46,7 +46,7 @@ class RePinCourseEnrollmentCommandHandler:
         self,
         transaction: Transaction,
         enrollment_gateway: EnrollmentGateway,
-        release_gateway: CourseReleaseGateway,
+        release_gateway: NoteReleaseGateway,
         authorizer: Authorizer,
     ) -> None:
         self._transaction: Final = transaction
@@ -54,7 +54,7 @@ class RePinCourseEnrollmentCommandHandler:
         self._release_gateway: Final = release_gateway
         self._authorizer: Final = authorizer
 
-    async def run(self, data: RePinCourseEnrollmentCommand) -> None:
+    async def run(self, data: RePinNoteEnrollmentCommand) -> None:
         enrollment = await self._enrollment_gateway.with_id(
             data.enrollment_id,
         )
@@ -69,5 +69,5 @@ class RePinCourseEnrollmentCommandHandler:
         if release is None or release.product_id != enrollment.product_id:
             raise EntityNotFoundError(data.release_id)
         enrollment.repin_to_release(release.oid)
-        await self._enrollment_gateway.update_course_details(enrollment)
+        await self._enrollment_gateway.update_note_details(enrollment)
         await self._transaction.commit()

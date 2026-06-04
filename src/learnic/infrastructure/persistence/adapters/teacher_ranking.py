@@ -30,7 +30,7 @@ class TeacherRankingReaderAlchemy(TeacherRankingReader):
     no published product in the result) LEFT JOIN ``enrollments`` (only
     ``ACTIVE`` rows, so revoked access does not inflate the count).
     ``COUNT(DISTINCT enrollments.student_id)`` collapses a student
-    enrolled in several of a teacher's courses to one, while
+    enrolled in several of a teacher's notes to one, while
     ``COUNT(DISTINCT products.oid)`` counts the published catalog; both
     fold to ``0`` for a user who has taught nothing. The avatar is
     folded in via an outer join on the live (non-soft-deleted) ``files``

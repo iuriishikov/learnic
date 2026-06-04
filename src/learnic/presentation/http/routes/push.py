@@ -33,13 +33,17 @@ from learnic.application.queries.push.list_my import (
     ListMyPushSubscriptionsQuery,
     ListMyPushSubscriptionsQueryHandler,
 )
+from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.entities.push_subscription.models import PushSubscription
 from learnic.infrastructure.push.vapid import VapidPublicKey
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
 )
-from learnic.presentation.http.common.errors.rules import AUTHENTICATED_MAP
+from learnic.presentation.http.common.errors.rules import (
+    AUTHENTICATED_MAP,
+    RESOURCE_LIMIT_RULE,
+)
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 
 
@@ -169,7 +173,8 @@ async def vapid_public_key(
     operation_id="subscribeWebPush",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
-    error_map=AUTHENTICATED_MAP,
+    error_map=AUTHENTICATED_MAP
+    | {ResourceLimitReachedError: RESOURCE_LIMIT_RULE},
 )
 async def subscribe_web_push(
     request: Request,
@@ -195,6 +200,10 @@ async def subscribe_web_push(
 
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        ResourceLimitReachedError: The caller already has
+            ``PUSH_SUBSCRIPTION_LIMIT`` distinct devices registered and
+            this is a new endpoint; HTTP 409. Refreshing an existing
+            endpoint never raises.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(

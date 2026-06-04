@@ -12,7 +12,7 @@ class FileTooLargeError(FieldError):
     (see ``learnic.presentation.http.common.upload_limits``). There is
     no longer a global cap — this error always carries the
     context-specific value the caller passed to
-    ``read_upload(..., max_bytes=...)``.
+    ``open_upload(..., max_bytes=...)``.
     """
 
     limit: int

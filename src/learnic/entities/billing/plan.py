@@ -27,7 +27,7 @@ class PlanLimits:
     """Per-plan resource caps.
 
     Only ``storage_bytes_max`` today — extend with future fields
-    (e.g. ``max_courses``, ``max_students``) when the first concrete
+    (e.g. ``max_notes``, ``max_students``) when the first concrete
     use case shows up. YAGNI defaults to "don't add a knob until
     something will turn it."
     """

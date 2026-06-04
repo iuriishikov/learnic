@@ -50,92 +50,134 @@ from learnic.application.commands.auth.verify_wait import (
 from learnic.application.queries.auth.token_status import (
     GetTokenStatusQueryHandler,
 )
-from learnic.application.commands.course_block.add_code import (
+from learnic.application.commands.note_block.add_code import (
     AddCodeBlockCommandHandler,
 )
-from learnic.application.commands.course_block.check_answer import (
+from learnic.application.commands.blog_post.change_slug import (
+    ChangeBlogPostSlugCommandHandler,
+)
+from learnic.application.commands.blog_post.create import (
+    CreateBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.delete import (
+    DeleteBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.publish import (
+    PublishBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.rename import (
+    RenameBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.unpublish import (
+    UnpublishBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post_block.add_html import (
+    AddBlogHtmlBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.add_image import (
+    AddBlogImageBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.add_video import (
+    AddBlogVideoBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.delete import (
+    DeleteBlogPostBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.reorder import (
+    ReorderBlogPostBlocksCommandHandler,
+)
+from learnic.application.commands.blog_post_block.update_html import (
+    UpdateBlogHtmlBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.update_image import (
+    UpdateBlogImageBlockCommandHandler,
+)
+from learnic.application.commands.blog_post_block.update_video import (
+    UpdateBlogVideoBlockCommandHandler,
+)
+from learnic.application.commands.note_block.check_answer import (
     CheckBlockAnswerCommandHandler,
 )
-from learnic.application.commands.course_block.reveal_answer import (
+from learnic.application.commands.note_block.reveal_answer import (
     RevealBlockAnswerCommandHandler,
 )
-from learnic.application.commands.course_block.add_html import (
+from learnic.application.commands.note_block.add_html import (
     AddHtmlBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_katex import (
+from learnic.application.commands.note_block.add_katex import (
     AddKatexBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_file import (
+from learnic.application.commands.note_block.add_file import (
     AddFileBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_multi_choice import (
+from learnic.application.commands.note_block.add_multi_choice import (
     AddMultiChoiceBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_photo_collage import (
+from learnic.application.commands.note_block.add_photo_collage import (
     AddPhotoCollageBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_rutube_video import (
+from learnic.application.commands.note_block.add_rutube_video import (
     AddRutubeVideoBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_video_file import (
+from learnic.application.commands.note_block.add_video_file import (
     AddVideoFileBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_single_choice import (
+from learnic.application.commands.note_block.add_single_choice import (
     AddSingleChoiceBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_text_input import (
+from learnic.application.commands.note_block.add_text_input import (
     AddTextInputBlockCommandHandler,
 )
-from learnic.application.commands.course_block.delete import (
+from learnic.application.commands.note_block.delete import (
     DeleteLessonBlockCommandHandler,
 )
-from learnic.application.commands.course_block.reorder import (
+from learnic.application.commands.note_block.reorder import (
     ReorderLessonBlocksCommandHandler,
 )
-from learnic.application.commands.course_block.update_code import (
+from learnic.application.commands.note_block.update_code import (
     UpdateCodeBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_file import (
+from learnic.application.commands.note_block.update_file import (
     UpdateFileBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_html import (
+from learnic.application.commands.note_block.update_html import (
     UpdateHtmlBlockCommandHandler,
 )
-from learnic.application.commands.course_block.add_photo_collage_item import (
+from learnic.application.commands.note_block.add_photo_collage_item import (
     AddPhotoCollageItemCommandHandler,
 )
-from learnic.application.commands.course_block.remove_photo_collage_item import (
+from learnic.application.commands.note_block.remove_photo_collage_item import (
     RemovePhotoCollageItemCommandHandler,
 )
-from learnic.application.commands.course_block.reorder_photo_collage_items import (
+from learnic.application.commands.note_block.reorder_photo_collage_items import (
     ReorderPhotoCollageItemsCommandHandler,
 )
-from learnic.application.commands.course_block.update_photo_collage_item_caption import (  # noqa: E501
+from learnic.application.commands.note_block.update_photo_collage_item_caption import (  # noqa: E501
     UpdatePhotoCollageItemCaptionCommandHandler,
 )
-from learnic.application.commands.course_block.update_photo_collage_title import (
+from learnic.application.commands.note_block.update_photo_collage_title import (
     UpdatePhotoCollageTitleCommandHandler,
 )
-from learnic.application.commands.course_block.update_video_file import (
+from learnic.application.commands.note_block.update_video_file import (
     UpdateVideoFileBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_katex import (
+from learnic.application.commands.note_block.update_katex import (
     UpdateKatexBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_multi_choice import (
+from learnic.application.commands.note_block.update_multi_choice import (
     UpdateMultiChoiceBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_rutube_video import (
+from learnic.application.commands.note_block.update_rutube_video import (
     UpdateRutubeVideoBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_single_choice import (
+from learnic.application.commands.note_block.update_single_choice import (
     UpdateSingleChoiceBlockCommandHandler,
 )
-from learnic.application.commands.course_block.update_text_input import (
+from learnic.application.commands.note_block.update_text_input import (
     UpdateTextInputBlockCommandHandler,
 )
-from learnic.application.commands.course_draft.reset import (
-    ResetCourseDraftCommandHandler,
+from learnic.application.commands.note_draft.reset import (
+    ResetNoteDraftCommandHandler,
 )
 from learnic.application.commands.enrollment.complete import (
     CompleteEnrollmentCommandHandler,
@@ -144,46 +186,43 @@ from learnic.application.commands.enrollment.enroll_into_product import (
     EnrollIntoProductCommandHandler,
 )
 from learnic.application.commands.enrollment.repin import (
-    RePinCourseEnrollmentCommandHandler,
+    RePinNoteEnrollmentCommandHandler,
 )
-from learnic.application.commands.enrollment.update_progress import (
-    UpdateProgressCommandHandler,
+from learnic.application.commands.note_lesson.add import (
+    AddNoteLessonCommandHandler,
 )
-from learnic.application.commands.course_lesson.add import (
-    AddCourseLessonCommandHandler,
+from learnic.application.commands.note_lesson.delete import (
+    DeleteNoteLessonCommandHandler,
 )
-from learnic.application.commands.course_lesson.delete import (
-    DeleteCourseLessonCommandHandler,
+from learnic.application.commands.note_lesson.move import (
+    MoveNoteLessonCommandHandler,
 )
-from learnic.application.commands.course_lesson.move import (
-    MoveCourseLessonCommandHandler,
+from learnic.application.commands.note_lesson.rename import (
+    RenameNoteLessonCommandHandler,
 )
-from learnic.application.commands.course_lesson.rename import (
-    RenameCourseLessonCommandHandler,
+from learnic.application.commands.note_lesson.reorder import (
+    ReorderNoteLessonsCommandHandler,
 )
-from learnic.application.commands.course_lesson.reorder import (
-    ReorderCourseLessonsCommandHandler,
+from learnic.application.commands.note_module.add import (
+    AddNoteModuleCommandHandler,
 )
-from learnic.application.commands.course_module.add import (
-    AddCourseModuleCommandHandler,
+from learnic.application.commands.note_module.delete import (
+    DeleteNoteModuleCommandHandler,
 )
-from learnic.application.commands.course_module.delete import (
-    DeleteCourseModuleCommandHandler,
+from learnic.application.commands.note_module.rename import (
+    RenameNoteModuleCommandHandler,
 )
-from learnic.application.commands.course_module.rename import (
-    RenameCourseModuleCommandHandler,
+from learnic.application.commands.note_module.reorder import (
+    ReorderNoteModulesCommandHandler,
 )
-from learnic.application.commands.course_module.reorder import (
-    ReorderCourseModulesCommandHandler,
+from learnic.application.commands.note_module.update_description import (
+    UpdateNoteModuleDescriptionCommandHandler,
 )
-from learnic.application.commands.course_module.update_description import (
-    UpdateCourseModuleDescriptionCommandHandler,
+from learnic.application.commands.note_release.create import (
+    CreateNoteReleaseCommandHandler,
 )
-from learnic.application.commands.course_release.create import (
-    CreateCourseReleaseCommandHandler,
-)
-from learnic.application.commands.product.add_course import (
-    AddCourseProductCommandHandler,
+from learnic.application.commands.product.add_note import (
+    AddNoteProductCommandHandler,
 )
 from learnic.application.commands.product.archive import (
     ArchiveProductCommandHandler,
@@ -403,17 +442,24 @@ from learnic.application.queries.user_experience.list_for_user import (
 )
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.email.sender import EmailSender
-from learnic.application.common.persistence.course_block import (
+from learnic.application.common.persistence.blog_post import (
+    BlogPostGateway,
+    BlogPostReader,
+)
+from learnic.application.common.persistence.blog_post_block import (
+    BlogPostBlockGateway,
+)
+from learnic.application.common.persistence.note_block import (
     LessonBlockGateway,
 )
-from learnic.application.common.persistence.course_content import (
-    CourseContentReader,
+from learnic.application.common.persistence.note_content import (
+    NoteContentReader,
 )
-from learnic.application.common.persistence.course_draft import (
-    CourseDraftResetter,
+from learnic.application.common.persistence.note_draft import (
+    NoteDraftResetter,
 )
-from learnic.application.common.enrollment.course_strategy import (
-    CourseEnrollmentStrategy,
+from learnic.application.common.enrollment.note_strategy import (
+    NoteEnrollmentStrategy,
 )
 from learnic.application.common.enrollment.service import EnrollmentService
 from learnic.application.common.enrollment.strategies import (
@@ -424,17 +470,17 @@ from learnic.application.common.persistence.enrollment import (
     EnrollmentReader,
 )
 from learnic.entities.enrollment.enums import EnrollmentKind
-from learnic.application.common.persistence.course_lesson import (
-    CourseLessonGateway,
+from learnic.application.common.persistence.note_lesson import (
+    NoteLessonGateway,
 )
-from learnic.application.common.persistence.course_module import (
-    CourseModuleGateway,
+from learnic.application.common.persistence.note_module import (
+    NoteModuleGateway,
 )
-from learnic.application.common.persistence.course_release import (
-    CourseReleaseBlockGateway,
-    CourseReleaseGateway,
-    CourseReleaseReader,
-    CourseReleaseSnapshotter,
+from learnic.application.common.persistence.note_release import (
+    NoteReleaseBlockGateway,
+    NoteReleaseGateway,
+    NoteReleaseReader,
+    NoteReleaseSnapshotter,
 )
 from learnic.application.billing.entitlement import EntitlementService
 from learnic.application.common.persistence.billing import (
@@ -456,8 +502,8 @@ from learnic.application.commands.billing.reconcile_storage_quotas import (
 from learnic.application.commands.file.purge_from_storage import (
     PurgeFileFromStorageCommandHandler,
 )
-from learnic.application.queries.billing.get_course_storage_remaining import (
-    GetCourseStorageRemainingQueryHandler,
+from learnic.application.queries.billing.get_note_storage_remaining import (
+    GetNoteStorageRemainingQueryHandler,
 )
 from learnic.application.queries.billing.get_my_subscription import (
     GetMySubscriptionQueryHandler,
@@ -592,8 +638,8 @@ from learnic.application.queries.session.list_my import (
 from learnic.application.commands.admin.ban_user import (
     BanUserCommandHandler,
 )
-from learnic.application.commands.admin.delete_course import (
-    AdminDeleteCourseCommandHandler,
+from learnic.application.commands.admin.delete_note import (
+    AdminDeleteNoteCommandHandler,
 )
 from learnic.application.commands.admin.grant_admin import (
     GrantAdminCommandHandler,
@@ -649,20 +695,35 @@ from learnic.application.queries.product.recommend_for_me import (
     RankingWeights,
     RecommendForMeQueryHandler,
 )
-from learnic.application.queries.course_content.get_block import (
+from learnic.application.queries.note_content.get_block import (
     GetLessonBlockQueryHandler,
 )
-from learnic.application.queries.course_content.get_draft import (
-    GetCourseDraftQueryHandler,
+from learnic.application.queries.note_content.get_draft import (
+    GetNoteDraftQueryHandler,
 )
-from learnic.application.queries.course_content.get import (
-    GetCourseContentQueryHandler,
+from learnic.application.queries.blog_post.get import (
+    GetBlogPostQueryHandler,
 )
-from learnic.application.queries.course_release.get_content import (
-    GetCourseReleaseContentQueryHandler,
+from learnic.application.queries.blog_post.get_block import (
+    GetBlogPostBlockQueryHandler,
 )
-from learnic.application.queries.course_release.list_for_product import (
-    ListCourseReleasesQueryHandler,
+from learnic.application.queries.blog_post.get_by_slug import (
+    GetPublishedBlogPostBySlugQueryHandler,
+)
+from learnic.application.queries.blog_post.list import (
+    ListBlogPostsQueryHandler,
+)
+from learnic.application.queries.blog_post.list_published import (
+    ListPublishedBlogPostsQueryHandler,
+)
+from learnic.application.queries.note_content.get import (
+    GetNoteContentQueryHandler,
+)
+from learnic.application.queries.note_release.get_content import (
+    GetNoteReleaseContentQueryHandler,
+)
+from learnic.application.queries.note_release.list_for_product import (
+    ListNoteReleasesQueryHandler,
 )
 from learnic.application.queries.enrollment.list_for_product import (
     GetProductEnrollmentsQueryHandler,
@@ -711,30 +772,37 @@ from learnic.infrastructure.email.renderer import (
 from learnic.infrastructure.persistence.adapters.email_token import (
     EmailTokenStoreAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_block import (
+from learnic.infrastructure.persistence.adapters.blog_post import (
+    BlogPostMapperAlchemy,
+    BlogPostReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.blog_post_block import (
+    BlogPostBlockGatewayAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.note_block import (
     LessonBlockGatewayAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_content import (
-    CourseContentReaderAlchemy,
+from learnic.infrastructure.persistence.adapters.note_content import (
+    NoteContentReaderAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_draft import (
-    CourseDraftResetterAlchemy,
+from learnic.infrastructure.persistence.adapters.note_draft import (
+    NoteDraftResetterAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.enrollment import (
     EnrollmentMapperAlchemy,
     EnrollmentReaderAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_lesson import (
-    CourseLessonMapperAlchemy,
+from learnic.infrastructure.persistence.adapters.note_lesson import (
+    NoteLessonMapperAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_module import (
-    CourseModuleMapperAlchemy,
+from learnic.infrastructure.persistence.adapters.note_module import (
+    NoteModuleMapperAlchemy,
 )
-from learnic.infrastructure.persistence.adapters.course_release import (
-    CourseReleaseBlockGatewayAlchemy,
-    CourseReleaseMapperAlchemy,
-    CourseReleaseReaderAlchemy,
-    CourseReleaseSnapshotterAlchemy,
+from learnic.infrastructure.persistence.adapters.note_release import (
+    NoteReleaseBlockGatewayAlchemy,
+    NoteReleaseMapperAlchemy,
+    NoteReleaseReaderAlchemy,
+    NoteReleaseSnapshotterAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.billing import (
     AuthorActiveFilesReaderAlchemy,
@@ -1095,41 +1163,53 @@ class GatewaysProvider(Provider):
         EnrollmentReaderAlchemy,
         provides=EnrollmentReader,
     )
-    course_module_gateway = provide(
-        CourseModuleMapperAlchemy,
-        provides=CourseModuleGateway,
+    note_module_gateway = provide(
+        NoteModuleMapperAlchemy,
+        provides=NoteModuleGateway,
     )
-    course_lesson_gateway = provide(
-        CourseLessonMapperAlchemy,
-        provides=CourseLessonGateway,
+    note_lesson_gateway = provide(
+        NoteLessonMapperAlchemy,
+        provides=NoteLessonGateway,
     )
-    course_content_reader = provide(
-        CourseContentReaderAlchemy,
-        provides=CourseContentReader,
+    note_content_reader = provide(
+        NoteContentReaderAlchemy,
+        provides=NoteContentReader,
     )
     lesson_block_gateway = provide(
         LessonBlockGatewayAlchemy,
         provides=LessonBlockGateway,
     )
-    course_release_gateway = provide(
-        CourseReleaseMapperAlchemy,
-        provides=CourseReleaseGateway,
+    blog_post_gateway = provide(
+        BlogPostMapperAlchemy,
+        provides=BlogPostGateway,
     )
-    course_release_snapshotter = provide(
-        CourseReleaseSnapshotterAlchemy,
-        provides=CourseReleaseSnapshotter,
+    blog_post_reader = provide(
+        BlogPostReaderAlchemy,
+        provides=BlogPostReader,
     )
-    course_release_reader = provide(
-        CourseReleaseReaderAlchemy,
-        provides=CourseReleaseReader,
+    blog_post_block_gateway = provide(
+        BlogPostBlockGatewayAlchemy,
+        provides=BlogPostBlockGateway,
     )
-    course_release_block_gateway = provide(
-        CourseReleaseBlockGatewayAlchemy,
-        provides=CourseReleaseBlockGateway,
+    note_release_gateway = provide(
+        NoteReleaseMapperAlchemy,
+        provides=NoteReleaseGateway,
     )
-    course_draft_resetter = provide(
-        CourseDraftResetterAlchemy,
-        provides=CourseDraftResetter,
+    note_release_snapshotter = provide(
+        NoteReleaseSnapshotterAlchemy,
+        provides=NoteReleaseSnapshotter,
+    )
+    note_release_reader = provide(
+        NoteReleaseReaderAlchemy,
+        provides=NoteReleaseReader,
+    )
+    note_release_block_gateway = provide(
+        NoteReleaseBlockGatewayAlchemy,
+        provides=NoteReleaseBlockGateway,
+    )
+    note_draft_resetter = provide(
+        NoteDraftResetterAlchemy,
+        provides=NoteDraftResetter,
     )
     role_gateway = provide(
         RoleMapperAlchemy,
@@ -1456,7 +1536,7 @@ class EnrollmentStrategiesProvider(Provider):
     new ``EnrollmentKind`` means:
 
     1. Write a new ``EnrollmentStrategy`` impl alongside
-       ``CourseEnrollmentStrategy``.
+       ``NoteEnrollmentStrategy``.
     2. Add it to ``_DECLARED_STRATEGIES`` in
        ``application/common/enrollment/strategies.py`` (module-load
        fail-fast).
@@ -1469,16 +1549,16 @@ class EnrollmentStrategiesProvider(Provider):
 
     scope = Scope.REQUEST
 
-    course_strategy = provide(CourseEnrollmentStrategy)
+    note_strategy = provide(NoteEnrollmentStrategy)
     enrollment_service = provide(EnrollmentService)
 
     @provide
     def strategies(
         self,
-        course: CourseEnrollmentStrategy,
+        note: NoteEnrollmentStrategy,
     ) -> Mapping[EnrollmentKind, EnrollmentStrategy]:
         mapping: dict[EnrollmentKind, EnrollmentStrategy] = {
-            EnrollmentKind.COURSE: course,
+            EnrollmentKind.NOTE: note,
         }
         missing = set(EnrollmentKind) - mapping.keys()
         if missing:
@@ -1500,7 +1580,7 @@ class InteractorsProvider(Provider):
 
     grant_admin = provide(GrantAdminCommandHandler)
     ban_user = provide(BanUserCommandHandler)
-    admin_delete_course = provide(AdminDeleteCourseCommandHandler)
+    admin_delete_note = provide(AdminDeleteNoteCommandHandler)
     get_admin_stats = provide(GetAdminStatsQueryHandler)
     get_admin_metric_series = provide(GetAdminMetricSeriesQueryHandler)
 
@@ -1553,7 +1633,7 @@ class InteractorsProvider(Provider):
     )
     list_user_experiences = provide(ListUserExperiencesQueryHandler)
 
-    add_course_product = provide(AddCourseProductCommandHandler)
+    add_note_product = provide(AddNoteProductCommandHandler)
     change_product_name = provide(ChangeProductNameCommandHandler)
     change_product_description = provide(
         ChangeProductDescriptionCommandHandler,
@@ -1591,24 +1671,23 @@ class InteractorsProvider(Provider):
     get_product_qa_list = provide(GetProductQAListQueryHandler)
 
     enroll_into_product = provide(EnrollIntoProductCommandHandler)
-    update_progress = provide(UpdateProgressCommandHandler)
     complete_enrollment = provide(CompleteEnrollmentCommandHandler)
-    repin_course_enrollment = provide(RePinCourseEnrollmentCommandHandler)
+    repin_note_enrollment = provide(RePinNoteEnrollmentCommandHandler)
     get_product_enrollments = provide(GetProductEnrollmentsQueryHandler)
     get_student_enrollments = provide(GetStudentEnrollmentsQueryHandler)
 
-    add_course_module = provide(AddCourseModuleCommandHandler)
-    rename_course_module = provide(RenameCourseModuleCommandHandler)
-    update_course_module_description = provide(
-        UpdateCourseModuleDescriptionCommandHandler,
+    add_note_module = provide(AddNoteModuleCommandHandler)
+    rename_note_module = provide(RenameNoteModuleCommandHandler)
+    update_note_module_description = provide(
+        UpdateNoteModuleDescriptionCommandHandler,
     )
-    reorder_course_modules = provide(ReorderCourseModulesCommandHandler)
-    delete_course_module = provide(DeleteCourseModuleCommandHandler)
-    add_course_lesson = provide(AddCourseLessonCommandHandler)
-    rename_course_lesson = provide(RenameCourseLessonCommandHandler)
-    move_course_lesson = provide(MoveCourseLessonCommandHandler)
-    reorder_course_lessons = provide(ReorderCourseLessonsCommandHandler)
-    delete_course_lesson = provide(DeleteCourseLessonCommandHandler)
+    reorder_note_modules = provide(ReorderNoteModulesCommandHandler)
+    delete_note_module = provide(DeleteNoteModuleCommandHandler)
+    add_note_lesson = provide(AddNoteLessonCommandHandler)
+    rename_note_lesson = provide(RenameNoteLessonCommandHandler)
+    move_note_lesson = provide(MoveNoteLessonCommandHandler)
+    reorder_note_lessons = provide(ReorderNoteLessonsCommandHandler)
+    delete_note_lesson = provide(DeleteNoteLessonCommandHandler)
     add_html_block = provide(AddHtmlBlockCommandHandler)
     add_katex_block = provide(AddKatexBlockCommandHandler)
     add_rutube_video_block = provide(AddRutubeVideoBlockCommandHandler)
@@ -1641,8 +1720,8 @@ class InteractorsProvider(Provider):
     )
     entitlement_service = provide(EntitlementService)
     get_my_subscription = provide(GetMySubscriptionQueryHandler)
-    get_course_storage_remaining = provide(
-        GetCourseStorageRemainingQueryHandler,
+    get_note_storage_remaining = provide(
+        GetNoteStorageRemainingQueryHandler,
     )
     reconcile_storage_quotas = provide(
         ReconcileStorageQuotasCommandHandler,
@@ -1654,15 +1733,38 @@ class InteractorsProvider(Provider):
     reveal_block_answer = provide(RevealBlockAnswerCommandHandler)
     reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
     delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
-    get_course_draft = provide(GetCourseDraftQueryHandler)
-    get_lesson_block = provide(GetLessonBlockQueryHandler)
-    get_course_content = provide(GetCourseContentQueryHandler)
-    create_course_release = provide(CreateCourseReleaseCommandHandler)
-    list_course_releases = provide(ListCourseReleasesQueryHandler)
-    get_course_release_content = provide(
-        GetCourseReleaseContentQueryHandler,
+    get_note_draft = provide(GetNoteDraftQueryHandler)
+
+    # --- blog ---
+    create_blog_post = provide(CreateBlogPostCommandHandler)
+    rename_blog_post = provide(RenameBlogPostCommandHandler)
+    change_blog_post_slug = provide(ChangeBlogPostSlugCommandHandler)
+    publish_blog_post = provide(PublishBlogPostCommandHandler)
+    unpublish_blog_post = provide(UnpublishBlogPostCommandHandler)
+    delete_blog_post = provide(DeleteBlogPostCommandHandler)
+    add_blog_html_block = provide(AddBlogHtmlBlockCommandHandler)
+    add_blog_image_block = provide(AddBlogImageBlockCommandHandler)
+    add_blog_video_block = provide(AddBlogVideoBlockCommandHandler)
+    update_blog_html_block = provide(UpdateBlogHtmlBlockCommandHandler)
+    update_blog_image_block = provide(UpdateBlogImageBlockCommandHandler)
+    update_blog_video_block = provide(UpdateBlogVideoBlockCommandHandler)
+    delete_blog_post_block = provide(DeleteBlogPostBlockCommandHandler)
+    reorder_blog_post_blocks = provide(ReorderBlogPostBlocksCommandHandler)
+    get_blog_post = provide(GetBlogPostQueryHandler)
+    get_blog_post_block = provide(GetBlogPostBlockQueryHandler)
+    get_published_blog_post_by_slug = provide(
+        GetPublishedBlogPostBySlugQueryHandler,
     )
-    reset_course_draft = provide(ResetCourseDraftCommandHandler)
+    list_blog_posts = provide(ListBlogPostsQueryHandler)
+    list_published_blog_posts = provide(ListPublishedBlogPostsQueryHandler)
+    get_lesson_block = provide(GetLessonBlockQueryHandler)
+    get_note_content = provide(GetNoteContentQueryHandler)
+    create_note_release = provide(CreateNoteReleaseCommandHandler)
+    list_note_releases = provide(ListNoteReleasesQueryHandler)
+    get_note_release_content = provide(
+        GetNoteReleaseContentQueryHandler,
+    )
+    reset_note_draft = provide(ResetNoteDraftCommandHandler)
 
     create_custom_role = provide(CreateCustomRoleCommandHandler)
     update_custom_role = provide(UpdateCustomRoleCommandHandler)

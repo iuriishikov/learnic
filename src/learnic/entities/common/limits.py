@@ -27,6 +27,14 @@ class LimitedResource(StrEnum):
     LESSON_BLOCK = "lesson_block"
     PRODUCT = "product"
     USER_EXPERIENCE = "user_experience"
+    NOTE_MODULE = "note_module"
+    NOTE_LESSON = "note_lesson"
+    NOTE_RELEASE = "note_release"
+    PRODUCT_QA = "product_qa"
+    ROLE = "role"
+    PRODUCT_COLLABORATION = "product_collaboration"
+    PUSH_SUBSCRIPTION = "push_subscription"
+    BLOG_POST_BLOCK = "blog_post_block"
 
 
 class ResourceLimitReachedError(DomainError):
@@ -70,3 +78,19 @@ class ResourceLimit:
 LESSON_BLOCK_LIMIT: Final = ResourceLimit(LimitedResource.LESSON_BLOCK, 200)
 PRODUCT_LIMIT: Final = ResourceLimit(LimitedResource.PRODUCT, 200)
 USER_EXPERIENCE_LIMIT: Final = ResourceLimit(LimitedResource.USER_EXPERIENCE, 50)
+NOTE_MODULE_LIMIT: Final = ResourceLimit(LimitedResource.NOTE_MODULE, 200)
+NOTE_LESSON_LIMIT: Final = ResourceLimit(LimitedResource.NOTE_LESSON, 200)
+NOTE_RELEASE_LIMIT: Final = ResourceLimit(
+    LimitedResource.NOTE_RELEASE, 100,
+)
+PRODUCT_QA_LIMIT: Final = ResourceLimit(LimitedResource.PRODUCT_QA, 100)
+ROLE_LIMIT: Final = ResourceLimit(LimitedResource.ROLE, 100)
+PRODUCT_COLLABORATION_LIMIT: Final = ResourceLimit(
+    LimitedResource.PRODUCT_COLLABORATION, 200,
+)
+PUSH_SUBSCRIPTION_LIMIT: Final = ResourceLimit(
+    LimitedResource.PUSH_SUBSCRIPTION, 20,
+)
+BLOG_POST_BLOCK_LIMIT: Final = ResourceLimit(
+    LimitedResource.BLOG_POST_BLOCK, 200,
+)

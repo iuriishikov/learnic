@@ -42,6 +42,7 @@ from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
 )
+from learnic.entities.common.limits import PRODUCT_COLLABORATION_LIMIT
 from learnic.entities.notification.models import Notification
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.constants import (
@@ -181,6 +182,11 @@ class InviteCollaboratorByEmailCommandHandler:
                     EMAIL_INVITE_RATE_LIMIT_WINDOW.total_seconds(),
                 ),
             )
+        PRODUCT_COLLABORATION_LIMIT.ensure(
+            await self._collab_gateway.count_active_or_pending_for_product(
+                data.product_id,
+            ),
+        )
         grants = await self._resolver.resolve(
             data.product_id,
             data.grants,

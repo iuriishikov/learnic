@@ -117,15 +117,15 @@ emitted while disconnected are lost by design.
 
 Read-only push of every per-product delta — product metadata,
 cover, status, webinar defaults, Q&A, collaboration lifecycle,
-role catalogue, **and** course-content edits (modules, lessons,
-blocks, releases, draft reset) when the product is a course.
+role catalogue, **and** note-content edits (modules, lessons,
+blocks, releases, draft reset) when the product is a note.
 Subscribers must hold `read_product` on the target product —
 the product owner (short-circuited as having every permission)
 and any active collaborator whose grants transitively include
 `read_product` (every editor / manager permission does).
 Non-authorised callers get `4403`. Webinar products see product
-events only; course-content `kind` values are emitted exclusively
-for products that carry the `has_course_content` capability.
+events only; note-content `kind` values are emitted exclusively
+for products that carry the `has_note_content` capability.
 Cohorts (and their schedules / sessions) are intentionally not
 covered yet.
 
@@ -133,7 +133,7 @@ Bootstrap by fetching every REST resource the SPA renders from
 the channel before opening the socket: `GET /products/{id}`,
 `GET /products/{id}/qa` (if Q&A is shown),
 `GET /products/{id}/collaborations` (if the team tab is shown),
-and — for courses only —
+and — for notes only —
 `GET /products/{id}/content/draft` and
 `GET /products/{id}/content/releases`.
 
@@ -246,7 +246,7 @@ reaches a collaborator who only has editor access. Expiry of
 stale pending invites is swept by a daily cron and is NOT
 broadcast — the SPA discovers purged invites on its next refetch.
 
-**Content `kind` values** (`ContentPayload` union — courses only):
+**Content `kind` values** (`ContentPayload` union — notes only):
 
 - Module: `module_added`, `module_renamed`,
   `module_description_updated`, `modules_reordered`, `module_deleted`.
@@ -271,7 +271,7 @@ Concretely:
   array.
 - `lesson_added` → `{"module_id", "lesson": {"oid", "title",
   "position", "blocks": []}}`. `module_id` is the parent; `lesson`
-  matches `CourseDraftLessonSchema`.
+  matches `NoteDraftLessonSchema`.
 - `lesson_moved` → `{"lesson_id", "from_module_id", "to_module_id",
   "position"}`. `from_module_id` is the lesson's previous module so
   the SPA can locate the lesson in its draft cache without a tree
@@ -653,8 +653,8 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "(`GET /admin/stats`), banning a user "
             "(`POST /admin/users/{user_id}/ban`, which also revokes "
             "every active session — there is no user-deletion "
-            "counterpart), and permanently deleting a course "
-            "(`DELETE /admin/courses/{course_id}`, irreversible and "
+            "counterpart), and permanently deleting a note "
+            "(`DELETE /admin/notes/{note_id}`, irreversible and "
             "allowed in any status, unlike the author-facing "
             "draft-only delete)."
         ),
@@ -665,6 +665,28 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "User profile reads and edits. `GET /users/{user_id}` is "
             "public; everything under `/users/me/...` requires the "
             "`accessCookie` security scheme."
+        ),
+    },
+    {
+        "name": "BlogPosts",
+        "description": (
+            "Admin-authored blog. Reads are public and split by URL "
+            "space: `GET /blog/posts` (paginated index of **published** "
+            "posts, newest first, total in the `X-Total-Count` header) "
+            "and `GET /blog/posts/{slug}` (a single published post with "
+            "its ordered blocks). Every write — and reads in any status "
+            "— live under `/admin/blog/posts`, require the `accessCookie` "
+            "scheme **and** the platform-admin flag (non-admins get 403 "
+            "`NotAdmin`), and cover the full post lifecycle "
+            "(create draft, rename, change slug, publish/unpublish, "
+            "delete) plus block management. A post body is an ordered "
+            "list of blocks of three kinds — `image`, `html`, `video` — "
+            "managed under `/admin/blog/posts/{post_id}/blocks/...`. "
+            "Image and video blocks are `multipart/form-data` uploads "
+            "(content type must start with `image/` / `video/`, else "
+            "415); read views carry short-lived presigned media URLs. "
+            "Block create/update return the full block; reorder takes "
+            "the complete id permutation (else 409 `InvalidReorder`)."
         ),
     },
     {
@@ -710,9 +732,9 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
     {
         "name": "Products",
         "description": (
-            "User-owned learning products — courses and webinars. "
+            "User-owned learning products — notes and webinars. "
             "`GET /products` (catalog) and `GET /products/{id}` are "
-            "public; `POST /products/courses`, "
+            "public; `POST /products/notes`, "
             "`POST /products/webinars`, `GET /products/mine`, all "
             "PATCH/POST/DELETE state-changing endpoints, require the "
             "`accessCookie` scheme. Mutations are author-only; "
@@ -735,7 +757,7 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "are restricted to either the parent product's author or "
             "the cohort's `host_id` (HTTP 403 `NotResourceOwner` "
             "otherwise). `POST /products/{id}/cohorts` requires a "
-            "webinar product (HTTP 409 `NotAWebinar` for courses)."
+            "webinar product (HTTP 409 `NotAWebinar` for notes)."
         ),
     },
     {
@@ -764,42 +786,43 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
     {
         "name": "Enrollments",
         "description": (
-            "Student enrollments — currently course-only. "
-            "Polymorphic on `kind` (`course`); the kind-specific "
-            "body lives in `details` (course: `release_id`, "
+            "Student enrollments — currently note-only. "
+            "Polymorphic on `kind` (`note`); the kind-specific "
+            "body lives in `details` (note: `release_id`, "
             "`progress_percent`, `completed_at`). `product_id` and "
             "`student_id` live on the base shape. `status` has two "
             "values: `active` (default) and `revoked` "
-            "(author/admin removal of access). Course completion "
+            "(author/admin removal of access). Note completion "
             "lives on `details.completed_at` and is orthogonal to "
             "`status` — a completed enrollment is still `active`. "
             "Create: `POST /products/{product_id}/enrollments` "
             "(self-enroll; product must be `PUBLISHED` — 409 "
             "`CannotEnrollInUnpublishedProduct` otherwise; 409 on "
             "`ProductDoesNotSupport`, `AlreadyEnrolled`, or "
-            "`CannotEnrollInUnreleasedCourse`). Admin grants live on "
+            "`CannotEnrollInUnreleasedNote`). Admin grants live on "
             "an internal handler and do not expose an HTTP route. "
             "Caller-scoped: `GET /users/me/enrollments`. "
             "List by parent: "
-            "`GET /courses/{course_id}/enrollments` (author/"
+            "`GET /notes/{note_id}/enrollments` (author/"
             "`READ_PRODUCT`). "
             "Item ops: "
-            "`PATCH /courses/{course_id}/enrollments/{id}/progress` "
-            "is student-only and auto-marks-completed at 100; "
-            "`/complete` is author-only."
+            "`POST /notes/{note_id}/enrollments/{id}/complete` "
+            "is author-only (marks `completed_at`); "
+            "`PATCH .../{id}/release` re-pins the enrollment to "
+            "another release (author-only, `MANAGE_RELEASES`)."
         ),
     },
     {
-        "name": "CourseReleases",
+        "name": "NoteReleases",
         "description": (
-            "Immutable releases of a course product. A release "
+            "Immutable releases of a note product. A release "
             "snapshots the current draft (modules + lessons + "
             "blocks) into mirror tables, pinning every row to the "
             "new release id. Creating the **first** release also "
-            "flips the product's status to ``PUBLISHED`` — courses "
+            "flips the product's status to ``PUBLISHED`` — notes "
             "are not published any other way (the standalone "
-            "publish endpoint refuses for courses with HTTP 409 "
-            "``CannotPublishCourseDirectly``). Versions follow "
+            "publish endpoint refuses for notes with HTTP 409 "
+            "``CannotPublishNoteDirectly``). Versions follow "
             "semver: from the previous ``v(M.m.p)``, ``patch`` → "
             "``v(M.m.p+1)``, ``minor`` → ``v(M.m+1.0)``, ``major`` "
             "→ ``v(M+1.0.0)``. The first release starts from the "
@@ -808,18 +831,18 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
-        "name": "CourseContent",
+        "name": "NoteContent",
         "description": (
-            "Author-side editing of course content — modules and "
-            "lessons inside a course product. All endpoints under "
+            "Author-side editing of note content — modules and "
+            "lessons inside a note product. All endpoints under "
             "`/products/{product_id}/...` and "
             "`/products/{product_id}/lessons/...` require the "
             "`accessCookie` scheme and are author-only (HTTP 403 "
             "`NotResourceOwner` otherwise). Operations refuse on "
-            "webinar products with HTTP 409 `NotACourse`. Content "
+            "webinar products with HTTP 409 `NotANote`. Content "
             "lives in the product's draft workspace; releases are "
             "introduced in a later phase and snapshot the draft. "
-            "Real-time deltas of course-content edits flow over "
+            "Real-time deltas of note-content edits flow over "
             "the unified product channel "
             "`WS /products/{product_id}/events` — see the "
             "**WebSocket channels** section in the API description."
@@ -896,7 +919,7 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
     {
         "name": "Gifts",
         "description": (
-            "Gift product (course) access to another person. The "
+            "Gift product (note) access to another person. The "
             "gifter issues a gift via "
             "`POST /products/{id}/gifts/by-user` (registered user) or "
             "`POST /products/{id}/gifts/by-email` (possibly "
@@ -909,7 +932,7 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "POST to `POST /gifts/{id}/accept-by-token` / "
             "`/gifts/{id}/decline`; the in-app card POSTs to the "
             "token-less `POST /gifts/{id}/accept`. Accepting creates "
-            "the course enrollment; the gifter is notified of the "
+            "the note enrollment; the gifter is notified of the "
             "outcome. The gifter may cancel a still-pending gift with "
             "`DELETE /gifts/{id}`. Expired pending gifts are purged by "
             "a nightly job and cannot be accepted. Requires "

@@ -2,7 +2,7 @@ from enum import StrEnum
 
 
 class ProductType(StrEnum):
-    COURSE = "course"
+    NOTE = "note"
 
 
 class ProductStatus(StrEnum):

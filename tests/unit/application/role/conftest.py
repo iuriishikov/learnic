@@ -70,6 +70,7 @@ def fake_role_reader() -> AsyncMock:
     reader.for_product = AsyncMock(return_value=[])
     reader.max_position_in_product = AsyncMock(return_value=400)
     reader.min_position_for_user = AsyncMock(return_value=None)
+    reader.count_for_product = AsyncMock(return_value=0)
     return reader
 
 
@@ -87,7 +88,7 @@ def author_id() -> UserID:
 
 @pytest.fixture
 def product(author_id: UserID) -> Product:
-    return Product.create_course(
+    return Product.create_note(
         author_id=author_id,
         name=ProductTitle("Demo"),
     )

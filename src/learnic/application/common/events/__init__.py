@@ -1,7 +1,7 @@
 """Generic per-product event channel primitives.
 
 A WebSocket-backed event channel — the abstraction that powers
-both the course-content channel
+both the note-content channel
 (:mod:`learnic.application.common.collaboration`) and the
 product-metadata channel
 (:mod:`learnic.application.common.product_events`) — is fully

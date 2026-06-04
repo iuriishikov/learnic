@@ -36,7 +36,7 @@ class AcceptGiftInAppCommandHandler:
 
     The in-app channel is itself authenticated as the recipient, so
     no token is needed — addressee identity is the only gate. Creates
-    the course enrollment and notifies the gifter, mirroring
+    the note enrollment and notifies the gifter, mirroring
     :class:`AcceptGiftByTokenCommandHandler`.
     """
 

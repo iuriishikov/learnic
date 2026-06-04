@@ -65,7 +65,7 @@ class EnrollmentDetails(StatisticDetails):
     Recorded when a student is enrolled into a product through any
     path (self-enroll, accepted gift, admin grant). The enrolling
     student is the actor on the parent row; ``product_id`` is the
-    course they joined, so enrollments can be broken down per
+    note they joined, so enrollments can be broken down per
     product.
     """
 

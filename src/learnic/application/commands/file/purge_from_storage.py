@@ -39,7 +39,7 @@ import logging
 from dataclasses import dataclass
 from typing import Final, final
 
-from learnic.application.common.persistence.course_block import (
+from learnic.application.common.persistence.note_block import (
     LessonBlockGateway,
 )
 from learnic.application.common.persistence.file import FilesGateway
@@ -103,6 +103,8 @@ class PurgeFileFromStorageCommandHandler:
             extra={
                 "file_id": str(data.file_id),
                 "bucket": file.bucket.value,
-                "name": file.storage_name.value,
+                # NB: not "name" — that key is reserved by logging.LogRecord
+                # (the logger name) and raises KeyError in makeRecord.
+                "storage_name": file.storage_name.value,
             },
         )

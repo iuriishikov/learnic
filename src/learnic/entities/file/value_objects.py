@@ -48,7 +48,7 @@ class FileSize(ValueObject):
 
     Only the "positive integer" invariant lives here. Upper bounds are
     enforced **per-call-site** at the HTTP boundary via
-    :func:`learnic.presentation.http.common.uploads.read_upload` —
+    :func:`learnic.presentation.http.common.uploads.open_upload` —
     that's where the policy "an avatar caps at 5 MB but a lesson video
     can be 500 MB" belongs, and a single global ``MAX_FILE_SIZE_BYTES``
     here would hide the choice from the caller.

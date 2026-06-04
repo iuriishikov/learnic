@@ -112,10 +112,10 @@ def other_user_id() -> UserID:
 
 
 @pytest.fixture
-def course_product(author_id: UserID) -> Product:
-    return Product.create_course(
+def note_product(author_id: UserID) -> Product:
+    return Product.create_note(
         author_id=author_id,
-        name=ProductTitle("Original course"),
+        name=ProductTitle("Original note"),
         description=ProductDescription("<p>Original.</p>"),
         total_duration_in_hours=DurationHours(20),
     )

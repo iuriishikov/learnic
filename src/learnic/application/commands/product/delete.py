@@ -35,7 +35,7 @@ class DeleteProductCommandHandler:
     it would erase commercial history. Authors must archive
     instead — permanent removal of any product regardless of
     status is an admin-only operation
-    (``AdminDeleteCourseCommandHandler``).
+    (``AdminDeleteNoteCommandHandler``).
     """
 
     def __init__(

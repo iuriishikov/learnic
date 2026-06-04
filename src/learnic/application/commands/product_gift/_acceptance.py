@@ -10,7 +10,7 @@ time.
 
 from learnic.application.common.enrollment.service import EnrollmentService
 from learnic.application.common.enrollment.strategies import (
-    CourseEnrollmentTarget,
+    NoteEnrollmentTarget,
 )
 from learnic.application.common.errors import (
     AlreadyEnrolledError,
@@ -74,7 +74,7 @@ async def finalize_acceptance(
     try:
         await enrollment_service.enroll(
             student_id=actor_id,
-            target=CourseEnrollmentTarget(product_id=gift.product_id),
+            target=NoteEnrollmentTarget(product_id=gift.product_id),
         )
     except AlreadyEnrolledError:
         await transaction.commit()

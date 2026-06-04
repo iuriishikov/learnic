@@ -12,12 +12,17 @@ from learnic.application.common.persistence.product_gift import (
     ProductGiftReader,
     ProductGiftView,
 )
-from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_gift.enums import GiftStatus
 from learnic.entities.product_gift.ids import ProductGiftID
 from learnic.entities.product_gift.models import ProductGift
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.adapters._embedded_user import (
+    embedded_user_columns,
+    user_view_from_row,
+    user_view_from_row_optional,
+)
+from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.product_gift import (
     product_gifts_table,
@@ -110,28 +115,10 @@ class ProductGiftMapperAlchemy(ProductGiftGateway):
 
 _recipient_users = aliased(users_table, name="recipient")
 _gifter_users = aliased(users_table, name="gifter")
-
-
-def _row_to_recipient(row: sa.Row[Any]) -> UserRefView | None:
-    if row.recipient_oid is None:
-        return None
-    return UserRefView(
-        oid=UserID(row.recipient_oid),
-        email=row.recipient_email,
-        first_name=row.recipient_first_name,
-        last_name=row.recipient_last_name,
-        patronymic=row.recipient_patronymic,
-    )
-
-
-def _row_to_gifter(row: sa.Row[Any]) -> UserRefView:
-    return UserRefView(
-        oid=UserID(row.gifter_oid),
-        email=row.gifter_email,
-        first_name=row.gifter_first_name,
-        last_name=row.gifter_last_name,
-        patronymic=row.gifter_patronymic,
-    )
+_recipient_avatar = files_table.alias("recipient_avatar")
+_recipient_cover = files_table.alias("recipient_cover")
+_gifter_avatar = files_table.alias("gifter_avatar")
+_gifter_cover = files_table.alias("gifter_cover")
 
 
 class ProductGiftReaderAlchemy(ProductGiftReader):
@@ -195,16 +182,15 @@ class ProductGiftReaderAlchemy(ProductGiftReader):
             product_gifts_table.c.declined_at,
             product_gifts_table.c.revoked_at,
             products_table.c.name.label("product_name"),
-            _recipient_users.c.oid.label("recipient_oid"),
-            _recipient_users.c.email.label("recipient_email"),
-            _recipient_users.c.first_name.label("recipient_first_name"),
-            _recipient_users.c.last_name.label("recipient_last_name"),
-            _recipient_users.c.patronymic.label("recipient_patronymic"),
-            _gifter_users.c.oid.label("gifter_oid"),
-            _gifter_users.c.email.label("gifter_email"),
-            _gifter_users.c.first_name.label("gifter_first_name"),
-            _gifter_users.c.last_name.label("gifter_last_name"),
-            _gifter_users.c.patronymic.label("gifter_patronymic"),
+            *embedded_user_columns(
+                _recipient_users,
+                _recipient_avatar,
+                _recipient_cover,
+                "recipient",
+            ),
+            *embedded_user_columns(
+                _gifter_users, _gifter_avatar, _gifter_cover, "gifter",
+            ),
         ).select_from(
             product_gifts_table.join(
                 products_table,
@@ -215,8 +201,38 @@ class ProductGiftReaderAlchemy(ProductGiftReader):
                 product_gifts_table.c.invited_by == _gifter_users.c.oid,
             )
             .outerjoin(
+                _gifter_avatar,
+                sa.and_(
+                    _gifter_users.c.avatar_file_id == _gifter_avatar.c.oid,
+                    _gifter_avatar.c.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(
+                _gifter_cover,
+                sa.and_(
+                    _gifter_users.c.cover_file_id == _gifter_cover.c.oid,
+                    _gifter_cover.c.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(
                 _recipient_users,
                 product_gifts_table.c.recipient_id == _recipient_users.c.oid,
+            )
+            .outerjoin(
+                _recipient_avatar,
+                sa.and_(
+                    _recipient_users.c.avatar_file_id
+                    == _recipient_avatar.c.oid,
+                    _recipient_avatar.c.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(
+                _recipient_cover,
+                sa.and_(
+                    _recipient_users.c.cover_file_id
+                    == _recipient_cover.c.oid,
+                    _recipient_cover.c.deleted_at.is_(None),
+                ),
             ),
         )
 
@@ -225,10 +241,10 @@ class ProductGiftReaderAlchemy(ProductGiftReader):
             oid=ProductGiftID(row.oid),
             product_id=ProductID(row.product_id),
             product_name=row.product_name,
-            recipient=_row_to_recipient(row),
+            recipient=user_view_from_row_optional(row, "recipient"),
             invited_email=row.invited_email,
             status=row.status,
-            gifter=_row_to_gifter(row),
+            gifter=user_view_from_row(row, "gifter"),
             invite_expires_at=row.invite_expires_at,
             created_at=row.created_at,
             accepted_at=row.accepted_at,

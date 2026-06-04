@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.file import FileMeta
 from learnic.application.common.persistence.product import (
     ProductGateway,
     ProductReader,
@@ -14,9 +13,7 @@ from learnic.application.common.persistence.product import (
     RecommendationCandidate,
 )
 from learnic.application.common.persistence.tag import TagView
-from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.enrollment.enums import EnrollmentStatus
-from learnic.entities.file.ids import FileID
 from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
@@ -25,6 +22,12 @@ from learnic.entities.product_collaboration.enums import (
 )
 from learnic.entities.tag.ids import TagID
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.adapters._embedded_user import (
+    embedded_user_columns,
+    file_columns,
+    file_from_row,
+    user_view_from_row,
+)
 from learnic.infrastructure.persistence.models.enrollment import (
     enrollments_table,
 )
@@ -69,24 +72,14 @@ def _row_to_view(
         name=row.name,
         description=row.description,
         total_duration_in_hours=row.total_duration_in_hours,
-        author=UserRefView(
-            oid=UserID(row.author_oid),
-            email=row.author_email,
-            first_name=row.author_first_name,
-            last_name=row.author_last_name,
-            patronymic=row.author_patronymic,
-        ),
-        cover=(
-            FileMeta(
-                oid=FileID(row.cover_oid),
-                storage_name=row.cover_storage_name,
-                bucket=row.cover_bucket,
-                content_type=row.cover_content_type,
-                size_bytes=row.cover_size_bytes,
-            )
-            if row.cover_oid is not None
-            else None
-        ),
+        # Author embedded as the unified full UserView (avatar/cover
+        # FileMeta resolved to presigned URLs by resolve_user_output at
+        # the query-handler boundary). Profile-only fields the product
+        # join does not carry (description / contact links) are null —
+        # the embedded author shows name + media, the full profile lives
+        # at GET /users/{id}.
+        author=user_view_from_row(row, "author"),
+        cover=file_from_row(row, "cover"),
         tags=tags,
         published_at=row.published_at,
         created_at=row.created_at,
@@ -96,6 +89,8 @@ def _row_to_view(
 
 def _select_with_joins() -> sa.Select[Any]:
     cover = files_table.alias("cover")
+    author_avatar = files_table.alias("author_avatar")
+    author_cover = files_table.alias("author_cover")
     return sa.select(
         products_table.c.oid,
         products_table.c.type,
@@ -107,16 +102,10 @@ def _select_with_joins() -> sa.Select[Any]:
         products_table.c.published_at,
         products_table.c.created_at,
         products_table.c.updated_at,
-        cover.c.oid.label("cover_oid"),
-        cover.c.storage_name.label("cover_storage_name"),
-        cover.c.bucket.label("cover_bucket"),
-        cover.c.content_type.label("cover_content_type"),
-        cover.c.size_bytes.label("cover_size_bytes"),
-        users_table.c.oid.label("author_oid"),
-        users_table.c.email.label("author_email"),
-        users_table.c.first_name.label("author_first_name"),
-        users_table.c.last_name.label("author_last_name"),
-        users_table.c.patronymic.label("author_patronymic"),
+        *file_columns(cover, "cover"),
+        *embedded_user_columns(
+            users_table, author_avatar, author_cover, "author",
+        ),
     ).select_from(
         products_table.join(
             users_table,
@@ -127,6 +116,20 @@ def _select_with_joins() -> sa.Select[Any]:
             sa.and_(
                 products_table.c.cover_file_id == cover.c.oid,
                 cover.c.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            author_avatar,
+            sa.and_(
+                users_table.c.avatar_file_id == author_avatar.c.oid,
+                author_avatar.c.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            author_cover,
+            sa.and_(
+                users_table.c.cover_file_id == author_cover.c.oid,
+                author_cover.c.deleted_at.is_(None),
             ),
         ),
     )

@@ -9,9 +9,9 @@ Two routers ship here:
 * ``router`` — ``/users/me/subscription`` for the caller-scoped read
   (CLAUDE.md rule 14: "everything about the authenticated user" is
   namespaced under ``/users/me/...``).
-* ``course_router`` — ``/courses/{course_id}/storage-remaining``
-  nests under the parent course (rule 14: sub-resources mirror the
-  aggregate tree). The endpoint reports the *course author's* free
+* ``note_router`` — ``/notes/{note_id}/storage-remaining``
+  nests under the parent note (rule 14: sub-resources mirror the
+  aggregate tree). The endpoint reports the *note author's* free
   bytes so a collaborator opening an editor sees the same number
   the author would; both share one quota pool.
 """
@@ -24,10 +24,10 @@ from fastapi import Depends, Path, Request
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from learnic.application.queries.billing.get_course_storage_remaining import (
-    CourseStorageRemainingView,
-    GetCourseStorageRemainingQuery,
-    GetCourseStorageRemainingQueryHandler,
+from learnic.application.queries.billing.get_note_storage_remaining import (
+    NoteStorageRemainingView,
+    GetNoteStorageRemainingQuery,
+    GetNoteStorageRemainingQueryHandler,
 )
 from learnic.application.queries.billing.get_my_subscription import (
     GetMySubscriptionQuery,
@@ -50,15 +50,15 @@ router = ErrorAwareRouter(
     route_class=DishkaErrorAwareRoute,
 )
 
-course_router = ErrorAwareRouter(
-    prefix="/courses",
+note_router = ErrorAwareRouter(
+    prefix="/notes",
     tags=["Billing"],
     route_class=DishkaErrorAwareRoute,
 )
 
 _AUTH_SECURITY: Final = [Depends(access_cookie_scheme)]
-_COURSE_ID_PATH: Final = Path(
-    description="Target course product's UUID.",
+_NOTE_ID_PATH: Final = Path(
+    description="Target note product's UUID.",
     examples=["3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"],
 )
 
@@ -73,7 +73,7 @@ class PlanLimitsSchema(BaseModel):
     storage_bytes_max: int = Field(
         description=(
             "Maximum aggregate storage in bytes for files referenced "
-            "from the user's own courses. Files referenced from "
+            "from the user's own notes. Files referenced from "
             "multiple blocks count once."
         ),
         examples=[2147483648, 53687091200],
@@ -118,7 +118,7 @@ class StorageUsageSchema(BaseModel):
     )
 
     storage_bytes: int = Field(
-        description="Total bytes used across the caller's own courses.",
+        description="Total bytes used across the caller's own notes.",
         examples=[0, 1879048192],
     )
 
@@ -205,11 +205,11 @@ async def get_my_subscription(
     )
 
 
-class CourseStorageRemainingSchema(BaseModel):
-    """Response for ``GET /courses/{course_id}/storage-remaining``.
+class NoteStorageRemainingSchema(BaseModel):
+    """Response for ``GET /notes/{note_id}/storage-remaining``.
 
-    All four numbers describe the *course author's* quota — a
-    collaborator editing the course sees the same headroom the
+    All four numbers describe the *note author's* quota — a
+    collaborator editing the note sees the same headroom the
     author would. ``storage_bytes_remaining`` is clamped to 0; if
     the author is currently over quota (e.g. after a plan
     downgrade) the SPA still gets a non-negative integer to compare
@@ -231,27 +231,27 @@ class CourseStorageRemainingSchema(BaseModel):
 
     plan_code: str = Field(
         description=(
-            "Plan code of the **course author** — the quota owner."
+            "Plan code of the **note author** — the quota owner."
         ),
         examples=["FREE", "BETA"],
     )
     storage_bytes_max: int = Field(
         description=(
-            "Plan cap in bytes for the course author's storage pool."
+            "Plan cap in bytes for the note author's storage pool."
         ),
         examples=[2147483648],
     )
     storage_bytes_used: int = Field(
         description=(
-            "Bytes currently used across **all** of the course "
-            "author's products (not just this course). Files "
+            "Bytes currently used across **all** of the note "
+            "author's products (not just this note). Files "
             "referenced by multiple blocks count once."
         ),
         examples=[1879048192],
     )
     storage_bytes_remaining: int = Field(
         description=(
-            "How many more bytes can be uploaded into this course "
+            "How many more bytes can be uploaded into this note "
             "before the author's quota is hit. Computed as "
             "``max(0, storage_bytes_max - storage_bytes_used)``. "
             "**Informational** — the value is re-validated under "
@@ -264,53 +264,53 @@ class CourseStorageRemainingSchema(BaseModel):
     )
 
 
-@course_router.get(
-    "/{course_id}/storage-remaining",
-    summary="How many more bytes can be uploaded into this course",
-    operation_id="getCourseStorageRemaining",
+@note_router.get(
+    "/{note_id}/storage-remaining",
+    summary="How many more bytes can be uploaded into this note",
+    operation_id="getNoteStorageRemaining",
     dependencies=_AUTH_SECURITY,
-    response_model=CourseStorageRemainingSchema,
+    response_model=NoteStorageRemainingSchema,
     error_map=AUTHENTICATED_AUTHORIZED_FIELD_MAP,
 )
-async def get_course_storage_remaining(
+async def get_note_storage_remaining(
     request: Request,
-    interactor: FromDishka[GetCourseStorageRemainingQueryHandler],
+    interactor: FromDishka[GetNoteStorageRemainingQueryHandler],
     auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,
-) -> CourseStorageRemainingSchema:
-    """Report the *course author's* free storage headroom for this course.
+    note_id: UUID = _NOTE_ID_PATH,
+) -> NoteStorageRemainingSchema:
+    """Report the *note author's* free storage headroom for this note.
 
     Quota is anchored on the product author, not the actor. A
     collaborator and the author calling this endpoint on the same
-    course get the same numbers — they share one quota pool. The
-    actor must hold ``EDIT_LESSONS`` on the course (same gate as
+    note get the same numbers — they share one quota pool. The
+    actor must hold ``EDIT_LESSONS`` on the note (same gate as
     the file-block upload commands).
 
     Args:
         request: Source of the access cookie.
         interactor: Injected query handler.
         auth: Injected authenticator.
-        course_id: UUID of the course product to read for.
+        note_id: UUID of the note product to read for.
 
     Returns:
-        ``200 OK`` with :class:`CourseStorageRemainingSchema`.
+        ``200 OK`` with :class:`NoteStorageRemainingSchema`.
 
     Raises:
         InvalidTokenError: HTTP 401 — missing or denied access cookie.
-        EntityNotFoundError: HTTP 404 — no such course.
+        EntityNotFoundError: HTTP 404 — no such note.
         InsufficientPermissionsError: HTTP 403 — actor lacks
-            ``EDIT_LESSONS`` on the course.
+            ``EDIT_LESSONS`` on the note.
         FieldError: HTTP 422 — malformed input (unlikely for a
             UUID path param, mapped for completeness).
     """
     ctx = await auth.authenticate(request)
-    view: CourseStorageRemainingView = await interactor.run(
-        GetCourseStorageRemainingQuery(
+    view: NoteStorageRemainingView = await interactor.run(
+        GetNoteStorageRemainingQuery(
             actor_id=ctx.user_id,
-            course_id=ProductID(course_id),
+            note_id=ProductID(note_id),
         ),
     )
-    return CourseStorageRemainingSchema(
+    return NoteStorageRemainingSchema(
         plan_code=view.plan_code,
         storage_bytes_max=view.storage_bytes_max,
         storage_bytes_used=view.storage_bytes_used,

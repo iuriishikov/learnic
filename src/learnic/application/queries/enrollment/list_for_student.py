@@ -17,7 +17,7 @@ class GetStudentEnrollmentsQuery:
 class GetStudentEnrollmentsQueryHandler:
     """List all enrollments of the current student.
 
-    Returns both course and webinar enrollments unified —
+    Returns both note and webinar enrollments unified —
     consumers (SPA) discriminate on
     :class:`EnrollmentView.type`. Replaces the two previous
     type-specific "list mine" endpoints.

@@ -10,6 +10,7 @@ from learnic.application.common.persistence.user_experience import (
     UserExperienceGateway,
 )
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
 from learnic.entities.user_experience.ids import UserExperienceID
@@ -19,8 +20,7 @@ from learnic.entities.user_experience.ids import UserExperienceID
 class SetUserExperienceIconCommand:
     actor_id: UserID
     experience_id: UserExperienceID
-    data: bytes
-    content_type: str
+    upload: IncomingUpload
 
 
 @final
@@ -48,9 +48,8 @@ class SetUserExperienceIconCommandHandler:
             raise EntityNotFoundError(data.experience_id)
         if experience.user_id != data.actor_id:
             raise NotResourceOwnerError(data.experience_id, data.actor_id)
-        file = await self._file_uploads.upload(
-            data.data,
-            data.content_type,
+        file = await self._file_uploads.upload_stream(
+            data.upload,
             data.actor_id,
         )
         previous_file_id = experience.set_icon(file.oid)

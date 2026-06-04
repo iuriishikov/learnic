@@ -11,6 +11,7 @@ from learnic.application.common.product_events import (
     publish_product_event,
 )
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.entities.file.ids import FileID
 from learnic.entities.product.ids import ProductID
 from learnic.entities.role.permissions import Permission
@@ -21,8 +22,7 @@ from learnic.entities.user.models import UserID
 class SetProductCoverCommand:
     actor_id: UserID
     product_id: ProductID
-    data: bytes
-    content_type: str
+    upload: IncomingUpload
 
 
 @final
@@ -53,9 +53,8 @@ class SetProductCoverCommandHandler:
             Permission.EDIT_COVER,
         )
 
-        file = await self._file_uploads.upload(
-            data.data,
-            data.content_type,
+        file = await self._file_uploads.upload_stream(
+            data.upload,
             data.actor_id,
         )
         previous_file_id = product.set_cover(file.oid)

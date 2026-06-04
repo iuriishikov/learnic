@@ -113,6 +113,15 @@ class RoleReader(Protocol):
         """
         ...
 
+    async def count_for_product(self, product_id: ProductID) -> int:
+        """Return how many roles ``product_id`` already defines.
+
+        Used by ``CreateCustomRoleCommand`` to enforce
+        :data:`ROLE_LIMIT` — an abuse guard so an automated caller
+        cannot fan out unbounded role + ``role_permissions`` rows.
+        """
+        ...
+
     async def min_position_for_user(
         self,
         product_id: ProductID,

@@ -4,17 +4,20 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from learnic.infrastructure.configs import Configs, load_configs
+from learnic.infrastructure.persistence.models.blog_post import (
+    map_blog_post_table,
+)
 from learnic.infrastructure.persistence.models.enrollment import (
     map_enrollment_table,
 )
-from learnic.infrastructure.persistence.models.course_lesson import (
-    map_course_lesson_table,
+from learnic.infrastructure.persistence.models.note_lesson import (
+    map_note_lesson_table,
 )
-from learnic.infrastructure.persistence.models.course_module import (
-    map_course_module_table,
+from learnic.infrastructure.persistence.models.note_module import (
+    map_note_module_table,
 )
-from learnic.infrastructure.persistence.models.course_release import (
-    map_course_release_table,
+from learnic.infrastructure.persistence.models.note_release import (
+    map_note_release_table,
 )
 from learnic.infrastructure.persistence.models.file import map_file_table
 from learnic.infrastructure.persistence.models.product import (
@@ -55,22 +58,26 @@ from learnic.infrastructure.persistence.models.user_social_link import (
 )
 from learnic.presentation.http.routes.admin import router as admin_router
 from learnic.presentation.http.routes.auth import router as auth_router
-from learnic.presentation.http.routes.course_content import (
-    router as course_content_router,
+from learnic.presentation.http.routes.blog_post import (
+    admin_router as blog_admin_router,
+    public_router as blog_public_router,
+)
+from learnic.presentation.http.routes.note_content import (
+    router as note_content_router,
 )
 from learnic.presentation.http.routes.enrollment import (
-    course_router as course_enrollment_router,
+    note_router as note_enrollment_router,
     me_router as my_enrollments_router,
 )
-from learnic.presentation.http.routes.course_release import (
-    router as course_release_router,
-    student_router as course_student_content_router,
+from learnic.presentation.http.routes.note_release import (
+    router as note_release_router,
+    student_router as note_student_content_router,
 )
 from learnic.presentation.http.routes.presence import (
     router as presence_router,
 )
 from learnic.presentation.http.routes.product import (
-    course_router as product_course_router,
+    note_router as product_note_router,
     me_router as my_products_router,
     router as product_router,
 )
@@ -90,7 +97,7 @@ from learnic.presentation.http.routes.notification_preferences import (
     router as notification_preferences_router,
 )
 from learnic.presentation.http.routes.subscription import (
-    course_router as course_storage_router,
+    note_router as note_storage_router,
     router as subscription_router,
 )
 from learnic.presentation.http.routes.push import (
@@ -143,22 +150,24 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(root_router)
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(blog_public_router)
+    app.include_router(blog_admin_router)
     app.include_router(user_router)
     app.include_router(user_experiences_router)
     app.include_router(my_user_experiences_router)
     app.include_router(user_social_links_router)
     app.include_router(my_user_social_links_router)
     app.include_router(product_router)
-    app.include_router(product_course_router)
+    app.include_router(product_note_router)
     app.include_router(my_products_router)
     app.include_router(product_qa_router)
     app.include_router(product_ws_router)
     app.include_router(product_cursors_ws_router)
-    app.include_router(course_enrollment_router)
+    app.include_router(note_enrollment_router)
     app.include_router(my_enrollments_router)
-    app.include_router(course_content_router)
-    app.include_router(course_release_router)
-    app.include_router(course_student_content_router)
+    app.include_router(note_content_router)
+    app.include_router(note_release_router)
+    app.include_router(note_student_content_router)
     app.include_router(presence_router)
     app.include_router(product_roles_router)
     app.include_router(standalone_role_router)
@@ -175,7 +184,7 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(push_public_router)
     app.include_router(push_me_router)
     app.include_router(subscription_router)
-    app.include_router(course_storage_router)
+    app.include_router(note_storage_router)
     app.include_router(auth_ws_router)
     if configs.app.environment == "development":
         # Dev-only router — physically absent from prod builds.
@@ -193,12 +202,13 @@ def setup_map_tables() -> None:
     map_user_experience_table()
     map_user_social_link_table()
     map_file_table()
+    map_blog_post_table()
     map_product_table()
     map_product_qa_table()
     map_enrollment_table()
-    map_course_module_table()
-    map_course_lesson_table()
-    map_course_release_table()
+    map_note_module_table()
+    map_note_lesson_table()
+    map_note_release_table()
     map_role_table()
     map_tag_table()
     map_product_collaboration_table()

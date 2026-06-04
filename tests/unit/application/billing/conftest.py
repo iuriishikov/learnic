@@ -47,7 +47,7 @@ def fake_subscription_gateway() -> AsyncMock:
 @pytest.fixture
 def fake_file_usage_reader() -> AsyncMock:
     reader = AsyncMock()
-    reader.bytes_used_by_course_author = AsyncMock(return_value=0)
+    reader.bytes_used_by_note_author = AsyncMock(return_value=0)
     reader.usage_by_all_authors = AsyncMock(return_value={})
     return reader
 

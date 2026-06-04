@@ -33,10 +33,10 @@ async def test_change_name_updates_and_commits(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     handler = ChangeProductNameCommandHandler(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
@@ -48,22 +48,22 @@ async def test_change_name_updates_and_commits(
     await handler.run(
         ChangeProductNameCommand(
             actor_id=author_id,
-            product_id=course_product.oid,
+            product_id=note_product.oid,
             value="Renamed",
         ),
     )
 
-    assert course_product.name.value == "Renamed"
+    assert note_product.name.value == "Renamed"
     fake_product_reader.name_exists.assert_awaited_once_with(
-        course_product.author_id,
+        note_product.author_id,
         "Renamed",
-        exclude_oid=course_product.oid,
+        exclude_oid=note_product.oid,
     )
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
     assert type(event.payload).KIND == "name_changed"
-    assert event.product_id == course_product.oid
+    assert event.product_id == note_product.oid
     assert event.actor_id == author_id
     assert event.payload == NameChangedPayload(name="Renamed")
 
@@ -74,10 +74,10 @@ async def test_change_name_to_same_value_skips_uniqueness_check(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     handler = ChangeProductNameCommandHandler(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
@@ -89,8 +89,8 @@ async def test_change_name_to_same_value_skips_uniqueness_check(
     await handler.run(
         ChangeProductNameCommand(
             actor_id=author_id,
-            product_id=course_product.oid,
-            value=course_product.name.value,
+            product_id=note_product.oid,
+            value=note_product.name.value,
         ),
     )
 
@@ -104,10 +104,10 @@ async def test_change_name_duplicate_raises(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     fake_product_reader.name_exists.return_value = True
     handler = ChangeProductNameCommandHandler(
         transaction=fake_transaction,
@@ -121,7 +121,7 @@ async def test_change_name_duplicate_raises(
         await handler.run(
             ChangeProductNameCommand(
                 actor_id=author_id,
-                product_id=course_product.oid,
+                product_id=note_product.oid,
                 value="Already Taken",
             ),
         )
@@ -134,13 +134,13 @@ async def test_change_name_non_owner_raises(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     other_user_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     fake_authorizer.require.side_effect = InsufficientPermissionsError(
         user_id=other_user_id,
-        product_id=course_product.oid,
+        product_id=note_product.oid,
         permission="edit_description",
     )
     handler = ChangeProductNameCommandHandler(
@@ -155,7 +155,7 @@ async def test_change_name_non_owner_raises(
         await handler.run(
             ChangeProductNameCommand(
                 actor_id=other_user_id,
-                product_id=course_product.oid,
+                product_id=note_product.oid,
                 value="Hacked",
             ),
         )
@@ -168,7 +168,7 @@ async def test_change_name_missing_product_raises(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
     fake_product_gateway.with_id.return_value = None
@@ -184,7 +184,7 @@ async def test_change_name_missing_product_raises(
         await handler.run(
             ChangeProductNameCommand(
                 actor_id=author_id,
-                product_id=course_product.oid,
+                product_id=note_product.oid,
                 value="Whatever",
             ),
         )
@@ -197,10 +197,10 @@ async def test_change_name_empty_raises_field_error(
     fake_product_gateway: AsyncMock,
     fake_product_reader: AsyncMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     handler = ChangeProductNameCommandHandler(
         transaction=fake_transaction,
         authorizer=fake_authorizer,
@@ -213,7 +213,7 @@ async def test_change_name_empty_raises_field_error(
         await handler.run(
             ChangeProductNameCommand(
                 actor_id=author_id,
-                product_id=course_product.oid,
+                product_id=note_product.oid,
                 value="   ",
             ),
         )
@@ -226,10 +226,10 @@ async def test_change_description_sanitizes_before_storing(
     fake_product_gateway: AsyncMock,
     fake_html_sanitizer: MagicMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     fake_html_sanitizer.sanitize.side_effect = None
     fake_html_sanitizer.sanitize.return_value = "<p>safe</p>"
     handler = ChangeProductDescriptionCommandHandler(
@@ -243,13 +243,13 @@ async def test_change_description_sanitizes_before_storing(
     await handler.run(
         ChangeProductDescriptionCommand(
             actor_id=author_id,
-            product_id=course_product.oid,
+            product_id=note_product.oid,
             html="<script>bad</script><p>safe</p>",
         ),
     )
 
     fake_html_sanitizer.sanitize.assert_called_once()
-    assert course_product.description.value == "<p>safe</p>"
+    assert note_product.description.value == "<p>safe</p>"
     fake_transaction.commit.assert_awaited_once()
     fake_event_bus.publish.assert_awaited_once()
     event = fake_event_bus.publish.call_args.args[0]
@@ -263,10 +263,10 @@ async def test_change_description_too_long_raises(
     fake_product_gateway: AsyncMock,
     fake_html_sanitizer: MagicMock,
     fake_event_bus: AsyncMock,
-    course_product: Product,
+    note_product: Product,
     author_id: UserID,
 ) -> None:
-    fake_product_gateway.with_id.return_value = course_product
+    fake_product_gateway.with_id.return_value = note_product
     fake_html_sanitizer.sanitize.side_effect = lambda raw: raw  # echo
     handler = ChangeProductDescriptionCommandHandler(
         transaction=fake_transaction,
@@ -280,7 +280,7 @@ async def test_change_description_too_long_raises(
         await handler.run(
             ChangeProductDescriptionCommand(
                 actor_id=author_id,
-                product_id=course_product.oid,
+                product_id=note_product.oid,
                 html="x" * 100_000,
             ),
         )

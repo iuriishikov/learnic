@@ -478,7 +478,7 @@ infrastructure ───────┘   (implements application protocols)
     - **Bootstrap** — the REST endpoint(s) the client must fetch
       first to load initial state before opening the socket
       (e.g. `GET /products/{id}/content/draft` for the
-      course-content channel).
+      note-content channel).
     - **Server → client envelope** as a concrete JSON example.
     - **Client → server messages** (JSON shapes) if the channel is
       bidirectional. If the server currently ignores client
@@ -494,7 +494,7 @@ infrastructure ───────┘   (implements application protocols)
       The SPA cannot guess this from the envelope alone.
 
     Tag descriptions of any aggregate that owns a WS channel
-    (`Products`, `CourseContent`, `Presence`, etc.) MUST point at
+    (`Products`, `NoteContent`, `Presence`, etc.) MUST point at
     `## WebSocket channels` so a reader browsing Swagger UI by tag
     discovers the channel rather than missing it. The route module's
     docstring should be a brief pointer to the same section, never a
@@ -509,7 +509,7 @@ infrastructure ───────┘   (implements application protocols)
     resource that only exists in the context of an aggregate root is a
     sub-resource and its URL path must reflect that. Compound top-level
     paths like `/webinar-sessions`, `/webinar-schedules`,
-    `/webinar-enrollments`, `/course-enrollments`, `/product-qa` are
+    `/webinar-enrollments`, `/note-enrollments`, `/product-qa` are
     forbidden — they advertise a flat collection that does not exist
     in the domain (you cannot have a session without a cohort, an
     enrollment without a parent, a Q&A entry without a product). The
@@ -519,7 +519,7 @@ infrastructure ───────┘   (implements application protocols)
     /cohorts/{cohort_id}/sessions/{session_id}/...
     /cohorts/{cohort_id}/schedules/{schedule_id}
     /cohorts/{cohort_id}/enrollments/{enrollment_id}/...
-    /courses/{course_id}/enrollments/{enrollment_id}/...
+    /notes/{note_id}/enrollments/{enrollment_id}/...
     /products/{product_id}/qa/{qa_id}/...
     ```
 
@@ -554,7 +554,7 @@ infrastructure ───────┘   (implements application protocols)
       `/users/me/...`.** A "list my enrollments across all cohorts"
       query is conceptually a property of the current user, not of
       a specific parent — so it lives at `/users/me/webinar-enrollments`
-      and `/users/me/course-enrollments`, alongside the existing
+      and `/users/me/note-enrollments`, alongside the existing
       `/users/me/avatar`, `/users/me/first-name`, etc. Implement these
       as a sibling `me_router = ErrorAwareRouter(prefix="/users/me/...")`
       in the same file as the parent-nested router; export both, and
@@ -1269,7 +1269,7 @@ on PATH, run `eval $(poetry env activate)` once in your terminal.
   only sees committed state (rule 13).
 - ❌ Expose a sub-resource as a flat top-level collection
   (`/webinar-sessions`, `/webinar-schedules`, `/webinar-enrollments`,
-  `/course-enrollments`, `/product-qa`, etc.). Sub-resources nest under
+  `/note-enrollments`, `/product-qa`, etc.). Sub-resources nest under
   their parent; the URL must mirror the aggregate tree. See rule 14
   for the exact shape and the narrow invitation-flow exception.
 - ❌ Expose a `/<aggregate>/mine` (or `/<aggregate>/me`) endpoint at

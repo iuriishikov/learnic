@@ -8,7 +8,7 @@ contract is closed at the type level — each channel binds
 The scope is :class:`ProductID` for every current channel; that
 matches the Redis routing convention (``<channel>:<product_id>``)
 and the WebSocket route shape (``/products/{id}/events``,
-``/courses/{id}/events``). If a future channel ever wants a
+``/notes/{id}/events``). If a future channel ever wants a
 different scope, generalise this dataclass with a second
 ``TScope`` parameter at that point — not before.
 """

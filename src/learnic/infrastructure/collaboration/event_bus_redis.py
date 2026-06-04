@@ -1,4 +1,4 @@
-"""Redis-backed adapter for the course-content collaboration channel.
+"""Redis-backed adapter for the note-content collaboration channel.
 
 Thin subclass of :class:`RedisEventChannel` parameterised by the
 channel's :data:`ContentPayload` union and the

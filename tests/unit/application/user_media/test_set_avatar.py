@@ -7,6 +7,7 @@ from learnic.application.commands.user.avatar.set import (
     SetUserAvatarCommandHandler,
 )
 from learnic.application.common.errors import EntityNotFoundError
+from tests.unit.application.uploads import FakeUpload
 
 
 def _make_handler(**kwargs) -> SetUserAvatarCommandHandler:  # noqa: ANN003
@@ -29,13 +30,12 @@ async def test_set_avatar_happy_path_uploads_and_attaches(
     file_id = await handler.run(
         SetUserAvatarCommand(
             user_id=user.oid,
-            data=b"binary",
-            content_type="image/jpeg",
+            upload=FakeUpload(content_type="image/jpeg"),
         )
     )
 
     assert user.avatar_file_id == file_id
-    fake_file_uploads.upload.assert_awaited_once()
+    fake_file_uploads.upload_stream.assert_awaited_once()
     fake_file_uploads.soft_delete_previous.assert_awaited_once_with(None)
     fake_transaction.commit.assert_awaited_once()
 
@@ -56,7 +56,10 @@ async def test_set_avatar_replaces_and_soft_deletes_old(
         file_uploads=fake_file_uploads,
     )
     await handler.run(
-        SetUserAvatarCommand(user_id=user.oid, data=b"binary", content_type="image/png")
+        SetUserAvatarCommand(
+            user_id=user.oid,
+            upload=FakeUpload(content_type="image/png"),
+        )
     )
 
     fake_file_uploads.soft_delete_previous.assert_awaited_once_with(existing_file.oid)
@@ -79,13 +82,12 @@ async def test_set_avatar_accepts_arbitrary_mime(
     file_id = await handler.run(
         SetUserAvatarCommand(
             user_id=user.oid,
-            data=b"binary",
-            content_type="application/pdf",
+            upload=FakeUpload(content_type="application/pdf"),
         )
     )
 
     assert user.avatar_file_id == file_id
-    fake_file_uploads.upload.assert_awaited_once()
+    fake_file_uploads.upload_stream.assert_awaited_once()
 
 
 async def test_set_avatar_user_missing_raises(
@@ -105,10 +107,9 @@ async def test_set_avatar_user_missing_raises(
         await handler.run(
             SetUserAvatarCommand(
                 user_id=user.oid,
-                data=b"binary",
-                content_type="image/jpeg",
+                upload=FakeUpload(content_type="image/jpeg"),
             )
         )
 
-    fake_file_uploads.upload.assert_not_called()
+    fake_file_uploads.upload_stream.assert_not_called()
     fake_transaction.commit.assert_not_called()

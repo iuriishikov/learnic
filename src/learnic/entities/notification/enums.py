@@ -31,8 +31,8 @@ class NotificationCategory(StrEnum):
     everything an author or collaborator does on the teaching side
     (invites, access changes, future content events). ``Learning``
     is the student-side counterpart — events that surface to a
-    learner (course progress, deadlines, instructor messages,
-    future content events on courses they are enrolled in).
+    learner (note progress, deadlines, instructor messages,
+    future content events on notes they are enrolled in).
     ``Security`` covers account-safety events (new login, password
     changed, suspicious activity) so the user sees them in a
     dedicated tab. ``Files`` and ``Jobs`` are reserved for future

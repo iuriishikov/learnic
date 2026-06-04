@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.enums import (
     EnrollmentKind,
     EnrollmentStatus,
@@ -14,10 +14,10 @@ from learnic.entities.user.models import UserID
 
 
 @dataclass(slots=True, frozen=True)
-class CourseEnrollmentDetailsView:
-    """Read-side projection of :class:`CourseEnrollmentDetails`."""
+class NoteEnrollmentDetailsView:
+    """Read-side projection of :class:`NoteEnrollmentDetails`."""
 
-    release_id: CourseReleaseID | None
+    release_id: NoteReleaseID | None
     progress_percent: int
     completed_at: datetime | None
 
@@ -32,7 +32,7 @@ class EnrollmentView:
     student_id: UserID
     status: EnrollmentStatus
     enrolled_at: datetime
-    details: CourseEnrollmentDetailsView | None
+    details: NoteEnrollmentDetailsView | None
 
 
 class EnrollmentGateway(Protocol):
@@ -55,8 +55,8 @@ class EnrollmentGateway(Protocol):
         student_id: UserID,
     ) -> Enrollment | None: ...
 
-    async def update_course_details(self, enrollment: Enrollment) -> None:
-        """Persist the course-kind ``details`` body of ``enrollment``.
+    async def update_note_details(self, enrollment: Enrollment) -> None:
+        """Persist the note-kind ``details`` body of ``enrollment``.
 
         The polymorphic ``details`` body is not mapped
         imperatively, so SQLAlchemy cannot auto-flush mutations

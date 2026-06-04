@@ -340,7 +340,7 @@ class StorageQuotaEnforcedDetailsSchema(BaseModel):
     deleted_files_count: int = Field(
         description=(
             "Number of files soft-deleted in this enforcement pass. "
-            "Picked newest-first across the author's courses; files "
+            "Picked newest-first across the author's notes; files "
             "referenced from older blocks are preserved when the "
             "freed total reaches the overage."
         ),

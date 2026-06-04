@@ -6,6 +6,7 @@ from learnic.application.common.persistence.transaction import (
     Transaction,
 )
 from learnic.application.common.storage.file_storage import FileStorage
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
@@ -68,18 +69,22 @@ class FileUploadService:
         self._task_scheduler: Final = task_scheduler
         self._default_bucket: Final = default_bucket
 
-    async def upload(
+    async def upload_stream(
         self,
-        data: bytes,
-        content_type: str,
+        upload: IncomingUpload,
         uploaded_by: UserID,
     ) -> File:
-        """Persist a new ``File`` and upload its bytes to storage.
+        """Stream an upload into storage and persist its ``File`` row.
+
+        The byte count comes from ``upload.size`` — known up front
+        because the ASGI layer fully receives and spools the body
+        before the handler runs — so the ``File`` is built with its
+        true size while the bytes are forwarded to object storage one
+        chunk at a time, never materialising the whole file in memory.
 
         Args:
-            data: Raw bytes of the uploaded file.
-            content_type: MIME type as supplied by the client. Wrapped
-                in :class:`ContentType` so VO-level validation applies.
+            upload: The incoming file: its known ``size``, declared
+                ``content_type`` and a chunked byte ``stream``.
             uploaded_by: Acting user; written to ``File.uploaded_by``.
 
         Returns:
@@ -90,15 +95,16 @@ class FileUploadService:
         bucket = StorageBucket(self._default_bucket)
         file = File.create_file(
             bucket=bucket,
-            content_type=ContentType(content_type),
-            size_bytes=FileSize(len(data)),
+            content_type=ContentType(upload.content_type),
+            size_bytes=FileSize(upload.size),
             uploaded_by=uploaded_by,
         )
-        await self._file_storage.put(
+        await self._file_storage.put_stream(
             bucket=bucket.value,
             name=file.storage_name.value,
-            data=data,
-            content_type=content_type,
+            source=upload,
+            size=upload.size,
+            content_type=upload.content_type,
         )
         self._entity_saver.add_one(file)
         await self._transaction.flush()

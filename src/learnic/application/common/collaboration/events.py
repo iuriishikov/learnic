@@ -1,4 +1,4 @@
-"""Event envelope alias for the course-content collaboration channel.
+"""Event envelope alias for the note-content collaboration channel.
 
 The channel rides on the generic
 :class:`~learnic.application.common.events.Event` envelope; this

@@ -6,7 +6,7 @@ from learnic.application.common.formatting import (
     mask_email,
 )
 from learnic.application.common.persistence.file import FileView
-from learnic.application.common.persistence.user import UserReader
+from learnic.application.common.persistence.user import UserReader, UserView
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
 from learnic.entities.user.models import UserID
@@ -44,6 +44,37 @@ class UserOutput:
     public_email: str | None
 
 
+async def resolve_user_output(
+    view: UserView,
+    file_storage: FileStorage,
+) -> UserOutput:
+    """Inflate a raw :class:`UserView` into a wire-ready :class:`UserOutput`.
+
+    Collapses the name parts into the canonical display name, masks the
+    login email, and signs presigned URLs for the avatar/cover. Single
+    call site for user-projection resolution: reused by the full-profile
+    handler, name-search, and **every embedded-user context** (product
+    author, gift gifter/recipient, collaboration collaborator,
+    notification actor/…). Keeping it here means the unified
+    :class:`UserSchema` the API exposes always carries the same shape
+    no matter where the user is embedded.
+    """
+    return UserOutput(
+        oid=view.oid,
+        full_name=build_full_name(
+            view.first_name, view.last_name, view.patronymic,
+        ),
+        email=mask_email(view.email) if view.email else "",
+        is_verified=view.is_verified,
+        description=view.description,
+        avatar=await FileView.of_optional(view.avatar, file_storage),
+        cover=await FileView.of_optional(view.cover, file_storage),
+        website_url=view.website_url,
+        portfolio_url=view.portfolio_url,
+        public_email=view.public_email,
+    )
+
+
 @final
 class GetUserQueryHandler:
     def __init__(
@@ -56,15 +87,4 @@ class GetUserQueryHandler:
 
     async def run(self, data: GetUserQuery) -> UserOutput:
         view = validate_empty(await self._reader.with_id(data.oid), data.oid)
-        return UserOutput(
-            oid=view.oid,
-            full_name=build_full_name(view.first_name, view.last_name, view.patronymic),
-            email=mask_email(view.email),
-            is_verified=view.is_verified,
-            description=view.description,
-            avatar=await FileView.of_optional(view.avatar, self._file_storage),
-            cover=await FileView.of_optional(view.cover, self._file_storage),
-            website_url=view.website_url,
-            portfolio_url=view.portfolio_url,
-            public_email=view.public_email,
-        )
+        return await resolve_user_output(view, self._file_storage)

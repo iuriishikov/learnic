@@ -1,6 +1,6 @@
 """Per-product-kind enrollment policies (strategy pattern).
 
-Currently only the ``COURSE`` strategy exists. The shape is
+Currently only the ``NOTE`` strategy exists. The shape is
 preserved so additional enrollment kinds can be added later by
 declaring a new :class:`EnrollmentTarget` variant, an
 :class:`EnrollmentStrategy` impl, and an entry in the
@@ -18,10 +18,10 @@ from learnic.entities.user.models import UserID
 
 
 @dataclass(slots=True, frozen=True)
-class CourseEnrollmentTarget:
-    """Course-kind enrollment target. Ties to a course product."""
+class NoteEnrollmentTarget:
+    """Note-kind enrollment target. Ties to a note product."""
 
-    enrollment_kind: ClassVar[EnrollmentKind] = EnrollmentKind.COURSE
+    enrollment_kind: ClassVar[EnrollmentKind] = EnrollmentKind.NOTE
     product_id: ProductID
 
     @property
@@ -29,7 +29,7 @@ class CourseEnrollmentTarget:
         return self.product_id
 
 
-EnrollmentTarget: TypeAlias = CourseEnrollmentTarget
+EnrollmentTarget: TypeAlias = NoteEnrollmentTarget
 
 
 class EnrollmentStrategy(Protocol):
@@ -62,7 +62,7 @@ class EnrollmentStrategy(Protocol):
 # its strategy must also be declared here.
 _DECLARED_STRATEGIES: Final[frozenset[EnrollmentKind]] = frozenset(
     {
-        EnrollmentKind.COURSE,
+        EnrollmentKind.NOTE,
     },
 )
 

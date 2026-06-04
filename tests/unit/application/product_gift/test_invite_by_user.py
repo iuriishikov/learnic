@@ -187,7 +187,7 @@ async def test_invite_by_user_rejects_existing_gift(
         )
 
 
-async def test_invite_by_user_rejects_non_course(
+async def test_invite_by_user_rejects_non_note(
     fake_transaction: AsyncMock,
     fake_entity_saver: AsyncMock,
     fake_authorizer: AsyncMock,
@@ -229,6 +229,6 @@ async def test_invite_by_user_rejects_non_course(
 
 
 class _FakeWebinarType:
-    """Stand-in product type that is not COURSE (only COURSE exists today)."""
+    """Stand-in product type that is not NOTE (only NOTE exists today)."""
 
     value = "webinar"

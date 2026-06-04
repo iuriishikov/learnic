@@ -1,4 +1,4 @@
-"""Typed payloads for the course-content WebSocket channel.
+"""Typed payloads for the note-content WebSocket channel.
 
 Each kind of :class:`ContentEvent` carries its own payload
 dataclass; the discriminator is the class-level :attr:`KIND`
@@ -21,7 +21,7 @@ command handlers stay free of presentation-level wire shaping.
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, assert_never
 
-from learnic.entities.course_block.models import (
+from learnic.entities.note_block.models import (
     CodeBlock,
     FileBlock,
     HtmlBlock,
@@ -34,13 +34,13 @@ from learnic.entities.course_block.models import (
     TextInputBlock,
     VideoFileBlock,
 )
-from learnic.entities.course_lesson.ids import CourseLessonID
-from learnic.entities.course_lesson.models import CourseLesson
-from learnic.entities.course_module.ids import CourseModuleID
-from learnic.entities.course_module.models import CourseModule
-from learnic.entities.course_release.models import CourseRelease
+from learnic.entities.note_lesson.ids import NoteLessonID
+from learnic.entities.note_lesson.models import NoteLesson
+from learnic.entities.note_module.ids import NoteModuleID
+from learnic.entities.note_module.models import NoteModule
+from learnic.entities.note_release.models import NoteRelease
 
-# Mirror of `presentation/http/routes/course_content._rutube_embed_url`.
+# Mirror of `presentation/http/routes/note_content._rutube_embed_url`.
 # Kept in `application/` so handlers can build the snapshot without
 # crossing into `presentation/`. If Rutube ever changes the path,
 # both call sites must be updated together.
@@ -107,7 +107,7 @@ class SingleChoiceBlockSnapshot:
     """Authoring-side wire shape.
 
     The ``correct_option_id`` is sent verbatim because this channel
-    is auth-gated for course collaborators (authors). The
+    is auth-gated for note collaborators (authors). The
     student-facing public view, exposed only through the release
     HTTP endpoint, strips the correct id at the presentation layer.
     """
@@ -326,7 +326,7 @@ class ModuleAddedPayload:
     module: ModuleSnapshot
 
     @classmethod
-    def from_entity(cls, module: CourseModule) -> "ModuleAddedPayload":
+    def from_entity(cls, module: NoteModule) -> "ModuleAddedPayload":
         return cls(
             module=ModuleSnapshot(
                 oid=str(module.oid),
@@ -376,8 +376,8 @@ class LessonAddedPayload:
     def from_entity(
         cls,
         *,
-        module_id: CourseModuleID,
-        lesson: CourseLesson,
+        module_id: NoteModuleID,
+        lesson: NoteLesson,
     ) -> "LessonAddedPayload":
         return cls(
             module_id=str(module_id),
@@ -409,9 +409,9 @@ class LessonMovedPayload:
     def of(
         cls,
         *,
-        lesson_id: CourseLessonID,
-        from_module_id: CourseModuleID,
-        to_module_id: CourseModuleID,
+        lesson_id: NoteLessonID,
+        from_module_id: NoteModuleID,
+        to_module_id: NoteModuleID,
         position: int,
     ) -> "LessonMovedPayload":
         return cls(
@@ -445,7 +445,7 @@ class BlockAddedPayload:
     def from_entity(
         cls,
         *,
-        lesson_id: CourseLessonID,
+        lesson_id: NoteLessonID,
         block: LessonBlock,
     ) -> "BlockAddedPayload":
         return cls(
@@ -494,7 +494,7 @@ class ReleaseCreatedPayload:
     kind: str
 
     @classmethod
-    def from_entity(cls, release: CourseRelease) -> "ReleaseCreatedPayload":
+    def from_entity(cls, release: NoteRelease) -> "ReleaseCreatedPayload":
         return cls(
             release_id=str(release.oid),
             ordinal=release.ordinal,
@@ -515,7 +515,7 @@ class DraftResetPayload:
     version: list[int]
 
     @classmethod
-    def from_entity(cls, release: CourseRelease) -> "DraftResetPayload":
+    def from_entity(cls, release: NoteRelease) -> "DraftResetPayload":
         return cls(
             release_id=str(release.oid),
             ordinal=release.ordinal,

@@ -35,6 +35,7 @@ from learnic.application.commands.product_collaboration.invite_by_email import (
     EMAIL_INVITE_RATE_LIMIT_WINDOW,
     MAX_EMAIL_INVITES_PER_DAY,
 )
+from learnic.entities.common.limits import PRODUCT_COLLABORATION_LIMIT
 from learnic.entities.notification.models import Notification
 from learnic.entities.product_collaboration.constants import (
     INVITE_TOKEN_TTL_DAYS,
@@ -120,6 +121,11 @@ class ReinviteCollaboratorCommandHandler:
             Permission.MANAGE_COLLABORATORS,
         )
         await self._guard_no_active_or_pending(source)
+        PRODUCT_COLLABORATION_LIMIT.ensure(
+            await self._collab_gateway.count_active_or_pending_for_product(
+                source.product_id,
+            ),
+        )
         new_grants = [
             CollaborationGrant.create(
                 role_id=g.role_id,

@@ -5,6 +5,7 @@ from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
 
@@ -12,8 +13,7 @@ from learnic.entities.user.models import UserID
 @dataclass(slots=True, frozen=True)
 class SetUserCoverCommand:
     user_id: UserID
-    data: bytes
-    content_type: str
+    upload: IncomingUpload
 
 
 @final
@@ -35,9 +35,8 @@ class SetUserCoverCommandHandler:
         if user is None:
             raise EntityNotFoundError(data.user_id)
 
-        file = await self._file_uploads.upload(
-            data.data,
-            data.content_type,
+        file = await self._file_uploads.upload_stream(
+            data.upload,
             data.user_id,
         )
         previous_file_id = user.set_cover(file.oid)

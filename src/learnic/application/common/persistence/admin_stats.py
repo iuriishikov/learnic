@@ -17,10 +17,10 @@ class AdminStatsView:
     total_users: int
     banned_users: int
     admin_users: int
-    total_courses: int
-    draft_courses: int
-    published_courses: int
-    archived_courses: int
+    total_notes: int
+    draft_notes: int
+    published_notes: int
+    archived_notes: int
     total_enrollments: int
     active_enrollments: int
     dau: int

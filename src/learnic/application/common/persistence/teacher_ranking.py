@@ -11,14 +11,14 @@ class TopTeacherView:
     """Read-side projection of one user row in the popularity ranking.
 
     The ranking covers **every** registered, non-banned user — a user
-    who has never published a course still appears (at the tail) with
+    who has never published a note still appears (at the tail) with
     zeroed metrics, so the list doubles as a full user directory. The
     two metrics are computed in the same aggregate query that produces
     the row:
 
     - ``student_count`` — number of **distinct** students with an
       ``ACTIVE`` enrollment across the user's published products. A
-      student enrolled in two of the same teacher's courses counts
+      student enrolled in two of the same teacher's notes counts
       once; ``REVOKED`` enrollments are excluded. ``0`` for a user with
       no students.
     - ``published_product_count`` — number of the user's ``PUBLISHED``

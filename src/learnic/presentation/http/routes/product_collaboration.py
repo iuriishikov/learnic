@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
 )
-from learnic.application.common.formatting import mask_email
 from learnic.application.commands.product_collaboration.accept import (
     AcceptCollaborationInviteCommand,
     AcceptCollaborationInviteCommandHandler,
@@ -66,7 +65,6 @@ from learnic.application.common.pagination import (
 )
 from learnic.application.common.persistence.product_collaboration import (
     CollaborationGrantView,
-    ProductCollaborationView,
 )
 from learnic.application.queries.product_collaboration.get_my_permissions import (
     EffectivePermissionsView,
@@ -76,6 +74,7 @@ from learnic.application.queries.product_collaboration.get_my_permissions import
 from learnic.application.queries.product_collaboration.list_for_product import (
     ListProductCollaboratorsQuery,
     ListProductCollaboratorsQueryHandler,
+    ProductCollaborationOutput,
 )
 from learnic.application.queries.product_collaboration.list_my import (
     ListMyCollaborationsQuery,
@@ -105,7 +104,7 @@ from learnic.presentation.http.common.errors.rules import (
 )
 from learnic.presentation.http.common.device import client_ip
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
-from learnic.presentation.http.common.schemas import UserRefSchema
+from learnic.presentation.http.common.schemas import UserSchema
 
 product_router = ErrorAwareRouter(
     prefix="/products/{product_id}/collaborations",
@@ -344,6 +343,8 @@ class CollaborationSchema(BaseModel):
                         "oid": ("550e8400-e29b-41d4-a716-446655440000"),
                         "full_name": "Lovelace Ada",
                         "email": "a*****a@example.com",
+                        "is_verified": False,
+                        "avatar": None,
                     },
                     "invited_email": None,
                     "status": "active",
@@ -369,7 +370,7 @@ class CollaborationSchema(BaseModel):
 
     oid: UUID
     product_id: UUID
-    collaborator: UserRefSchema | None
+    collaborator: UserSchema | None
     invited_email: str | None
     status: CollaborationStatus
     invited_by: UUID
@@ -381,20 +382,16 @@ class CollaborationSchema(BaseModel):
     grants: list[GrantSchema]
 
     @classmethod
-    def from_view(cls, view: ProductCollaborationView) -> Self:
+    def from_output(cls, view: ProductCollaborationOutput) -> Self:
         return cls(
             oid=view.oid,
             product_id=view.product_id,
             collaborator=(
-                UserRefSchema.from_view(view.collaborator)
+                UserSchema.model_validate(view.collaborator)
                 if view.collaborator is not None
                 else None
             ),
-            invited_email=(
-                mask_email(view.invited_email)
-                if view.invited_email is not None
-                else None
-            ),
+            invited_email=view.invited_email,
             status=view.status,
             invited_by=view.invited_by,
             invite_expires_at=view.invite_expires_at,
@@ -523,7 +520,7 @@ async def list_collaborators(
         ),
     )
     return CollaborationListSchema(
-        items=[CollaborationSchema.from_view(v) for v in views],
+        items=[CollaborationSchema.from_output(v) for v in views],
     )
 
 
@@ -570,6 +567,9 @@ async def invite_by_user(
             HTTP 409.
         CollaborationAlreadyExistsError: Target already has an active
             or pending collaboration; HTTP 409.
+        ResourceLimitReachedError: The product already has
+            ``PRODUCT_COLLABORATION_LIMIT`` active or pending
+            collaborators; HTTP 409.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -634,6 +634,9 @@ async def invite_by_email(
             the per-day limit of email invitations; HTTP 429.
         EmailSendRateLimitExceededError: Caller hit the cross-flow
             per-user outbound-email cap; HTTP 429.
+        ResourceLimitReachedError: The product already has
+            ``PRODUCT_COLLABORATION_LIMIT`` active or pending
+            collaborators; HTTP 409.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -986,6 +989,9 @@ async def reinvite(
             target cannot be resolved; HTTP 404.
         CollaborationAlreadyExistsError: A new active or pending
             invite already exists for the same target; HTTP 409.
+        ResourceLimitReachedError: The product already has
+            ``PRODUCT_COLLABORATION_LIMIT`` active or pending
+            collaborators; HTTP 409.
         EmailInviteRateLimitExceededError: Email rate cap reached;
             HTTP 429.
         EmailSendRateLimitExceededError: Caller hit the cross-flow
@@ -1041,7 +1047,7 @@ async def list_mine(
         ),
     )
     return CollaborationListSchema(
-        items=[CollaborationSchema.from_view(v) for v in views],
+        items=[CollaborationSchema.from_output(v) for v in views],
     )
 
 

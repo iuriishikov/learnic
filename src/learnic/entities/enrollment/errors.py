@@ -26,7 +26,7 @@ class EnrollmentDoesNotSupportError(DomainError):
 class CannotRepinRevokedEnrollmentError(DomainError):
     """Raised when re-pinning is attempted on a non-ACTIVE enrollment.
 
-    Revoked enrollments have no access to course content, so
+    Revoked enrollments have no access to note content, so
     moving them to a different release would either expose
     content the student no longer has access to, or be a silent
     no-op once they re-enroll. Authors must restore access first

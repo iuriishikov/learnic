@@ -117,7 +117,7 @@ from learnic.presentation.http.common.upload_limits import (
     USER_AVATAR_MAX_BYTES,
     USER_COVER_MAX_BYTES,
 )
-from learnic.presentation.http.common.uploads import read_upload
+from learnic.presentation.http.common.uploads import open_upload
 
 router = ErrorAwareRouter(
     prefix="/users",
@@ -405,7 +405,7 @@ class TopTeacherSchema(UserBaseSchema):
         description=(
             "Number of distinct students with an active enrollment "
             "across the user's published products. A student enrolled "
-            "in several of the user's courses counts once; revoked "
+            "in several of the user's notes counts once; revoked "
             "enrollments are excluded. `0` for a user with no students. "
             "Primary ranking key."
         ),
@@ -791,14 +791,13 @@ async def upload_avatar(
         FileTooLargeError: Payload over ``USER_AVATAR_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_upload(
+    upload = await open_upload(
         file, max_bytes=USER_AVATAR_MAX_BYTES,
     )
     file_id = await interactor.run(
         SetUserAvatarCommand(
             user_id=ctx.user_id,
-            data=data,
-            content_type=content_type,
+            upload=upload,
         )
     )
     return UploadedFileSchema(oid=file_id)
@@ -870,14 +869,13 @@ async def upload_cover(
         FileTooLargeError: Payload over ``USER_COVER_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_upload(
+    upload = await open_upload(
         file, max_bytes=USER_COVER_MAX_BYTES,
     )
     file_id = await interactor.run(
         SetUserCoverCommand(
             user_id=ctx.user_id,
-            data=data,
-            content_type=content_type,
+            upload=upload,
         )
     )
     return UploadedFileSchema(oid=file_id)

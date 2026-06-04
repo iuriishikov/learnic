@@ -4,6 +4,9 @@ from typing import Final, final
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.errors import EntityNotFoundError
 from learnic.application.common.persistence.product import ProductGateway
+from learnic.application.common.persistence.product_qa import (
+    ProductQAGateway,
+)
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
     Transaction,
@@ -13,6 +16,7 @@ from learnic.application.common.product_events import (
     QaAddedPayload,
     publish_product_event,
 )
+from learnic.entities.common.limits import PRODUCT_QA_LIMIT
 from learnic.entities.product.ids import ProductID, ProductQAID
 from learnic.entities.product.qa import ProductQA
 from learnic.entities.product.value_objects import QAAnswer, QAQuestion
@@ -39,12 +43,14 @@ class AddProductQACommandHandler:
         authorizer: Authorizer,
         entity_saver: EntitySaver,
         product_gateway: ProductGateway,
+        qa_gateway: ProductQAGateway,
         event_bus: ProductEventBus,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
         self._entity_saver: Final = entity_saver
         self._product_gateway: Final = product_gateway
+        self._qa_gateway: Final = qa_gateway
         self._event_bus: Final = event_bus
 
     async def run(self, data: AddProductQACommand) -> ProductQAID:
@@ -55,6 +61,9 @@ class AddProductQACommandHandler:
             data.actor_id,
             AuthzTarget.for_product(data.product_id),
             Permission.EDIT_QA,
+        )
+        PRODUCT_QA_LIMIT.ensure(
+            await self._qa_gateway.count_for_product(data.product_id),
         )
         qa = ProductQA.create(
             product_id=data.product_id,

@@ -19,13 +19,13 @@ class EnrollmentCapability(StrEnum):
     """Tracks an asynchronous progress percent (0–100)."""
 
     HAS_RELEASE_PIN = "has_release_pin"
-    """Pinned to a specific course release at signup time."""
+    """Pinned to a specific note release at signup time."""
 
 
 ENROLLMENT_KIND_CAPABILITIES: Final[
     dict[EnrollmentKind, frozenset[EnrollmentCapability]]
 ] = {
-    EnrollmentKind.COURSE: frozenset(
+    EnrollmentKind.NOTE: frozenset(
         {
             EnrollmentCapability.HAS_PROGRESS,
             EnrollmentCapability.HAS_RELEASE_PIN,

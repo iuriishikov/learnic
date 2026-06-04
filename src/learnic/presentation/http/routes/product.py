@@ -17,9 +17,9 @@ from fastapi import (
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from learnic.application.commands.product.add_course import (
-    AddCourseProductCommand,
-    AddCourseProductCommandHandler,
+from learnic.application.commands.product.add_note import (
+    AddNoteProductCommand,
+    AddNoteProductCommandHandler,
 )
 from learnic.application.commands.product.archive import (
     ArchiveProductCommand,
@@ -73,8 +73,8 @@ from learnic.application.common.errors import (
     AlreadyEnrolledError,
     CannotEnrollInPrivateProductError,
     CannotEnrollInUnpublishedProductError,
-    CannotEnrollInUnreleasedCourseError,
-    CannotPublishCourseDirectlyError,
+    CannotEnrollInUnreleasedNoteError,
+    CannotPublishNoteDirectlyError,
     EntityNotFoundError,
     ProductNameAlreadyTakenError,
     ProductNotArchivedError,
@@ -95,6 +95,7 @@ from learnic.application.common.pagination import (
     SEARCH_QUERY_MIN_LEN,
     Pagination,
 )
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.application.common.statistics.collector import (
     StatisticsCollector,
 )
@@ -158,8 +159,8 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_WITH_FIELD_MAP,
     CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE,
     CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE,
-    CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE,
-    CANNOT_PUBLISH_COURSE_DIRECTLY_RULE,
+    CANNOT_ENROLL_IN_UNRELEASED_NOTE_RULE,
+    CANNOT_PUBLISH_NOTE_DIRECTLY_RULE,
     ENTITY_NOT_FOUND_RULE,
     PRODUCT_DOES_NOT_SUPPORT_RULE,
     PRODUCT_NAME_TAKEN_RULE,
@@ -171,12 +172,12 @@ from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.tag import TagSchema
 from learnic.presentation.http.common.schemas import (
     FileSchema,
-    UserRefSchema,
+    UserSchema,
 )
 from learnic.presentation.http.common.upload_limits import (
     PRODUCT_COVER_MAX_BYTES,
 )
-from learnic.presentation.http.common.uploads import read_upload
+from learnic.presentation.http.common.uploads import open_upload
 
 router = ErrorAwareRouter(
     prefix="/products",
@@ -184,13 +185,13 @@ router = ErrorAwareRouter(
     route_class=DishkaErrorAwareRoute,
 )
 
-# Course-enrollment endpoints live under /courses (parallel to other
-# course-specific routers in course_content.py / course_release.py).
+# Note-enrollment endpoints live under /notes (parallel to other
+# note-specific routers in note_content.py / note_release.py).
 # Listed here for code locality with the rest of product.py — these
 # operations still take a ``ProductID`` underneath but the URL surface
-# is course-scoped.
-course_router = ErrorAwareRouter(
-    prefix="/courses",
+# is note-scoped.
+note_router = ErrorAwareRouter(
+    prefix="/notes",
     tags=["Enrollments"],
     route_class=DishkaErrorAwareRoute,
 )
@@ -207,8 +208,8 @@ _PRODUCT_ID_PATH: Final = Path(
     description="Target product's UUID.",
     examples=["3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"],
 )
-_COURSE_ID_PATH: Final = Path(
-    description="Target course product's UUID.",
+_NOTE_ID_PATH: Final = Path(
+    description="Target note product's UUID.",
     examples=["3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"],
 )
 
@@ -315,16 +316,18 @@ class ProductSchema(BaseModel):
             "examples": [
                 {
                     "oid": "3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8",
-                    "type": "course",
+                    "type": "note",
                     "status": "published",
                     "visibility": "public",
                     "name": "Async Python deep dive",
-                    "description": "<p>A 30-hour course.</p>",
+                    "description": "<p>A 30-hour note.</p>",
                     "total_duration_in_hours": 30,
                     "author": {
                         "oid": "550e8400-e29b-41d4-a716-446655440000",
                         "full_name": "Lovelace Ada",
                         "email": "a*****a@example.com",
+                        "is_verified": True,
+                        "avatar": None,
                     },
                     "cover": {
                         "oid": "11111111-2222-3333-4444-555555555555",
@@ -370,7 +373,17 @@ class ProductSchema(BaseModel):
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    author: UserRefSchema
+    author: UserSchema = Field(
+        description=(
+            "Product author as the unified public user projection — "
+            "identity (id, display name, masked email, verified badge) "
+            "plus avatar/cover with presigned URLs. The profile-only "
+            "fields (`description`, contact links) are `null` here; "
+            "fetch `GET /users/{id}` for the full profile. Same shape "
+            "everywhere a user is embedded (collaborators, gifts, "
+            "notification actors)."
+        ),
+    )
     cover: FileSchema | None = Field(
         default=None,
         description=(
@@ -402,7 +415,7 @@ class ProductSchema(BaseModel):
             name=view.name,
             description=view.description,
             total_duration_in_hours=view.total_duration_in_hours,
-            author=UserRefSchema.from_view(view.author),
+            author=UserSchema.model_validate(view.author),
             cover=(
                 FileSchema.model_validate(view.cover)
                 if view.cover is not None
@@ -503,9 +516,9 @@ _CoverField = Annotated[
 
 
 @router.post(
-    "/courses",
-    summary="Create a new course product",
-    operation_id="addCourseProduct",
+    "/notes",
+    summary="Create a new note product",
+    operation_id="addNoteProduct",
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=CreatedProductSchema,
@@ -515,16 +528,16 @@ _CoverField = Annotated[
         ResourceLimitReachedError: RESOURCE_LIMIT_RULE,
     },
 )
-async def add_course(
+async def add_note(
     request: Request,
-    interactor: FromDishka[AddCourseProductCommandHandler],
+    interactor: FromDishka[AddNoteProductCommandHandler],
     auth: FromDishka[Authenticator],
     name: _NameField,
     description_html: _DescriptionField = None,
     total_duration_in_hours: _DurationHoursField = None,
     cover: _CoverField = None,
 ) -> CreatedProductSchema:
-    """Create a new course product owned by the current user.
+    """Create a new note product owned by the current user.
 
     Only ``name`` is required — every other field is optional and
     can be filled in later via PATCH endpoints. The endpoint
@@ -533,7 +546,7 @@ async def add_course(
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected add-course command handler.
+        interactor: Injected add-note command handler.
         auth: Injected authenticator that validates the access cookie.
         name: Form field — product title (VO-validated). Required.
         description_html: Optional form field — HTML description
@@ -556,15 +569,14 @@ async def add_course(
             ``PRODUCT_COVER_MAX_BYTES``; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    cover_data, cover_content_type = await _read_optional_cover(cover)
+    cover_upload = await _read_optional_cover(cover)
     oid = await interactor.run(
-        AddCourseProductCommand(
+        AddNoteProductCommand(
             author_id=ctx.user_id,
             name=name,
             description_html=description_html,
             total_duration_in_hours=total_duration_in_hours,
-            cover=cover_data,
-            cover_content_type=cover_content_type,
+            cover=cover_upload,
         ),
     )
     return CreatedProductSchema(oid=oid)
@@ -572,20 +584,20 @@ async def add_course(
 
 async def _read_optional_cover(
     upload: UploadFile | None,
-) -> tuple[bytes | None, str | None]:
-    """Read an optional cover ``UploadFile`` to ``(bytes, content_type)``.
+) -> IncomingUpload | None:
+    """Open an optional cover ``UploadFile`` as an ``IncomingUpload``.
 
-    Returns ``(None, None)`` when nothing was uploaded so the
-    handler can skip the file-creation branch entirely. Uses
+    Returns ``None`` when nothing was uploaded so the handler can
+    skip the file-creation branch entirely. Uses
     ``PRODUCT_COVER_MAX_BYTES`` to match the dedicated set-cover
-    endpoint — keep the two in lockstep.
+    endpoint — keep the two in lockstep. The returned upload exposes
+    ``.size`` / ``.content_type`` and streams its bytes on demand.
     """
     if upload is None:
-        return None, None
-    data, content_type = await read_upload(
+        return None
+    return await open_upload(
         upload, max_bytes=PRODUCT_COVER_MAX_BYTES,
     )
-    return data, content_type
 
 
 @router.patch(
@@ -830,15 +842,14 @@ async def set_cover(
             HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_upload(
+    upload = await open_upload(
         file, max_bytes=PRODUCT_COVER_MAX_BYTES,
     )
     await interactor.run(
         SetProductCoverCommand(
             actor_id=ctx.user_id,
             product_id=ProductID(product_id),
-            data=data,
-            content_type=content_type,
+            upload=upload,
         ),
     )
     view = await get_query.run(GetProductQuery(oid=ProductID(product_id)))
@@ -901,7 +912,7 @@ async def remove_cover(
     dependencies=_AUTH_SECURITY,
     response_model=ProductSchema,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
-    | {CannotPublishCourseDirectlyError: CANNOT_PUBLISH_COURSE_DIRECTLY_RULE},
+    | {CannotPublishNoteDirectlyError: CANNOT_PUBLISH_NOTE_DIRECTLY_RULE},
 )
 async def publish(
     request: Request,
@@ -912,10 +923,10 @@ async def publish(
 ) -> ProductSchema:
     """Mark a product published.
 
-    Course products cannot be published via this endpoint — they
+    Note products cannot be published via this endpoint — they
     are published implicitly by creating their first release
     (``POST /products/{id}/releases``). Direct publish on a
-    course returns HTTP 409 ``CannotPublishCourseDirectly``.
+    note returns HTTP 409 ``CannotPublishNoteDirectly``.
 
     Args:
         request: Source of the access-token cookie.
@@ -935,7 +946,7 @@ async def publish(
         NotResourceOwnerError: Caller is not the product's author;
             HTTP 403.
         EntityNotFoundError: No product with the given id; HTTP 404.
-        CannotPublishCourseDirectlyError: Product is a course;
+        CannotPublishNoteDirectlyError: Product is a note;
             HTTP 409.
     """
     ctx = await auth.authenticate(request)
@@ -1018,7 +1029,7 @@ async def unarchive(
 
     The target status is derived from ``published_at``: a non-null
     value means the product was previously published (webinar via
-    ``POST /products/{id}/publish``, course via its first release)
+    ``POST /products/{id}/publish``, note via its first release)
     and the product returns to ``published``; otherwise it returns
     to ``draft``.
 
@@ -1621,6 +1632,8 @@ async def add_qa(
         NotResourceOwnerError: Caller is not the product's author;
             HTTP 403.
         EntityNotFoundError: No product with the given id; HTTP 404.
+        ResourceLimitReachedError: The product already has
+            ``PRODUCT_QA_LIMIT`` Q&A entries; HTTP 409.
         FieldError: VO invariants violated; HTTP 422.
     """
     ctx = await auth.authenticate(request)
@@ -1699,8 +1712,8 @@ class CreatedEnrollmentSchema(BaseModel):
         CannotEnrollInPrivateProductError: (
             CANNOT_ENROLL_IN_PRIVATE_PRODUCT_RULE
         ),
-        CannotEnrollInUnreleasedCourseError: (
-            CANNOT_ENROLL_IN_UNRELEASED_COURSE_RULE
+        CannotEnrollInUnreleasedNoteError: (
+            CANNOT_ENROLL_IN_UNRELEASED_NOTE_RULE
         ),
         ProductDoesNotSupportError: PRODUCT_DOES_NOT_SUPPORT_RULE,
         AlreadyEnrolledError: ALREADY_ENROLLED_RULE,
@@ -1715,8 +1728,8 @@ async def enroll_into_product(
     """Create an enrollment for the current user in ``product_id``.
 
     The single public self-enroll entry point — replaces the legacy
-    course-scoped path. Accepts any product type that advertises
-    student enrollment (today: ``course`` only). The product must
+    note-scoped path. Accepts any product type that advertises
+    student enrollment (today: ``note`` only). The product must
     already be ``PUBLISHED``; drafts and archived products refuse
     with 409 ``CannotEnrollInUnpublishedProduct``. Admin grants
     (internal-only) go through a different handler and may target
@@ -1739,10 +1752,10 @@ async def enroll_into_product(
         CannotEnrollInPrivateProductError: Product visibility is
             ``PRIVATE`` (invite-only); HTTP 409. Access is only
             granted through an accepted gift/invite.
-        CannotEnrollInUnreleasedCourseError: Product is a course
+        CannotEnrollInUnreleasedNoteError: Product is a note
             with no releases yet; HTTP 409.
         ProductDoesNotSupportError: Product type does not advertise
-            ``HAS_COURSE_ENROLLMENT``; HTTP 409.
+            ``HAS_NOTE_ENROLLMENT``; HTTP 409.
         AlreadyEnrolledError: Caller already has an enrollment in
             this product; HTTP 409.
     """
@@ -1756,28 +1769,28 @@ async def enroll_into_product(
     return CreatedEnrollmentSchema(oid=enrollment_id)
 
 
-# ===================== Course-enrollment routes ======================== #
+# ===================== Note-enrollment routes ======================== #
 
 
-@course_router.get(
-    "/{course_id}/enrollments",
-    summary="List a course's enrollments",
-    operation_id="getCourseEnrollments",
+@note_router.get(
+    "/{note_id}/enrollments",
+    summary="List a note's enrollments",
+    operation_id="getNoteEnrollments",
     response_model=list[EnrollmentSchema],
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
-async def get_course_enrollments(
+async def get_note_enrollments(
     request: Request,
     interactor: FromDishka[GetProductEnrollmentsQueryHandler],
     auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,
+    note_id: UUID = _NOTE_ID_PATH,
 ) -> list[EnrollmentSchema]:
-    """Return course enrollments.
+    """Return note enrollments.
 
     Caller needs ``READ_PRODUCT`` on the product (owner or any
     collaborator with that permission). Returns the unified
-    :class:`EnrollmentSchema`; ``type`` is always ``"course"``
+    :class:`EnrollmentSchema`; ``type`` is always ``"note"``
     for this endpoint.
 
     Raises:
@@ -1790,7 +1803,7 @@ async def get_course_enrollments(
     views = await interactor.run(
         GetProductEnrollmentsQuery(
             actor_id=ctx.user_id,
-            product_id=ProductID(course_id),
+            product_id=ProductID(note_id),
         ),
     )
     return [EnrollmentSchema.from_view(v) for v in views]

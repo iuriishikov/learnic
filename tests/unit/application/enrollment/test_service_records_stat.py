@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from learnic.application.common.enrollment.service import EnrollmentService
 from learnic.application.common.enrollment.strategies import (
-    CourseEnrollmentTarget,
+    NoteEnrollmentTarget,
 )
 from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.entities.product.ids import ProductID
@@ -24,13 +24,13 @@ async def test_enroll_records_enrollment_statistic() -> None:
     statistics = AsyncMock()
 
     service = EnrollmentService(
-        strategies={EnrollmentKind.COURSE: strategy},
+        strategies={EnrollmentKind.NOTE: strategy},
         transaction=transaction,
         statistics=statistics,
     )
     await service.enroll(
         student_id=student_id,
-        target=CourseEnrollmentTarget(product_id=product_id),
+        target=NoteEnrollmentTarget(product_id=product_id),
     )
 
     transaction.commit.assert_awaited_once()

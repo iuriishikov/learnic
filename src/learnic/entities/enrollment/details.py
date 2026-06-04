@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from learnic.entities.course_release.ids import CourseReleaseID
+from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.value_objects import ProgressPercent
 
 
@@ -16,13 +16,13 @@ class EnrollmentDetails:
 
 
 @dataclass
-class CourseEnrollmentDetails(EnrollmentDetails):
-    """Course-kind specific data for an :class:`Enrollment`.
+class NoteEnrollmentDetails(EnrollmentDetails):
+    """Note-kind specific data for an :class:`Enrollment`.
 
-    Lives in the ``enrollment_course_details`` subtype table,
+    Lives in the ``enrollment_note_details`` subtype table,
     loaded out-of-band by the gateway after the parent row.
     """
 
-    release_id: CourseReleaseID
+    release_id: NoteReleaseID
     progress: ProgressPercent
     completed_at: datetime | None = None

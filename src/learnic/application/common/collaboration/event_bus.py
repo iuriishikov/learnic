@@ -1,4 +1,4 @@
-"""Pub/sub Protocol alias for the course-content collaboration channel.
+"""Pub/sub Protocol alias for the note-content collaboration channel.
 
 Concretises :class:`~learnic.application.common.events.EventChannel`
 to the channel's payload union so handlers can depend on

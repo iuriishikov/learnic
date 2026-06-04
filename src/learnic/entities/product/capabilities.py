@@ -10,7 +10,7 @@ class ProductCapability(StrEnum):
     Each :class:`ProductType` declares its set of capabilities in
     :data:`PRODUCT_TYPE_CAPABILITIES`. Handlers gate type-specific
     operations through :meth:`Product.require_supports` instead of
-    spreading ``if product.type is not ProductType.COURSE`` checks
+    spreading ``if product.type is not ProductType.NOTE`` checks
     across the codebase.
 
     Adding a new :class:`ProductType` requires adding a row to
@@ -18,22 +18,22 @@ class ProductCapability(StrEnum):
     below fails-fast on omission.
     """
 
-    HAS_COURSE_CONTENT = "has_course_content"
-    """Owns a draftable course tree (modules / lessons / blocks)."""
+    HAS_NOTE_CONTENT = "has_note_content"
+    """Owns a draftable note tree (modules / lessons / blocks)."""
 
-    HAS_COURSE_RELEASES = "has_course_releases"
-    """Publishes versioned snapshots of its course content."""
+    HAS_NOTE_RELEASES = "has_note_releases"
+    """Publishes versioned snapshots of its note content."""
 
-    HAS_COURSE_ENROLLMENT = "has_course_enrollment"
-    """Accepts asynchronous student enrollments into the course."""
+    HAS_NOTE_ENROLLMENT = "has_note_enrollment"
+    """Accepts asynchronous student enrollments into the note."""
 
 
 PRODUCT_TYPE_CAPABILITIES: Final[dict[ProductType, frozenset[ProductCapability]]] = {
-    ProductType.COURSE: frozenset(
+    ProductType.NOTE: frozenset(
         {
-            ProductCapability.HAS_COURSE_CONTENT,
-            ProductCapability.HAS_COURSE_RELEASES,
-            ProductCapability.HAS_COURSE_ENROLLMENT,
+            ProductCapability.HAS_NOTE_CONTENT,
+            ProductCapability.HAS_NOTE_RELEASES,
+            ProductCapability.HAS_NOTE_ENROLLMENT,
         },
     ),
 }

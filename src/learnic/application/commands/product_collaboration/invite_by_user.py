@@ -38,6 +38,7 @@ from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
 )
+from learnic.entities.common.limits import PRODUCT_COLLABORATION_LIMIT
 from learnic.entities.notification.enums import (
     NotificationCategory,
     NotificationChannel,
@@ -143,6 +144,11 @@ class InviteCollaboratorByUserCommandHandler:
                 product_id=data.product_id,
                 collaborator_id=data.target_user_id,
             )
+        PRODUCT_COLLABORATION_LIMIT.ensure(
+            await self._collab_gateway.count_active_or_pending_for_product(
+                data.product_id,
+            ),
+        )
         grants = await self._resolver.resolve(
             data.product_id,
             data.grants,

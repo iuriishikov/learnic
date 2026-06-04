@@ -9,7 +9,7 @@ only protocols that already live in :mod:`learnic.application`.
 
 **Quota ownership.** Storage is anchored on the *product author*,
 not on the upload's actor. A collaborator uploading into the
-author's course consumes the author's quota; the collaborator's own
+author's note consumes the author's quota; the collaborator's own
 plan governs only the products they themselves author. Every
 quota-changing entry point therefore takes the quota owner's user
 id, and every caller resolves that owner via ``product.author_id``.
@@ -78,13 +78,13 @@ class EntitlementService:
         return plan_for(subscription.plan_code)
 
     async def storage_used(self, user_id: UserID) -> int:
-        """Return aggregate bytes used across the user's own courses.
+        """Return aggregate bytes used across the user's own notes.
 
-        Counts files referenced from courses where ``user_id`` is the
-        author. Files the user uploaded into a collaborator's course
-        are NOT counted here — they belong to that course's author.
+        Counts files referenced from notes where ``user_id`` is the
+        author. Files the user uploaded into a collaborator's note
+        are NOT counted here — they belong to that note's author.
         """
-        return await self._file_usage_reader.bytes_used_by_course_author(
+        return await self._file_usage_reader.bytes_used_by_note_author(
             user_id,
         )
 
@@ -95,7 +95,7 @@ class EntitlementService:
         """Return plan + used + remaining for ``quota_owner_id``.
 
         Used by read-only endpoints (e.g. "how much can still be
-        uploaded into this course"). No advisory lock is taken — the
+        uploaded into this note"). No advisory lock is taken — the
         result is informational and may go stale between the read
         and any subsequent upload, which is exactly the contract
         :meth:`ensure_can_upload` enforces at write time.

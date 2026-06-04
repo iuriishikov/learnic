@@ -8,7 +8,7 @@ Three concrete adapters:
   :class:`SubscriptionView` projections.
 * ``FileUsageReaderAlchemy`` — aggregates ``files.size_bytes``
   across the three file-backed block types referenced from a given
-  author's courses.
+  author's notes.
 """
 
 from typing import Any, Final
@@ -36,7 +36,7 @@ from learnic.entities.billing.ids import PlanCode, SubscriptionID
 from learnic.entities.billing.models import StorageQuotaBreach, Subscription
 from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
-from learnic.infrastructure.persistence.models.course_block import (
+from learnic.infrastructure.persistence.models.note_block import (
     file_blocks_table,
     lesson_blocks_table,
     photo_collage_items_table,
@@ -133,7 +133,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
         self._session: Final = session
 
     @override
-    async def bytes_used_by_course_author(self, user_id: UserID) -> int:
+    async def bytes_used_by_note_author(self, user_id: UserID) -> int:
         # File-block path: file_id is a direct column on file_blocks.
         file_path = (
             sa.select(file_blocks_table.c.file_id.label("file_id"))
@@ -209,7 +209,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
 
     @override
     async def usage_by_all_authors(self) -> dict[UserID, int]:
-        # Same three-path union as bytes_used_by_course_author, but
+        # Same three-path union as bytes_used_by_note_author, but
         # carrying author_id alongside the file_id so we can GROUP BY
         # author after DISTINCT-deduplicating files.
         file_path = (
@@ -324,11 +324,11 @@ class StorageQuotaBreachMapperAlchemy(StorageQuotaBreachGateway):
 
 
 class AuthorActiveFilesReaderAlchemy(AuthorActiveFilesReader):
-    """Walk an author's live files newest-first via course-block joins.
+    """Walk an author's live files newest-first via note-block joins.
 
     Mirrors :class:`FileUsageReaderAlchemy`'s scoping (files
     referenced by file / video-file / photo-collage blocks within
-    courses authored by ``user_id``, deduplicated via DISTINCT,
+    notes authored by ``user_id``, deduplicated via DISTINCT,
     soft-deleted excluded) but emits per-file rows ordered by
     ``files.uploaded_at DESC`` for LIFO eviction.
     """

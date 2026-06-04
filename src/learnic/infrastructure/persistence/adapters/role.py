@@ -225,6 +225,15 @@ class RoleReaderAlchemy(RoleReader):
         return int((await self._session.execute(stmt)).scalar_one())
 
     @override
+    async def count_for_product(self, product_id: ProductID) -> int:
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(roles_table)
+            .where(roles_table.c.product_id == product_id)
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    @override
     async def min_position_for_user(
         self,
         product_id: ProductID,

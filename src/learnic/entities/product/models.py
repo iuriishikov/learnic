@@ -26,7 +26,7 @@ from learnic.entities.user.models import UserID
 
 @dataclass
 class Product(BaseEntity[ProductID]):
-    """A user-owned learning product (course only at this phase).
+    """A user-owned learning product (note only at this phase).
 
     Only ``name`` is a required identity field at creation time —
     every other piece of metadata (``description``,
@@ -110,7 +110,7 @@ class Product(BaseEntity[ProductID]):
 
         ``published_at`` is preserved on archive, so it is the
         authoritative signal: a non-``None`` value means the product
-        was previously published (webinar via ``publish()``, course
+        was previously published (webinar via ``publish()``, note
         via first release) and is restored to ``PUBLISHED``;
         otherwise the product returns to ``DRAFT``.
         """
@@ -120,7 +120,7 @@ class Product(BaseEntity[ProductID]):
             self.status = ProductStatus.DRAFT
 
     @classmethod
-    def create_course(
+    def create_note(
         cls,
         author_id: UserID,
         name: ProductTitle,
@@ -132,7 +132,7 @@ class Product(BaseEntity[ProductID]):
         return cls(
             oid=ProductID(uuid.uuid4()),
             author_id=author_id,
-            type=ProductType.COURSE,
+            type=ProductType.NOTE,
             name=name,
             description=description,
             total_duration_in_hours=total_duration_in_hours,

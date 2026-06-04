@@ -44,6 +44,7 @@ from learnic.entities.role.constants import (
     ROLE_NAME_MAX_LEN,
     ROLE_NAME_MIN_LEN,
 )
+from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.permissions import Permission
 from learnic.presentation.http.common.auth_deps import (
@@ -52,6 +53,7 @@ from learnic.presentation.http.common.auth_deps import (
 )
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_AUTHORIZED_FIELD_MAP,
+    RESOURCE_LIMIT_RULE,
     ROLE_DELETE_MAP,
     ROLE_MUTATION_MAP,
 )
@@ -344,7 +346,8 @@ async def list_product_roles(
     status_code=status.HTTP_201_CREATED,
     response_model=CreatedRoleSchema,
     dependencies=_AUTH_SECURITY,
-    error_map=ROLE_MUTATION_MAP,
+    error_map=ROLE_MUTATION_MAP
+    | {ResourceLimitReachedError: RESOURCE_LIMIT_RULE},
 )
 async def create_custom_role(
     request: Request,
@@ -373,6 +376,8 @@ async def create_custom_role(
             HTTP 403.
         RoleNameAlreadyTakenError: Name already used inside this
             product; HTTP 409.
+        ResourceLimitReachedError: The product already has
+            ``ROLE_LIMIT`` roles; HTTP 409.
         FieldError: ``RoleName`` / ``RoleDescription`` /
             ``PermissionSet`` invariants violated; HTTP 422.
     """

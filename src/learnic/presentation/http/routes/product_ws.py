@@ -5,10 +5,10 @@ in-process buses fan in here:
 
 * :class:`ProductEventBus` — product-metadata, cover, status,
   webinar defaults, Q&A, collaboration lifecycle, role catalogue.
-* :class:`ContentEventBus` — course-content edits (modules,
+* :class:`ContentEventBus` — note-content edits (modules,
   lessons, blocks, releases, draft reset). Only subscribed when
   the target product supports
-  :attr:`ProductCapability.HAS_COURSE_CONTENT` — webinar products
+  :attr:`ProductCapability.HAS_NOTE_CONTENT` — webinar products
   see product events only.
 
 Both buses publish events that share the same wire envelope
@@ -33,7 +33,7 @@ model WebSockets):
   disconnects. No client→server messages are interpreted yet.
 * **Initial state.** Client refetches every REST resource the
   channel reflects (product, Q&A, collaborations, roles; for
-  courses also the draft tree and releases) before opening the
+  notes also the draft tree and releases) before opening the
   socket. On reconnect, refetch + resubscribe — no event
   buffering / replay.
 
@@ -111,8 +111,8 @@ async def product_ws(
         if product is None:
             await websocket.close(code=4404, reason="product not found")
             return
-        has_course_content = product.supports(
-            ProductCapability.HAS_COURSE_CONTENT,
+        has_note_content = product.supports(
+            ProductCapability.HAS_NOTE_CONTENT,
         )
 
         authorizer = await request_scope.get(Authorizer)
@@ -131,7 +131,7 @@ async def product_ws(
 
     product_event_bus = await container.get(ProductEventBus)
     content_event_bus: ContentEventBus | None = None
-    if has_course_content:
+    if has_note_content:
         content_event_bus = await container.get(ContentEventBus)
 
     product_id_obj = ProductID(product_id)

@@ -12,12 +12,8 @@ from learnic.application.commands.enrollment.complete import (
     CompleteEnrollmentCommandHandler,
 )
 from learnic.application.commands.enrollment.repin import (
-    RePinCourseEnrollmentCommand,
-    RePinCourseEnrollmentCommandHandler,
-)
-from learnic.application.commands.enrollment.update_progress import (
-    UpdateProgressCommand,
-    UpdateProgressCommandHandler,
+    RePinNoteEnrollmentCommand,
+    RePinNoteEnrollmentCommandHandler,
 )
 from learnic.application.common.persistence.enrollment import (
     EnrollmentView,
@@ -26,11 +22,7 @@ from learnic.application.queries.enrollment.list_for_student import (
     GetStudentEnrollmentsQuery,
     GetStudentEnrollmentsQueryHandler,
 )
-from learnic.entities.course_release.ids import CourseReleaseID
-from learnic.entities.enrollment.constants import (
-    PROGRESS_PERCENT_MAX,
-    PROGRESS_PERCENT_MIN,
-)
+from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.enums import (
     EnrollmentKind,
     EnrollmentStatus,
@@ -52,8 +44,8 @@ from learnic.presentation.http.common.errors.rules import (
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 
-course_router = ErrorAwareRouter(
-    prefix="/courses/{course_id}/enrollments",
+note_router = ErrorAwareRouter(
+    prefix="/notes/{note_id}/enrollments",
     tags=["Enrollments"],
     route_class=DishkaErrorAwareRoute,
 )
@@ -64,8 +56,8 @@ me_router = ErrorAwareRouter(
 )
 
 _AUTH_SECURITY: Final = [Depends(access_cookie_scheme)]
-_COURSE_ID_PATH: Final = Path(
-    description="Parent course (product) UUID.",
+_NOTE_ID_PATH: Final = Path(
+    description="Parent note (product) UUID.",
     examples=["3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"],
 )
 _ENROLLMENT_ID_PATH: Final = Path(
@@ -77,29 +69,8 @@ _ENROLLMENT_ID_PATH: Final = Path(
 # --------------------------- request / response schemas --------------- #
 
 
-class UpdateProgressSchema(BaseModel):
-    """Body for ``PATCH /courses/{course_id}/enrollments/{id}/progress``."""
-
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"value": 75}]},
-    )
-
-    value: int = Field(
-        ge=PROGRESS_PERCENT_MIN,
-        le=PROGRESS_PERCENT_MAX,
-        description=(
-            "New progress percentage in "
-            f"`[{PROGRESS_PERCENT_MIN}, {PROGRESS_PERCENT_MAX}]`. "
-            f"Setting `{PROGRESS_PERCENT_MAX}` automatically marks "
-            "the enrollment completed (sets `completed_at` on the "
-            "course details body; does not change `status`)."
-        ),
-        examples=[75],
-    )
-
-
 class RePinEnrollmentSchema(BaseModel):
-    """Body for ``PATCH /courses/{course_id}/enrollments/{id}/release``."""
+    """Body for ``PATCH /notes/{note_id}/enrollments/{id}/release``."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -111,7 +82,7 @@ class RePinEnrollmentSchema(BaseModel):
 
     release_id: UUID = Field(
         description=(
-            "Target release UUID. Must belong to the same course "
+            "Target release UUID. Must belong to the same note "
             "as the enrollment — releases of other products are "
             "rejected as `EntityNotFound`."
         ),
@@ -119,8 +90,8 @@ class RePinEnrollmentSchema(BaseModel):
     )
 
 
-class CourseEnrollmentDetailsSchema(BaseModel):
-    """Course-kind specific projection of an :class:`EnrollmentView`."""
+class NoteEnrollmentDetailsSchema(BaseModel):
+    """Note-kind specific projection of an :class:`EnrollmentView`."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -142,9 +113,9 @@ class CourseEnrollmentDetailsSchema(BaseModel):
 class EnrollmentSchema(BaseModel):
     """Unified response projection for :class:`EnrollmentView`.
 
-    ``kind`` discriminates the polymorphic body: ``course``
+    ``kind`` discriminates the polymorphic body: ``note``
     enrollments carry ``details`` shaped as
-    :class:`CourseEnrollmentDetailsSchema`. ``product_id`` and
+    :class:`NoteEnrollmentDetailsSchema`. ``product_id`` and
     ``student_id`` live on the base shape so callers don't have
     to descend into ``details`` for the most common references.
     """
@@ -154,7 +125,7 @@ class EnrollmentSchema(BaseModel):
             "examples": [
                 {
                     "oid": "e5f60718-2b34-4d2c-9d11-9d4f0a44b6c8",
-                    "kind": "course",
+                    "kind": "note",
                     "product_id": (
                         "3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"
                     ),
@@ -181,7 +152,7 @@ class EnrollmentSchema(BaseModel):
     student_id: UUID
     status: EnrollmentStatus
     enrolled_at: datetime
-    details: CourseEnrollmentDetailsSchema | None
+    details: NoteEnrollmentDetailsSchema | None
 
     @classmethod
     def from_view(cls, view: EnrollmentView) -> Self:
@@ -193,7 +164,7 @@ class EnrollmentSchema(BaseModel):
             status=view.status,
             enrolled_at=view.enrolled_at,
             details=(
-                CourseEnrollmentDetailsSchema(
+                NoteEnrollmentDetailsSchema(
                     release_id=view.details.release_id,
                     progress_percent=view.details.progress_percent,
                     completed_at=view.details.completed_at,
@@ -232,63 +203,25 @@ async def get_mine(
     return [EnrollmentSchema.from_view(v) for v in views]
 
 
-# --------------------------- course item ops -------------------------- #
+# --------------------------- note item ops -------------------------- #
 
 
-@course_router.patch(
-    "/{enrollment_id}/progress",
-    summary="Update progress on a course enrollment",
-    operation_id="updateEnrollmentProgress",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=_AUTH_SECURITY,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
-)
-async def update_progress(
-    request: Request,
-    payload: UpdateProgressSchema,
-    interactor: FromDishka[UpdateProgressCommandHandler],
-    auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,  # noqa: ARG001
-    enrollment_id: UUID = _ENROLLMENT_ID_PATH,
-) -> None:
-    """Update progress (student-only). Hitting 100 auto-completes.
-
-    Returns:
-        ``204 No Content``.
-
-    Raises:
-        InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: Caller is not the enrolled
-            student; HTTP 403.
-        EntityNotFoundError: HTTP 404.
-        FieldError: ``ProgressPercent`` invariants; HTTP 422.
-    """
-    ctx = await auth.authenticate(request)
-    await interactor.run(
-        UpdateProgressCommand(
-            actor_id=ctx.user_id,
-            enrollment_id=EnrollmentID(enrollment_id),
-            progress_percent=payload.value,
-        ),
-    )
-
-
-@course_router.post(
+@note_router.post(
     "/{enrollment_id}/complete",
-    summary="Mark a course enrollment completed",
-    operation_id="completeCourseEnrollment",
+    summary="Mark a note enrollment completed",
+    operation_id="completeNoteEnrollment",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP,
 )
-async def complete_course(
+async def complete_note(
     request: Request,
     interactor: FromDishka[CompleteEnrollmentCommandHandler],
     auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,  # noqa: ARG001
+    note_id: UUID = _NOTE_ID_PATH,  # noqa: ARG001
     enrollment_id: UUID = _ENROLLMENT_ID_PATH,
 ) -> None:
-    """Mark a course enrollment completed (product author only).
+    """Mark a note enrollment completed (product author only).
 
     Sets ``details.completed_at`` on the enrollment. Does NOT
     change ``status`` — a completed enrollment is still ACTIVE.
@@ -310,10 +243,10 @@ async def complete_course(
     )
 
 
-@course_router.patch(
+@note_router.patch(
     "/{enrollment_id}/release",
-    summary="Re-pin a course enrollment to a different release",
-    operation_id="repinCourseEnrollment",
+    summary="Re-pin a note enrollment to a different release",
+    operation_id="repinNoteEnrollment",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=AUTHENTICATED_OWNER_FIELD_MAP
@@ -327,16 +260,16 @@ async def complete_course(
 async def repin_release(
     request: Request,
     payload: RePinEnrollmentSchema,
-    interactor: FromDishka[RePinCourseEnrollmentCommandHandler],
+    interactor: FromDishka[RePinNoteEnrollmentCommandHandler],
     auth: FromDishka[Authenticator],
-    course_id: UUID = _COURSE_ID_PATH,  # noqa: ARG001
+    note_id: UUID = _NOTE_ID_PATH,  # noqa: ARG001
     enrollment_id: UUID = _ENROLLMENT_ID_PATH,
 ) -> None:
-    """Move a course enrollment to a different release (author only).
+    """Move a note enrollment to a different release (author only).
 
     Caller needs ``MANAGE_RELEASES`` on the parent product (owner
     short-circuits inside the authorizer). The target release
-    must belong to the same course as the enrollment. Only
+    must belong to the same note as the enrollment. Only
     ACTIVE enrollments may be re-pinned — revoked enrollments
     have no access and must be restored first.
 
@@ -348,7 +281,7 @@ async def repin_release(
 
     Args:
         payload: Body carrying the target ``release_id``.
-        course_id: Parent course (product) UUID — present for
+        note_id: Parent note (product) UUID — present for
             URL framing, not used by the handler (validation
             walks ``enrollment → product → release``).
         enrollment_id: Target enrollment UUID.
@@ -359,21 +292,21 @@ async def repin_release(
     Raises:
         InvalidTokenError: HTTP 401.
         InsufficientPermissionsError: HTTP 403 — caller lacks
-            ``MANAGE_RELEASES`` on the course.
+            ``MANAGE_RELEASES`` on the note.
         EntityNotFoundError: HTTP 404 — enrollment missing, or
             target release missing / belongs to a different
             product.
         EnrollmentDoesNotSupportError: HTTP 409 — enrollment
-            kind has no release pin (only ``course`` kind does
+            kind has no release pin (only ``note`` kind does
             today).
         CannotRepinRevokedEnrollmentError: HTTP 409 — enrollment
             is REVOKED.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
-        RePinCourseEnrollmentCommand(
+        RePinNoteEnrollmentCommand(
             actor_id=ctx.user_id,
             enrollment_id=EnrollmentID(enrollment_id),
-            release_id=CourseReleaseID(payload.release_id),
+            release_id=NoteReleaseID(payload.release_id),
         ),
     )

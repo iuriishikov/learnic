@@ -38,7 +38,7 @@ class AcceptGiftByTokenCommandHandler:
 
     Used by the SPA landing route ``/gifts/{id}/accept`` which carries
     the plaintext token from the email. Validates addressee + token +
-    TTL, creates the course enrollment, and notifies the gifter.
+    TTL, creates the note enrollment, and notifies the gifter.
     """
 
     def __init__(

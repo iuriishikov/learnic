@@ -58,7 +58,7 @@ from learnic.presentation.http.common.schemas import (
 from learnic.presentation.http.common.upload_limits import (
     USER_EXPERIENCE_ICON_MAX_BYTES,
 )
-from learnic.presentation.http.common.uploads import read_upload
+from learnic.presentation.http.common.uploads import open_upload
 
 router = ErrorAwareRouter(
     prefix="/users/{user_id}/experiences",
@@ -530,15 +530,14 @@ async def upload_icon(
         FileTooLargeError: Payload exceeds the upload cap; HTTP 422.
     """
     ctx = await auth.authenticate(request)
-    data, content_type = await read_upload(
+    upload = await open_upload(
         file, max_bytes=USER_EXPERIENCE_ICON_MAX_BYTES,
     )
     file_id = await interactor.run(
         SetUserExperienceIconCommand(
             actor_id=ctx.user_id,
             experience_id=UserExperienceID(experience_id),
-            data=data,
-            content_type=content_type,
+            upload=upload,
         ),
     )
     return UploadedFileSchema(oid=file_id)

@@ -1,7 +1,7 @@
 """Batch-resolve file references inside a lesson-block query result.
 
-Both :class:`CourseContentReaderAlchemy` (draft side) and
-:class:`CourseReleaseReaderAlchemy` (release side) SELECT block rows
+Both :class:`NoteContentReaderAlchemy` (draft side) and
+:class:`NoteReleaseReaderAlchemy` (release side) SELECT block rows
 that may carry file ids in two shapes:
 
 * ``file_block_file_id`` / ``video_file_block_file_id`` — direct FK

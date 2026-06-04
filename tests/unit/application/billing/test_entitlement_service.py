@@ -28,7 +28,7 @@ async def test_pure_shrink_passes_even_when_over_cap(
     # Author is already at 100% of the FREE cap. A replace that
     # frees more bytes than it adds (shrink) must NOT raise — this
     # is the whole point of the delta-aware variant.
-    fake_file_usage_reader.bytes_used_by_course_author.return_value = _TWO_GIB
+    fake_file_usage_reader.bytes_used_by_note_author.return_value = _TWO_GIB
 
     await entitlement_service.ensure_can_replace_upload(
         _USER_ID,
@@ -43,7 +43,7 @@ async def test_replace_within_cap_passes(
     entitlement_service: EntitlementService,
     fake_file_usage_reader: AsyncMock,
 ) -> None:
-    fake_file_usage_reader.bytes_used_by_course_author.return_value = (
+    fake_file_usage_reader.bytes_used_by_note_author.return_value = (
         1024 * 1024 * 1024  # 1 GiB used out of 2 GiB cap
     )
 
@@ -60,7 +60,7 @@ async def test_replace_over_cap_raises_with_effective_delta(
 ) -> None:
     # 1.9 GiB used. Replace adds 200 MB, frees 50 MB → effective
     # delta = 150 MB. 1.9 GiB + 150 MB > 2 GiB → should raise.
-    fake_file_usage_reader.bytes_used_by_course_author.return_value = (
+    fake_file_usage_reader.bytes_used_by_note_author.return_value = (
         int(1.9 * 1024 * 1024 * 1024)
     )
     added = 200 * 1024 * 1024
@@ -94,7 +94,7 @@ async def test_replace_acquires_lock_before_reading_usage(
         call_order.append("read_used")
         return 0
 
-    fake_file_usage_reader.bytes_used_by_course_author.side_effect = (
+    fake_file_usage_reader.bytes_used_by_note_author.side_effect = (
         record_used
     )
 

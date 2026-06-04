@@ -12,7 +12,7 @@ from learnic.application.common.persistence.file import (
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
 from learnic.entities.product.ids import ProductID
-from learnic.infrastructure.persistence.models.course_block import (
+from learnic.infrastructure.persistence.models.note_block import (
     file_blocks_table,
     lesson_blocks_table,
     photo_collage_items_table,

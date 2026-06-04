@@ -14,7 +14,6 @@ from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationSaver,
     ProductCollaborationView,
 )
-from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.grant import CollaborationGrant
@@ -28,6 +27,11 @@ from learnic.entities.product_collaboration.models import (
 from learnic.entities.role.ids import RoleID
 from learnic.entities.role.permissions import ScopeType
 from learnic.entities.user.models import UserID
+from learnic.infrastructure.persistence.adapters._embedded_user import (
+    embedded_user_columns,
+    user_view_from_row_optional,
+)
+from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product_collaboration import (
     collaboration_grants_table,
     product_collaborations_table,
@@ -109,6 +113,26 @@ class ProductCollaborationMapperAlchemy(ProductCollaborationGateway):
             return None
         collab.grants = await self._load_grants(collab.oid)
         return collab
+
+    @override
+    async def count_active_or_pending_for_product(
+        self,
+        product_id: ProductID,
+    ) -> int:
+        stmt = (
+            sa.select(sa.func.count())
+            .select_from(product_collaborations_table)
+            .where(
+                product_collaborations_table.c.product_id == product_id,
+                product_collaborations_table.c.status.in_(
+                    [
+                        CollaborationStatus.PENDING_INVITE.value,
+                        CollaborationStatus.ACTIVE.value,
+                    ],
+                ),
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
 
     @override
     async def count_email_invites_by_actor_since(
@@ -227,16 +251,8 @@ class ProductCollaborationSaverAlchemy(ProductCollaborationSaver):
         )
 
 
-def _row_to_collaborator(row: sa.Row[Any]) -> UserRefView | None:
-    if row.collaborator_oid is None:
-        return None
-    return UserRefView(
-        oid=UserID(row.collaborator_oid),
-        email=row.collaborator_email,
-        first_name=row.collaborator_first_name,
-        last_name=row.collaborator_last_name,
-        patronymic=row.collaborator_patronymic,
-    )
+_collaborator_avatar = files_table.alias("collaborator_avatar")
+_collaborator_cover = files_table.alias("collaborator_cover")
 
 
 class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
@@ -306,15 +322,32 @@ class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
             product_collaborations_table.c.accepted_at,
             product_collaborations_table.c.declined_at,
             product_collaborations_table.c.revoked_at,
-            users_table.c.oid.label("collaborator_oid"),
-            users_table.c.email.label("collaborator_email"),
-            users_table.c.first_name.label("collaborator_first_name"),
-            users_table.c.last_name.label("collaborator_last_name"),
-            users_table.c.patronymic.label("collaborator_patronymic"),
+            *embedded_user_columns(
+                users_table,
+                _collaborator_avatar,
+                _collaborator_cover,
+                "collaborator",
+            ),
         ).select_from(
             product_collaborations_table.outerjoin(
                 users_table,
                 product_collaborations_table.c.collaborator_id == users_table.c.oid,
+            )
+            .outerjoin(
+                _collaborator_avatar,
+                sa.and_(
+                    users_table.c.avatar_file_id
+                    == _collaborator_avatar.c.oid,
+                    _collaborator_avatar.c.deleted_at.is_(None),
+                ),
+            )
+            .outerjoin(
+                _collaborator_cover,
+                sa.and_(
+                    users_table.c.cover_file_id
+                    == _collaborator_cover.c.oid,
+                    _collaborator_cover.c.deleted_at.is_(None),
+                ),
             ),
         )
 
@@ -326,7 +359,7 @@ class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
         return ProductCollaborationView(
             oid=ProductCollaborationID(row.oid),
             product_id=ProductID(row.product_id),
-            collaborator=_row_to_collaborator(row),
+            collaborator=user_view_from_row_optional(row, "collaborator"),
             invited_email=row.invited_email,
             status=row.status,
             invited_by=UserID(row.invited_by),

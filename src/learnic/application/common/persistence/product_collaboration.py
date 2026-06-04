@@ -4,7 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.user_ref import UserRefView
+from learnic.application.common.persistence.user import UserView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.enums import CollaborationStatus
 from learnic.entities.product_collaboration.ids import (
@@ -32,7 +32,7 @@ class CollaborationGrantView:
 class ProductCollaborationView:
     oid: ProductCollaborationID
     product_id: ProductID
-    collaborator: UserRefView | None
+    collaborator: UserView | None
     invited_email: str | None
     status: CollaborationStatus
     invited_by: UserID
@@ -96,6 +96,21 @@ class ProductCollaborationGateway(Protocol):
 
         Used to prevent issuing two pending email invites to the
         same address for the same product.
+        """
+        ...
+
+    async def count_active_or_pending_for_product(
+        self,
+        product_id: ProductID,
+    ) -> int:
+        """Count live (active + pending) collaborations on a product.
+
+        Used by the invite handlers to enforce
+        :data:`PRODUCT_COLLABORATION_LIMIT`. Counts only
+        ``PENDING_INVITE`` and ``ACTIVE`` rows — ``DECLINED`` /
+        ``REVOKED`` are terminal audit rows that no longer occupy a
+        collaborator slot, so they must not count toward the cap
+        (same closed-set discipline as :meth:`RoleGateway.is_in_use`).
         """
         ...
 

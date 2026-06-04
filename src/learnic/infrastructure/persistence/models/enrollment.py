@@ -71,12 +71,12 @@ enrollments_table = sa.Table(
 )
 
 
-# Course-specific 1:1 subtype row. PK == FK enrollments.oid so the
+# Note-specific 1:1 subtype row. PK == FK enrollments.oid so the
 # row dies with its parent. ``product_id`` / ``student_id`` are
 # NOT denormalised here — they live on the parent enrollments row,
 # which now carries the UNIQUE(product_id, student_id) constraint.
-enrollment_course_details_table = sa.Table(
-    "enrollment_course_details",
+enrollment_note_details_table = sa.Table(
+    "enrollment_note_details",
     mapper_registry.metadata,
     sa.Column(
         "enrollment_id",
@@ -88,9 +88,9 @@ enrollment_course_details_table = sa.Table(
         "release_id",
         sa.Uuid,
         sa.ForeignKey(
-            "course_releases.oid",
+            "note_releases.oid",
             ondelete="RESTRICT",
-            name="fk_enrollment_course_details_release_id",
+            name="fk_enrollment_note_details_release_id",
         ),
         nullable=True,
     ),
@@ -105,7 +105,7 @@ enrollment_course_details_table = sa.Table(
         sa.DateTime(timezone=True),
         nullable=True,
     ),
-    sa.Index("ix_enrollment_course_details_release_id", "release_id"),
+    sa.Index("ix_enrollment_note_details_release_id", "release_id"),
 )
 
 

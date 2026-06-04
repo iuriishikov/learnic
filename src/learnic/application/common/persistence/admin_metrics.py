@@ -7,17 +7,22 @@ from typing import Protocol
 class AdminMetric(StrEnum):
     """A time-series metric the admin dashboard can chart.
 
-    Each value maps to a slice of the ``statistics`` event log:
+    Most values map to a slice of the ``statistics`` event log:
 
     - ``REGISTRATIONS`` — ``registration`` events, counted.
     - ``ENROLLMENTS`` — ``enrollment`` events, counted.
     - ``ACTIVE_USERS`` — distinct actors of ``site_visit`` events
       per day (the daily-active-users series).
+
+    ``NEW_PRODUCTS`` is the exception: there is no product-creation
+    event in the log, so it is counted straight off ``products`` by
+    ``created_at`` (every product created that UTC day, any status).
     """
 
     REGISTRATIONS = "registrations"
     ENROLLMENTS = "enrollments"
     ACTIVE_USERS = "active_users"
+    NEW_PRODUCTS = "new_products"
 
 
 @dataclass(slots=True, frozen=True)

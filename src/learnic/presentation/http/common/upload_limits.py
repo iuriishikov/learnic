@@ -3,7 +3,7 @@
 There is intentionally **no** single global ``MAX_FILE_SIZE_BYTES``
 constant: every route reading an upload must import the constant
 matching its own use case and pass it to
-:func:`learnic.presentation.http.common.uploads.read_upload` as
+:func:`learnic.presentation.http.common.uploads.open_upload` as
 ``max_bytes=...``. The keyword-only ``max_bytes`` parameter has no
 default, so omitting it is a ``TypeError`` at runtime and a mypy
 error at static-analysis time — there is no way to upload "the
@@ -19,9 +19,10 @@ Caveats:
   request body. There is no protection here against the network
   transferring the entire over-cap payload; combine with an upstream
   reverse-proxy body limit (Caddy / NGINX) when DOS is a concern.
-* ``read_upload`` reads ``max_bytes + 1`` bytes and rejects on
-  ``> max_bytes`` — anything bigger never lands in memory beyond
-  that single extra byte.
+* ``open_upload`` reads the spooled upload's ``size`` and rejects on
+  ``> max_bytes`` before any S3 write, so an over-cap payload is
+  never pulled into memory — the body is streamed to object storage
+  in chunks rather than buffered.
 """
 
 from typing import Final
@@ -45,7 +46,7 @@ PRODUCT_COVER_MAX_BYTES: Final = 10 * _MB
 # ---- lesson-content blocks (per-author-creativity caps) ---- #
 
 # Generic file block — PDFs / slide decks / small archives. 50 MB
-# covers the typical course material; anything heavier should live on
+# covers the typical note material; anything heavier should live on
 # an external CDN and be linked rather than re-hosted.
 LESSON_FILE_BLOCK_MAX_BYTES: Final = 50 * _MB
 # Video block — a single lecture or demo. 1 GiB covers ~30 min of
@@ -56,3 +57,14 @@ LESSON_VIDEO_BLOCK_MAX_BYTES: Final = 1024 * _MB
 # high-resolution exports. The block-level item count is capped at
 # 12, so the whole collage payload tops out below 1 GiB.
 LESSON_COLLAGE_ITEM_MAX_BYTES: Final = 80 * _MB
+
+# ---- blog-post media blocks (admin-authored platform content) ---- #
+
+# Blog image block — a single inline image. Matches the user-cover cap
+# (10 MB): comfortably covers a high-resolution hero/figure without
+# inviting raw multi-hundred-MB uploads into a text-first medium.
+BLOG_IMAGE_BLOCK_MAX_BYTES: Final = 10 * _MB
+# Blog video block — a single embedded clip. Same 1 GiB ceiling as the
+# lesson video block (~30 min of 1080p H.264); longer cuts should be
+# split across posts or hosted externally.
+BLOG_VIDEO_BLOCK_MAX_BYTES: Final = 1024 * _MB

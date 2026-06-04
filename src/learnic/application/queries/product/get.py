@@ -8,9 +8,12 @@ from learnic.application.common.persistence.product import (
     ProductView,
 )
 from learnic.application.common.persistence.tag import TagView
-from learnic.application.common.persistence.user_ref import UserRefView
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.application.common.validators import validate_empty
+from learnic.application.queries.user.get import (
+    UserOutput,
+    resolve_user_output,
+)
 from learnic.entities.product.enums import (
     ProductStatus,
     ProductType,
@@ -43,7 +46,7 @@ class ProductOutput:
     name: str
     description: str | None
     total_duration_in_hours: int | None
-    author: UserRefView
+    author: UserOutput
     cover: FileView | None
     tags: list[TagView]
     published_at: datetime | None
@@ -75,7 +78,10 @@ async def resolve_product_output(
 
     Single call site for cover-URL resolution; reused by the
     single-product and list-product query handlers so they share
-    the same conversion logic.
+    the same conversion logic. The author is resolved through the
+    shared :func:`resolve_user_output` so it carries the same unified
+    ``UserSchema`` shape (avatar/cover signed) the API uses everywhere
+    a user is embedded.
     """
     return ProductOutput(
         oid=view.oid,
@@ -85,7 +91,7 @@ async def resolve_product_output(
         name=view.name,
         description=view.description,
         total_duration_in_hours=view.total_duration_in_hours,
-        author=view.author,
+        author=await resolve_user_output(view.author, file_storage),
         cover=await FileView.of_optional(view.cover, file_storage),
         tags=view.tags,
         published_at=view.published_at,

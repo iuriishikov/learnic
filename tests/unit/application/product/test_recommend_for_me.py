@@ -29,7 +29,7 @@ def _make_view(
 ) -> ProductView:
     return ProductView(
         oid=ProductID(uuid.uuid4()),
-        type=ProductType.COURSE,
+        type=ProductType.NOTE,
         status=ProductStatus.PUBLISHED,
         name=name,
         description=None,

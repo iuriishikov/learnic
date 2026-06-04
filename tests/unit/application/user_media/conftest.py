@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from learnic.application.common.storage.upload import IncomingUpload
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
 from learnic.entities.file.value_objects import (
@@ -48,25 +49,26 @@ def fake_files_gateway() -> AsyncMock:
 def fake_file_uploads() -> AsyncMock:
     """Stub ``FileUploadService`` for handlers that mutate file state.
 
-    ``upload`` returns a fresh ``File`` so callers get a real ``oid``
-    to link via ``user.set_avatar(file.oid)``; ``soft_delete_previous``
-    is just an awaitable so we can assert it was (or wasn't) called.
+    ``upload_stream`` returns a fresh ``File`` so callers get a real
+    ``oid`` to link via ``user.set_avatar(file.oid)``;
+    ``soft_delete_previous`` is just an awaitable so we can assert it
+    was (or wasn't) called.
     """
 
-    def _build_file(data: bytes, content_type: str, uploaded_by: UserID) -> File:
+    def _build_file(upload: IncomingUpload, uploaded_by: UserID) -> File:
         return File(
             oid=FileID(uuid.uuid4()),
             storage_name=StorageName(str(uuid.uuid4())),
             bucket=StorageBucket("test-bucket"),
-            content_type=ContentType(content_type),
-            size_bytes=FileSize(len(data)),
+            content_type=ContentType(upload.content_type),
+            size_bytes=FileSize(upload.size),
             uploaded_by=uploaded_by,
             uploaded_at=datetime.now(timezone.utc),
             deleted_at=None,
         )
 
     svc = MagicMock()
-    svc.upload = AsyncMock(side_effect=_build_file)
+    svc.upload_stream = AsyncMock(side_effect=_build_file)
     svc.soft_delete_previous = AsyncMock()
     return svc
 

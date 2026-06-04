@@ -134,12 +134,12 @@ def recipient_id() -> UserID:
 
 @pytest.fixture
 def product(author_id: UserID) -> Product:
-    course = Product.create_course(
+    note = Product.create_note(
         author_id=author_id,
-        name=ProductTitle("Demo course"),
+        name=ProductTitle("Demo note"),
     )
-    course.publish()
-    return course
+    note.publish()
+    return note
 
 
 @pytest.fixture

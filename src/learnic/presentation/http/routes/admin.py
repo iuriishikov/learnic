@@ -12,9 +12,9 @@ from learnic.application.commands.admin.ban_user import (
     BanUserCommand,
     BanUserCommandHandler,
 )
-from learnic.application.commands.admin.delete_course import (
-    AdminDeleteCourseCommand,
-    AdminDeleteCourseCommandHandler,
+from learnic.application.commands.admin.delete_note import (
+    AdminDeleteNoteCommand,
+    AdminDeleteNoteCommandHandler,
 )
 from learnic.application.common.persistence.admin_metrics import AdminMetric
 from learnic.application.common.persistence.admin_stats import AdminStatsView
@@ -48,8 +48,8 @@ _USER_ID_PATH: Final = Path(
     description="Target user's UUID.",
     examples=["550e8400-e29b-41d4-a716-446655440000"],
 )
-_COURSE_ID_PATH: Final = Path(
-    description="Target course product's UUID.",
+_NOTE_ID_PATH: Final = Path(
+    description="Target note product's UUID.",
     examples=["3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8"],
 )
 
@@ -71,10 +71,10 @@ class AdminStatsSchema(BaseModel):
                     "total_users": 1280,
                     "banned_users": 7,
                     "admin_users": 3,
-                    "total_courses": 412,
-                    "draft_courses": 156,
-                    "published_courses": 240,
-                    "archived_courses": 16,
+                    "total_notes": 412,
+                    "draft_notes": 156,
+                    "published_notes": 240,
+                    "archived_notes": 16,
                     "total_enrollments": 9043,
                     "active_enrollments": 8771,
                     "dau": 312,
@@ -99,23 +99,23 @@ class AdminStatsSchema(BaseModel):
         ge=0,
         examples=[3],
     )
-    total_courses: int = Field(
-        description="Total course products across every status.",
+    total_notes: int = Field(
+        description="Total note products across every status.",
         ge=0,
         examples=[412],
     )
-    draft_courses: int = Field(
-        description="Courses in ``draft`` status.",
+    draft_notes: int = Field(
+        description="Notes in ``draft`` status.",
         ge=0,
         examples=[156],
     )
-    published_courses: int = Field(
-        description="Courses in ``published`` status.",
+    published_notes: int = Field(
+        description="Notes in ``published`` status.",
         ge=0,
         examples=[240],
     )
-    archived_courses: int = Field(
-        description="Courses in ``archived`` status.",
+    archived_notes: int = Field(
+        description="Notes in ``archived`` status.",
         ge=0,
         examples=[16],
     )
@@ -152,10 +152,10 @@ class AdminStatsSchema(BaseModel):
             total_users=view.total_users,
             banned_users=view.banned_users,
             admin_users=view.admin_users,
-            total_courses=view.total_courses,
-            draft_courses=view.draft_courses,
-            published_courses=view.published_courses,
-            archived_courses=view.archived_courses,
+            total_notes=view.total_notes,
+            draft_notes=view.draft_notes,
+            published_notes=view.published_notes,
+            archived_notes=view.archived_notes,
             total_enrollments=view.total_enrollments,
             active_enrollments=view.active_enrollments,
             dau=view.dau,
@@ -181,7 +181,7 @@ async def get_stats(
 ) -> AdminStatsSchema:
     """Return aggregate counters for the admin dashboard.
 
-    Admin-only. Counts users (total / banned / admins), courses
+    Admin-only. Counts users (total / banned / admins), notes
     (total + per lifecycle status), and enrollments (total / active)
     in three cheap ``COUNT(*)`` queries.
 
@@ -264,7 +264,8 @@ class MetricSeriesSchema(BaseModel):
 _METRIC_PATH: Final = Path(
     description=(
         "Which metric series to return: `registrations`, "
-        "`enrollments`, or `active_users` (daily active users)."
+        "`enrollments`, `active_users` (daily active users), or "
+        "`new_products` (products created that day)."
     ),
     examples=["registrations"],
 )
@@ -299,12 +300,13 @@ async def get_metric_series(
 ) -> MetricSeriesSchema:
     """Return a zero-filled daily series for one dashboard metric.
 
-    Admin-only. Aggregates the collected `statistics` events for the
-    last ``days`` UTC days: ``registrations`` and ``enrollments`` are
-    daily counts; ``active_users`` is distinct users with a
-    ``site_visit`` that day (the DAU series). The result always has
-    exactly ``days`` points in ascending order, gaps zero-filled, so
-    the SPA can chart it directly.
+    Admin-only. For the last ``days`` UTC days: ``registrations`` and
+    ``enrollments`` are daily counts of the matching `statistics`
+    events; ``active_users`` is distinct users with a ``site_visit``
+    that day (the DAU series); ``new_products`` is products created that
+    day (off ``products.created_at``, any status). The result always
+    has exactly ``days`` points in ascending order, gaps zero-filled,
+    so the SPA can chart it directly.
 
     Args:
         request: Source of the access-token cookie.
@@ -370,35 +372,35 @@ async def ban_user(
 
 
 @router.delete(
-    "/courses/{course_id}",
-    summary="Permanently delete a course",
-    operation_id="adminDeleteCourse",
+    "/notes/{note_id}",
+    summary="Permanently delete a note",
+    operation_id="adminDeleteNote",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_AUTH_SECURITY,
     error_map=ADMIN_MAP,
 )
-async def delete_course(
+async def delete_note(
     request: Request,
-    interactor: FromDishka[AdminDeleteCourseCommandHandler],
+    interactor: FromDishka[AdminDeleteNoteCommandHandler],
     admin_auth: FromDishka[AdminAuthenticator],
-    course_id: UUID = _COURSE_ID_PATH,
+    note_id: UUID = _NOTE_ID_PATH,
 ) -> None:
-    """Hard-delete a course regardless of status or ownership.
+    """Hard-delete a note regardless of status or ownership.
 
     Admin-only and **irreversible**. Unlike the author-facing
-    ``DELETE /products/{id}`` (drafts only), this removes a course in
-    any status — including published courses with enrollments. The
+    ``DELETE /products/{id}`` (drafts only), this removes a note in
+    any status — including published notes with enrollments. The
     delete cascades to every child row (modules, lessons, blocks,
     releases, enrollments, statistics, collaborations, roles, gifts,
-    Q&A, tags, notifications) and erases the course's commercial
+    Q&A, tags, notifications) and erases the note's commercial
     history. Referenced files are soft-deleted from storage.
 
     Args:
         request: Source of the access-token cookie.
-        interactor: Injected admin delete-course command handler.
+        interactor: Injected admin delete-note command handler.
         admin_auth: Injected authenticator that validates the access
             cookie and asserts the platform-admin flag.
-        course_id: Target course product's UUID, parsed from the URL
+        note_id: Target note product's UUID, parsed from the URL
             path.
 
     Returns:
@@ -407,12 +409,12 @@ async def delete_course(
     Raises:
         InvalidTokenError: Missing or denied access cookie; HTTP 401.
         NotAdminError: Caller is not a platform admin; HTTP 403.
-        EntityNotFoundError: No course with the given id; HTTP 404.
+        EntityNotFoundError: No note with the given id; HTTP 404.
     """
     ctx = await admin_auth.authenticate_admin(request)
     await interactor.run(
-        AdminDeleteCourseCommand(
+        AdminDeleteNoteCommand(
             actor_id=ctx.user_id,
-            course_id=ProductID(course_id),
+            note_id=ProductID(note_id),
         ),
     )

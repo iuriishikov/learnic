@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
-from learnic.application.common.persistence.user_ref import UserRefView
+from learnic.application.common.persistence.user import UserView
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_gift.enums import GiftStatus
 from learnic.entities.product_gift.ids import ProductGiftID
@@ -24,10 +24,10 @@ class ProductGiftView:
     oid: ProductGiftID
     product_id: ProductID
     product_name: str
-    recipient: UserRefView | None
+    recipient: UserView | None
     invited_email: str | None
     status: GiftStatus
-    gifter: UserRefView
+    gifter: UserView
     invite_expires_at: datetime | None
     created_at: datetime
     accepted_at: datetime | None

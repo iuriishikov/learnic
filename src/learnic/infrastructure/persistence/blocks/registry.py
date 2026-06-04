@@ -3,13 +3,13 @@
 Centralises the four if/elif chains that previously had to be kept
 in lock-step across the persistence adapters:
 
-* :func:`_row_to_block` in ``adapters/course_block.py`` — row →
+* :func:`_row_to_block` in ``adapters/note_block.py`` — row →
   ``LessonBlock`` entity (draft side).
-* :func:`_row_to_block_view` in ``adapters/course_content.py`` —
+* :func:`_row_to_block_view` in ``adapters/note_content.py`` —
   row → ``LessonBlockView`` (draft side).
-* :func:`_row_to_block_view` in ``adapters/course_release.py`` —
+* :func:`_row_to_block_view` in ``adapters/note_release.py`` —
   row → ``LessonBlockView`` (release / snapshot side).
-* :func:`_partition_subtypes` in ``adapters/course_release.py`` —
+* :func:`_partition_subtypes` in ``adapters/note_release.py`` —
   per-row routing of subtype INSERT payloads (release side).
 
 Adding a new :class:`BlockType` variant is now a single new
@@ -25,7 +25,7 @@ from typing import Any, Final
 
 import sqlalchemy as sa
 
-from learnic.application.common.persistence.course_content import (
+from learnic.application.common.persistence.note_content import (
     ChoiceOptionView,
     CodeBlockView,
     CodeTabView,
@@ -42,13 +42,13 @@ from learnic.application.common.persistence.course_content import (
     VideoFileBlockView,
 )
 from learnic.application.common.persistence.file import FileView
-from learnic.entities.course_block.enums import BlockType
-from learnic.entities.course_block.ids import (
+from learnic.entities.note_block.enums import BlockType
+from learnic.entities.note_block.ids import (
     ChoiceOptionID,
     CollageItemID,
     LessonBlockID,
 )
-from learnic.entities.course_block.models import (
+from learnic.entities.note_block.models import (
     ChoiceOption,
     CodeBlock,
     CodeTab,
@@ -64,7 +64,7 @@ from learnic.entities.course_block.models import (
     TextInputBlock,
     VideoFileBlock,
 )
-from learnic.entities.course_block.value_objects import (
+from learnic.entities.note_block.value_objects import (
     AcceptedAnswer,
     BlockTitle,
     ChoiceOptionLabel,
@@ -77,10 +77,10 @@ from learnic.entities.course_block.value_objects import (
     RutubeVideoID,
     VideoTitle,
 )
-from learnic.entities.course_lesson.ids import CourseLessonID
+from learnic.entities.note_lesson.ids import NoteLessonID
 from learnic.entities.file.ids import FileID
 from learnic.entities.product.ids import ProductID
-from learnic.infrastructure.persistence.models.course_block import (
+from learnic.infrastructure.persistence.models.note_block import (
     code_blocks_table,
     file_blocks_table,
     html_blocks_table,
@@ -92,17 +92,17 @@ from learnic.infrastructure.persistence.models.course_block import (
     text_input_blocks_table,
     video_file_blocks_table,
 )
-from learnic.infrastructure.persistence.models.course_release import (
-    course_release_code_blocks_table,
-    course_release_file_blocks_table,
-    course_release_html_blocks_table,
-    course_release_katex_blocks_table,
-    course_release_multi_choice_blocks_table,
-    course_release_photo_collage_blocks_table,
-    course_release_rutube_video_blocks_table,
-    course_release_single_choice_blocks_table,
-    course_release_text_input_blocks_table,
-    course_release_video_file_blocks_table,
+from learnic.infrastructure.persistence.models.note_release import (
+    note_release_code_blocks_table,
+    note_release_file_blocks_table,
+    note_release_html_blocks_table,
+    note_release_katex_blocks_table,
+    note_release_multi_choice_blocks_table,
+    note_release_photo_collage_blocks_table,
+    note_release_rutube_video_blocks_table,
+    note_release_single_choice_blocks_table,
+    note_release_text_input_blocks_table,
+    note_release_video_file_blocks_table,
 )
 
 
@@ -111,7 +111,7 @@ class _CommonBlockAttrs:
     """Parent-row attributes shared by every block type."""
 
     oid: LessonBlockID
-    lesson_id: CourseLessonID
+    lesson_id: NoteLessonID
     product_id: ProductID
     position: int
     created_at: Any
@@ -121,7 +121,7 @@ class _CommonBlockAttrs:
 def _common_from_row(row: sa.Row[Any]) -> _CommonBlockAttrs:
     return _CommonBlockAttrs(
         oid=LessonBlockID(row.oid),
-        lesson_id=CourseLessonID(row.lesson_id),
+        lesson_id=NoteLessonID(row.lesson_id),
         product_id=ProductID(row.product_id),
         position=row.position,
         created_at=row.created_at,
@@ -184,7 +184,7 @@ class BlockSpec:
         draft_subtype_table: Child table holding type-specific
             columns for draft blocks (e.g. ``html_blocks``).
         release_subtype_table: Mirror table on the snapshot side
-            (e.g. ``course_release_html_blocks``).
+            (e.g. ``note_release_html_blocks``).
         row_to_entity: Build a domain :class:`LessonBlock` from a
             row joined across the parent + subtype tables.
         row_to_view: Build a read-side ``LessonBlockView`` from a
@@ -612,7 +612,7 @@ def collage_items_payload_to_domain(raw: Any) -> list[CollageItem]:
 
     Shape is the canonical ``{"oid", "file_id", "caption"}`` triple
     used in BOTH the release JSONB snapshot AND the draft-side
-    composition assembled by :class:`CourseContentReaderAlchemy` /
+    composition assembled by :class:`NoteContentReaderAlchemy` /
     :class:`LessonBlockGatewayAlchemy` before dispatch (those callers
     re-shape rows from ``photo_collage_items_table`` into this dict
     form so the registry stays one code path across draft and
@@ -704,7 +704,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.HTML: BlockSpec(
         kind=BlockType.HTML,
         draft_subtype_table=html_blocks_table,
-        release_subtype_table=course_release_html_blocks_table,
+        release_subtype_table=note_release_html_blocks_table,
         row_to_entity=_html_row_to_entity,
         row_to_view=_html_row_to_view,
         release_insert_value=_html_release_insert_value,
@@ -712,7 +712,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.KATEX: BlockSpec(
         kind=BlockType.KATEX,
         draft_subtype_table=katex_blocks_table,
-        release_subtype_table=course_release_katex_blocks_table,
+        release_subtype_table=note_release_katex_blocks_table,
         row_to_entity=_katex_row_to_entity,
         row_to_view=_katex_row_to_view,
         release_insert_value=_katex_release_insert_value,
@@ -720,7 +720,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.RUTUBE_VIDEO: BlockSpec(
         kind=BlockType.RUTUBE_VIDEO,
         draft_subtype_table=rutube_video_blocks_table,
-        release_subtype_table=course_release_rutube_video_blocks_table,
+        release_subtype_table=note_release_rutube_video_blocks_table,
         row_to_entity=_rutube_row_to_entity,
         row_to_view=_rutube_row_to_view,
         release_insert_value=_rutube_release_insert_value,
@@ -728,7 +728,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.CODE: BlockSpec(
         kind=BlockType.CODE,
         draft_subtype_table=code_blocks_table,
-        release_subtype_table=course_release_code_blocks_table,
+        release_subtype_table=note_release_code_blocks_table,
         row_to_entity=_code_row_to_entity,
         row_to_view=_code_row_to_view,
         release_insert_value=_code_release_insert_value,
@@ -736,7 +736,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.SINGLE_CHOICE: BlockSpec(
         kind=BlockType.SINGLE_CHOICE,
         draft_subtype_table=single_choice_blocks_table,
-        release_subtype_table=course_release_single_choice_blocks_table,
+        release_subtype_table=note_release_single_choice_blocks_table,
         row_to_entity=_single_choice_row_to_entity,
         row_to_view=_single_choice_row_to_view,
         release_insert_value=_single_choice_release_insert_value,
@@ -744,7 +744,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.MULTI_CHOICE: BlockSpec(
         kind=BlockType.MULTI_CHOICE,
         draft_subtype_table=multi_choice_blocks_table,
-        release_subtype_table=course_release_multi_choice_blocks_table,
+        release_subtype_table=note_release_multi_choice_blocks_table,
         row_to_entity=_multi_choice_row_to_entity,
         row_to_view=_multi_choice_row_to_view,
         release_insert_value=_multi_choice_release_insert_value,
@@ -752,7 +752,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.TEXT_INPUT: BlockSpec(
         kind=BlockType.TEXT_INPUT,
         draft_subtype_table=text_input_blocks_table,
-        release_subtype_table=course_release_text_input_blocks_table,
+        release_subtype_table=note_release_text_input_blocks_table,
         row_to_entity=_text_input_row_to_entity,
         row_to_view=_text_input_row_to_view,
         release_insert_value=_text_input_release_insert_value,
@@ -760,7 +760,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.FILE: BlockSpec(
         kind=BlockType.FILE,
         draft_subtype_table=file_blocks_table,
-        release_subtype_table=course_release_file_blocks_table,
+        release_subtype_table=note_release_file_blocks_table,
         row_to_entity=_file_row_to_entity,
         row_to_view=_file_row_to_view,
         release_insert_value=_file_release_insert_value,
@@ -768,7 +768,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.VIDEO_FILE: BlockSpec(
         kind=BlockType.VIDEO_FILE,
         draft_subtype_table=video_file_blocks_table,
-        release_subtype_table=course_release_video_file_blocks_table,
+        release_subtype_table=note_release_video_file_blocks_table,
         row_to_entity=_video_file_row_to_entity,
         row_to_view=_video_file_row_to_view,
         release_insert_value=_video_file_release_insert_value,
@@ -776,7 +776,7 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
     BlockType.PHOTO_COLLAGE: BlockSpec(
         kind=BlockType.PHOTO_COLLAGE,
         draft_subtype_table=photo_collage_blocks_table,
-        release_subtype_table=course_release_photo_collage_blocks_table,
+        release_subtype_table=note_release_photo_collage_blocks_table,
         row_to_entity=_photo_collage_row_to_entity,
         row_to_view=_photo_collage_row_to_view,
         release_insert_value=_photo_collage_release_insert_value,
