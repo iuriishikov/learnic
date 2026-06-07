@@ -13,6 +13,7 @@ from learnic.entities.product.enums import (
 )
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
+from learnic.entities.tag.ids import TagID
 from learnic.entities.user.models import UserID
 
 
@@ -137,23 +138,42 @@ class ProductReader(Protocol):
     async def published(
         self,
         pagination: Pagination,
-    ) -> list[ProductView]: ...
+        tag_ids: tuple[TagID, ...] = (),
+    ) -> list[ProductView]:
+        """Return published products, newest first.
 
-    async def published_count(self) -> int:
-        """Return the total number of published products.
-
-        Mirrors ``published(...)``'s WHERE filter without pagination
-        so the catalog UI can render numbered page controls. Cheap:
-        a single ``COUNT(*)`` against the ``ix_products_type_status``
-        index slice.
+        When ``tag_ids`` is non-empty, restrict the result to
+        products carrying **every** requested tag (AND semantics) —
+        the intersection the catalog's tag-filter chips apply. An
+        empty tuple disables the filter (full published catalog).
         """
         ...
 
-    async def search_published_count(self, query: str) -> int:
+    async def published_count(
+        self,
+        tag_ids: tuple[TagID, ...] = (),
+    ) -> int:
+        """Return the total number of published products.
+
+        Mirrors ``published(...)``'s WHERE filter — including the
+        same ``tag_ids`` AND-intersection — without pagination so the
+        catalog UI can render numbered page controls over the
+        filtered set. Cheap: a single ``COUNT(*)`` against the
+        ``ix_products_type_status`` index slice (plus the
+        ``product_tags`` semi-join when ``tag_ids`` is set).
+        """
+        ...
+
+    async def search_published_count(
+        self,
+        query: str,
+        tag_ids: tuple[TagID, ...] = (),
+    ) -> int:
         """Return the total number of products matching ``query``.
 
         Mirrors ``search_published(...)``'s WHERE filter (tsvector
-        match OR trigram fallback) without pagination. Used to drive
+        match OR trigram fallback, intersected with the same
+        ``tag_ids`` AND-filter) without pagination. Used to drive
         numbered page controls on the search-mode catalog.
         """
         ...
@@ -162,8 +182,13 @@ class ProductReader(Protocol):
         self,
         query: str,
         pagination: Pagination,
+        tag_ids: tuple[TagID, ...] = (),
     ) -> list[ProductView]:
         """Search published products by free-text ``query``.
+
+        When ``tag_ids`` is non-empty, the full-text match is
+        intersected with products carrying **every** requested tag
+        (AND semantics), so search and the tag-filter chips compose.
 
         Multi-field, weighted full-text search across product name
         (weight ``A``), author full name + attached tag names (both

@@ -5,13 +5,17 @@ from sqlalchemy.orm import composite
 
 from learnic.entities.blog_post.constants import (
     BLOG_POST_SLUG_MAX_LEN,
+    BLOG_POST_SUBTITLE_MAX_LEN,
     BLOG_POST_TITLE_MAX_LEN,
+    BLOG_POST_TOPIC_MAX_LEN,
 )
 from learnic.entities.blog_post.enums import BlogPostStatus
 from learnic.entities.blog_post.models import BlogPost
 from learnic.entities.blog_post.value_objects import (
     BlogPostSlug,
+    BlogPostSubtitle,
     BlogPostTitle,
+    BlogPostTopic,
 )
 from learnic.infrastructure.persistence.models.registry import mapper_registry
 
@@ -70,6 +74,27 @@ blog_posts_table = sa.Table(
         sa.DateTime(timezone=True),
         nullable=True,
     ),
+    sa.Column(
+        "cover_file_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "files.oid",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_blog_posts_cover_file_id",
+        ),
+        nullable=True,
+    ),
+    sa.Column(
+        "subtitle",
+        sa.String(BLOG_POST_SUBTITLE_MAX_LEN),
+        nullable=True,
+    ),
+    sa.Column(
+        "topic",
+        sa.String(BLOG_POST_TOPIC_MAX_LEN),
+        nullable=True,
+    ),
     # Public list ("newest published first") and admin filtered list
     # both sort by created_at after filtering on status.
     sa.Index(
@@ -106,6 +131,22 @@ def map_blog_post_table() -> None:
             "created_at": blog_posts_table.c.created_at,
             "updated_at": blog_posts_table.c.updated_at,
             "published_at": blog_posts_table.c.published_at,
+            "cover_file_id": blog_posts_table.c.cover_file_id,
+            # Nullable VO columns: SQLAlchemy 2.0 always instantiates the
+            # composite on load, so a bare VO class would crash on a NULL.
+            # The factory returns None instead (see CLAUDE.md rule 7).
+            "subtitle": composite(
+                lambda value: (
+                    BlogPostSubtitle(value) if value is not None else None
+                ),
+                blog_posts_table.c.subtitle,
+            ),
+            "topic": composite(
+                lambda value: (
+                    BlogPostTopic(value) if value is not None else None
+                ),
+                blog_posts_table.c.topic,
+            ),
         },
         column_prefix="_col_",
     )

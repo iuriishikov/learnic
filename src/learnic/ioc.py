@@ -56,11 +56,20 @@ from learnic.application.commands.note_block.add_code import (
 from learnic.application.commands.blog_post.change_slug import (
     ChangeBlogPostSlugCommandHandler,
 )
+from learnic.application.commands.blog_post.cover.remove import (
+    RemoveBlogPostCoverCommandHandler,
+)
+from learnic.application.commands.blog_post.cover.set import (
+    SetBlogPostCoverCommandHandler,
+)
 from learnic.application.commands.blog_post.create import (
     CreateBlogPostCommandHandler,
 )
 from learnic.application.commands.blog_post.delete import (
     DeleteBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.edit_meta import (
+    EditBlogPostMetaCommandHandler,
 )
 from learnic.application.commands.blog_post.publish import (
     PublishBlogPostCommandHandler,
@@ -1738,10 +1747,13 @@ class InteractorsProvider(Provider):
     # --- blog ---
     create_blog_post = provide(CreateBlogPostCommandHandler)
     rename_blog_post = provide(RenameBlogPostCommandHandler)
+    edit_blog_post_meta = provide(EditBlogPostMetaCommandHandler)
     change_blog_post_slug = provide(ChangeBlogPostSlugCommandHandler)
     publish_blog_post = provide(PublishBlogPostCommandHandler)
     unpublish_blog_post = provide(UnpublishBlogPostCommandHandler)
     delete_blog_post = provide(DeleteBlogPostCommandHandler)
+    set_blog_post_cover = provide(SetBlogPostCoverCommandHandler)
+    remove_blog_post_cover = provide(RemoveBlogPostCoverCommandHandler)
     add_blog_html_block = provide(AddBlogHtmlBlockCommandHandler)
     add_blog_image_block = provide(AddBlogImageBlockCommandHandler)
     add_blog_video_block = provide(AddBlogVideoBlockCommandHandler)

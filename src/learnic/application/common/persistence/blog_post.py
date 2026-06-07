@@ -55,31 +55,17 @@ class BlogVideoBlockView:
     title: str | None
 
 
-BlogPostBlockView = (
-    BlogHtmlBlockView | BlogImageBlockView | BlogVideoBlockView
-)
+BlogPostBlockView = BlogHtmlBlockView | BlogImageBlockView | BlogVideoBlockView
 
 
 @dataclass(slots=True, frozen=True)
 class BlogPostSummaryView:
-    """Lightweight blog-post projection for list endpoints (no blocks)."""
+    """Lightweight blog-post projection for list endpoints (no blocks).
 
-    oid: BlogPostID
-    title: str
-    slug: str
-    status: BlogPostStatus
-    created_at: datetime
-    updated_at: datetime
-    published_at: datetime | None
-
-
-@dataclass(slots=True, frozen=True)
-class BlogPostView:
-    """Full blog-post projection: metadata plus the ordered block list.
-
-    Block files are resolved to :class:`FileView` (presigned URL) by
-    the reader, so the query handler stays trivial and the SPA renders
-    media without a follow-up call.
+    ``cover`` is the resolved cover image (presigned URL) or ``None``
+    when the post has no cover attached — the SPA falls back to a
+    brand placeholder. Resolved by the reader so list endpoints carry
+    the cover without a per-post follow-up call.
     """
 
     oid: BlogPostID
@@ -89,6 +75,47 @@ class BlogPostView:
     created_at: datetime
     updated_at: datetime
     published_at: datetime | None
+    cover: FileView | None
+
+
+@dataclass(slots=True, frozen=True)
+class BlogPostAuthorView:
+    """Resolved author byline for a post's public page.
+
+    ``name`` and ``avatar`` come from the post's ``created_by``
+    administrator (``avatar`` is a resolved :class:`FileView` with a
+    presigned URL). The whole view is ``None`` on the post when the
+    creating admin's account is gone (``created_by`` was ``SET NULL``).
+    """
+
+    name: str
+    avatar: FileView | None
+
+
+@dataclass(slots=True, frozen=True)
+class BlogPostView:
+    """Full blog-post projection: metadata plus the ordered block list.
+
+    Block files are resolved to :class:`FileView` (presigned URL) by
+    the reader, so the query handler stays trivial and the SPA renders
+    media without a follow-up call. ``cover`` follows the same rule —
+    a resolved :class:`FileView` or ``None`` when no cover is set.
+    ``author`` is the resolved byline (creator name + avatar), or
+    ``None`` when the creating admin's account is gone. ``topic`` is the
+    optional category label shown above the title.
+    """
+
+    oid: BlogPostID
+    title: str
+    slug: str
+    status: BlogPostStatus
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    cover: FileView | None
+    subtitle: str | None
+    topic: str | None
+    author: BlogPostAuthorView | None
     blocks: list[BlogPostBlockView]
 
 

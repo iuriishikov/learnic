@@ -7,6 +7,14 @@ from learnic.application.commands.blog_post.change_slug import (
     ChangeBlogPostSlugCommand,
     ChangeBlogPostSlugCommandHandler,
 )
+from learnic.application.commands.blog_post.cover.remove import (
+    RemoveBlogPostCoverCommand,
+    RemoveBlogPostCoverCommandHandler,
+)
+from learnic.application.commands.blog_post.cover.set import (
+    SetBlogPostCoverCommand,
+    SetBlogPostCoverCommandHandler,
+)
 from learnic.application.commands.blog_post.create import (
     CreateBlogPostCommand,
     CreateBlogPostCommandHandler,
@@ -14,6 +22,10 @@ from learnic.application.commands.blog_post.create import (
 from learnic.application.commands.blog_post.delete import (
     DeleteBlogPostCommand,
     DeleteBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.edit_meta import (
+    EditBlogPostMetaCommand,
+    EditBlogPostMetaCommandHandler,
 )
 from learnic.application.commands.blog_post.publish import (
     PublishBlogPostCommand,
@@ -49,7 +61,12 @@ from learnic.application.common.errors import (
 from learnic.entities.blog_post.errors import BlogPostStatusTransitionError
 from learnic.entities.blog_post.ids import BlogPostID
 from learnic.entities.blog_post.models import BlogPost
+from learnic.entities.blog_post.value_objects import (
+    BlogPostSubtitle,
+    BlogPostTopic,
+)
 from learnic.entities.blog_post_block.ids import BlogPostBlockID
+from learnic.entities.file.ids import FileID
 from learnic.entities.blog_post_block.models import (
     BlogHtmlBlock,
     BlogImageBlock,
@@ -169,6 +186,75 @@ class TestPublish:
         with pytest.raises(BlogPostStatusTransitionError):
             await handler.run(
                 PublishBlogPostCommand(post_id=BlogPostID(draft_post.oid)),
+            )
+
+
+class TestEditMeta:
+    async def test_sets_subtitle_and_role(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        draft_post: BlogPost,
+    ) -> None:
+        fake_blog_post_gateway.with_id.return_value = draft_post
+        handler = EditBlogPostMetaCommandHandler(
+            fake_transaction, fake_blog_post_gateway,
+        )
+        await handler.run(
+            EditBlogPostMetaCommand(
+                post_id=BlogPostID(draft_post.oid),
+                subtitle="A short deck",
+                topic="Design",
+            ),
+        )
+        assert draft_post.subtitle is not None
+        assert draft_post.subtitle.value == "A short deck"
+        assert draft_post.topic is not None
+        assert draft_post.topic.value == "Design"
+        fake_transaction.commit.assert_awaited_once()
+
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    async def test_blank_clears_fields(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        draft_post: BlogPost,
+        value: str | None,
+    ) -> None:
+        draft_post.edit_meta(
+            BlogPostSubtitle("old"),
+            BlogPostTopic("Design"),
+        )
+        fake_blog_post_gateway.with_id.return_value = draft_post
+        handler = EditBlogPostMetaCommandHandler(
+            fake_transaction, fake_blog_post_gateway,
+        )
+        await handler.run(
+            EditBlogPostMetaCommand(
+                post_id=BlogPostID(draft_post.oid),
+                subtitle=value,
+                topic=value,
+            ),
+        )
+        assert draft_post.subtitle is None
+        assert draft_post.topic is None
+
+    async def test_missing_post_raises(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+    ) -> None:
+        fake_blog_post_gateway.with_id.return_value = None
+        handler = EditBlogPostMetaCommandHandler(
+            fake_transaction, fake_blog_post_gateway,
+        )
+        with pytest.raises(EntityNotFoundError):
+            await handler.run(
+                EditBlogPostMetaCommand(
+                    post_id=BlogPostID(uuid.uuid4()),
+                    subtitle="x",
+                    topic="y",
+                ),
             )
 
 
@@ -488,3 +574,136 @@ class TestDeletePost:
         # only image + video carry files; html does not
         assert fake_file_uploads.soft_delete_previous.await_count == 2
         fake_transaction.commit.assert_called_once()
+
+
+class TestCover:
+    async def test_set_uploads_attaches_and_commits(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        fake_file_uploads: MagicMock,
+        draft_post: BlogPost,
+        actor_id: UserID,
+    ) -> None:
+        fake_blog_post_gateway.with_id.return_value = draft_post
+        handler = SetBlogPostCoverCommandHandler(
+            fake_transaction,
+            fake_blog_post_gateway,
+            fake_file_uploads,
+        )
+
+        new_file_id = await handler.run(
+            SetBlogPostCoverCommand(
+                actor_id=actor_id,
+                post_id=BlogPostID(draft_post.oid),
+                upload=FakeUpload("image/png"),
+            ),
+        )
+
+        assert draft_post.cover_file_id == new_file_id
+        fake_file_uploads.upload_stream.assert_awaited_once()
+        # No previous cover -> the soft-delete is a no-op on None.
+        fake_file_uploads.soft_delete_previous.assert_awaited_once_with(None)
+        fake_transaction.commit.assert_awaited_once()
+
+    async def test_set_replaces_soft_deletes_previous(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        fake_file_uploads: MagicMock,
+        draft_post: BlogPost,
+        actor_id: UserID,
+    ) -> None:
+        previous = FileID(uuid.uuid4())
+        draft_post.cover_file_id = previous
+        fake_blog_post_gateway.with_id.return_value = draft_post
+        handler = SetBlogPostCoverCommandHandler(
+            fake_transaction,
+            fake_blog_post_gateway,
+            fake_file_uploads,
+        )
+
+        new_file_id = await handler.run(
+            SetBlogPostCoverCommand(
+                actor_id=actor_id,
+                post_id=BlogPostID(draft_post.oid),
+                upload=FakeUpload("image/jpeg"),
+            ),
+        )
+
+        assert draft_post.cover_file_id == new_file_id
+        fake_file_uploads.soft_delete_previous.assert_awaited_once_with(
+            previous,
+        )
+        fake_transaction.commit.assert_awaited_once()
+
+    async def test_set_missing_post_raises(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        fake_file_uploads: MagicMock,
+        actor_id: UserID,
+    ) -> None:
+        fake_blog_post_gateway.with_id.return_value = None
+        handler = SetBlogPostCoverCommandHandler(
+            fake_transaction,
+            fake_blog_post_gateway,
+            fake_file_uploads,
+        )
+
+        with pytest.raises(EntityNotFoundError):
+            await handler.run(
+                SetBlogPostCoverCommand(
+                    actor_id=actor_id,
+                    post_id=BlogPostID(uuid.uuid4()),
+                    upload=FakeUpload("image/png"),
+                ),
+            )
+        fake_file_uploads.upload_stream.assert_not_awaited()
+        fake_transaction.commit.assert_not_awaited()
+
+    async def test_remove_detaches_and_soft_deletes(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        fake_file_uploads: MagicMock,
+        draft_post: BlogPost,
+    ) -> None:
+        previous = FileID(uuid.uuid4())
+        draft_post.cover_file_id = previous
+        fake_blog_post_gateway.with_id.return_value = draft_post
+        handler = RemoveBlogPostCoverCommandHandler(
+            fake_transaction,
+            fake_blog_post_gateway,
+            fake_file_uploads,
+        )
+
+        await handler.run(
+            RemoveBlogPostCoverCommand(post_id=BlogPostID(draft_post.oid)),
+        )
+
+        assert draft_post.cover_file_id is None
+        fake_file_uploads.soft_delete_previous.assert_awaited_once_with(
+            previous,
+        )
+        fake_transaction.commit.assert_awaited_once()
+
+    async def test_remove_missing_post_raises(
+        self,
+        fake_transaction: AsyncMock,
+        fake_blog_post_gateway: AsyncMock,
+        fake_file_uploads: MagicMock,
+    ) -> None:
+        fake_blog_post_gateway.with_id.return_value = None
+        handler = RemoveBlogPostCoverCommandHandler(
+            fake_transaction,
+            fake_blog_post_gateway,
+            fake_file_uploads,
+        )
+
+        with pytest.raises(EntityNotFoundError):
+            await handler.run(
+                RemoveBlogPostCoverCommand(post_id=BlogPostID(uuid.uuid4())),
+            )
+        fake_file_uploads.soft_delete_previous.assert_not_awaited()
+        fake_transaction.commit.assert_not_awaited()

@@ -135,6 +135,42 @@ def _select_with_joins() -> sa.Select[Any]:
     )
 
 
+def _tags_all_present_filter(
+    tag_ids: tuple[TagID, ...],
+) -> sa.ColumnElement[bool]:
+    """Build the AND-semantics tag-intersection predicate.
+
+    Returns ``sa.true()`` for an empty selection (no-op, optimised
+    away by Postgres) so call sites can drop it into ``.where(...)``
+    unconditionally. Otherwise a semi-join: the product's ``oid``
+    must appear among ``product_id``\\ s that carry **every**
+    requested tag::
+
+        products.oid IN (
+            SELECT product_id FROM product_tags
+            WHERE tag_id IN (:ids)
+            GROUP BY product_id
+            HAVING COUNT(DISTINCT tag_id) = len(:ids)
+        )
+
+    AND, not OR — a product must match all selected tags, the same
+    intersection the catalog's filter chips imply. The
+    ``ix_product_tags_tag_id`` index backs the inner scan.
+    """
+    if not tag_ids:
+        return sa.true()
+    matching = (
+        sa.select(product_tags_table.c.product_id)
+        .where(product_tags_table.c.tag_id.in_(tag_ids))
+        .group_by(product_tags_table.c.product_id)
+        .having(
+            sa.func.count(sa.distinct(product_tags_table.c.tag_id))
+            == len(tag_ids),
+        )
+    )
+    return products_table.c.oid.in_(matching)
+
+
 class ProductReaderAlchemy(ProductReader):
     def __init__(self, session: AsyncSession) -> None:
         self._session: Final = session
@@ -278,10 +314,14 @@ class ProductReaderAlchemy(ProductReader):
     async def published(
         self,
         pagination: Pagination,
+        tag_ids: tuple[TagID, ...] = (),
     ) -> list[ProductView]:
         stmt = (
             _select_with_joins()
-            .where(products_table.c.status == ProductStatus.PUBLISHED.value)
+            .where(
+                products_table.c.status == ProductStatus.PUBLISHED.value,
+                _tags_all_present_filter(tag_ids),
+            )
             # See ``accessible_to`` for why ``oid`` is a secondary
             # ORDER BY — keeps offset pagination stable across
             # rows with identical ``created_at``.
@@ -296,12 +336,16 @@ class ProductReaderAlchemy(ProductReader):
         return await self._rows_to_views(rows)
 
     @override
-    async def published_count(self) -> int:
+    async def published_count(
+        self,
+        tag_ids: tuple[TagID, ...] = (),
+    ) -> int:
         stmt = (
             sa.select(sa.func.count())
             .select_from(products_table)
             .where(
                 products_table.c.status == ProductStatus.PUBLISHED.value,
+                _tags_all_present_filter(tag_ids),
             )
         )
         return (await self._session.scalar(stmt)) or 0
@@ -385,6 +429,7 @@ class ProductReaderAlchemy(ProductReader):
         self,
         query: str,
         pagination: Pagination,
+        tag_ids: tuple[TagID, ...] = (),
     ) -> list[ProductView]:
         query_lower, tsq, search_predicate = await (
             self._prepare_search_predicates(query)
@@ -407,6 +452,7 @@ class ProductReaderAlchemy(ProductReader):
             .where(
                 products_table.c.status == ProductStatus.PUBLISHED.value,
                 search_predicate,
+                _tags_all_present_filter(tag_ids),
             )
             # tsvector (morphology + weights) carries twice the
             # weight of trigram (typos/transliteration) — exact /
@@ -428,7 +474,11 @@ class ProductReaderAlchemy(ProductReader):
         return await self._rows_to_views(rows)
 
     @override
-    async def search_published_count(self, query: str) -> int:
+    async def search_published_count(
+        self,
+        query: str,
+        tag_ids: tuple[TagID, ...] = (),
+    ) -> int:
         # Reuses the exact same free-text predicate as
         # ``search_published`` (built via the shared
         # ``_prepare_search_predicates`` helper) so the count
@@ -443,6 +493,7 @@ class ProductReaderAlchemy(ProductReader):
             .where(
                 products_table.c.status == ProductStatus.PUBLISHED.value,
                 search_predicate,
+                _tags_all_present_filter(tag_ids),
             )
         )
         return (await self._session.scalar(stmt)) or 0

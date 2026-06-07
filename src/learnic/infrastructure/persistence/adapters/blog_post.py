@@ -9,6 +9,7 @@ from learnic.application.common.pagination import Pagination
 from learnic.application.common.persistence.blog_post import (
     BlogHtmlBlockView,
     BlogImageBlockView,
+    BlogPostAuthorView,
     BlogPostBlockView,
     BlogPostGateway,
     BlogPostListFilters,
@@ -26,6 +27,10 @@ from learnic.entities.blog_post.models import BlogPost
 from learnic.entities.blog_post_block.enums import BlogPostBlockType
 from learnic.entities.blog_post_block.ids import BlogPostBlockID
 from learnic.entities.file.ids import FileID
+from learnic.infrastructure.persistence.adapters._embedded_user import (
+    file_columns,
+    file_from_row,
+)
 from learnic.infrastructure.persistence.models.blog_post import (
     blog_posts_table,
 )
@@ -36,6 +41,7 @@ from learnic.infrastructure.persistence.models.blog_post_block import (
     blog_post_video_blocks_table,
 )
 from learnic.infrastructure.persistence.models.file import files_table
+from learnic.infrastructure.persistence.models.user import users_table
 
 
 class BlogPostMapperAlchemy(BlogPostGateway):
@@ -81,13 +87,11 @@ def _select_blocks() -> sa.Select[Any]:
         )
         .outerjoin(
             blog_post_image_blocks_table,
-            blog_post_blocks_table.c.oid
-            == blog_post_image_blocks_table.c.oid,
+            blog_post_blocks_table.c.oid == blog_post_image_blocks_table.c.oid,
         )
         .outerjoin(
             blog_post_video_blocks_table,
-            blog_post_blocks_table.c.oid
-            == blog_post_video_blocks_table.c.oid,
+            blog_post_blocks_table.c.oid == blog_post_video_blocks_table.c.oid,
         ),
     )
 
@@ -204,11 +208,40 @@ class BlogPostReaderAlchemy(BlogPostReader):
         files_by_id = await self._resolve_files(file_ids)
         return [_row_to_block_view(row, files_by_id) for row in rows]
 
+    async def _cover_for_row(self, row: sa.Row[Any]) -> FileView | None:
+        if row.cover_file_id is None:
+            return None
+        cover_id = FileID(row.cover_file_id)
+        resolved = await self._resolve_files([cover_id])
+        return resolved.get(cover_id)
+
+    async def _author_for_row(
+        self,
+        row: sa.Row[Any],
+    ) -> BlogPostAuthorView | None:
+        """Resolve the byline from the joined ``created_by`` user row.
+
+        ``None`` when the creating admin is gone (``created_by`` was
+        ``SET NULL``, so the LEFT JOIN misses) — keyed off the
+        always-present ``author_first_name`` column.
+        """
+        first_name = row.author_first_name
+        if first_name is None:
+            return None
+        name = f"{first_name} {row.author_last_name}".strip()
+        avatar = await FileView.of_optional(
+            file_from_row(row, "author_avatar"),
+            self._file_storage,
+        )
+        return BlogPostAuthorView(name=name, avatar=avatar)
+
     async def _post_view_from_row(
         self,
         row: sa.Row[Any],
     ) -> BlogPostView:
         blocks = await self._blocks_for_post(BlogPostID(row.oid))
+        cover = await self._cover_for_row(row)
+        author = await self._author_for_row(row)
         return BlogPostView(
             oid=BlogPostID(row.oid),
             title=row.title,
@@ -217,12 +250,18 @@ class BlogPostReaderAlchemy(BlogPostReader):
             created_at=row.created_at,
             updated_at=row.updated_at,
             published_at=row.published_at,
+            cover=cover,
+            subtitle=row.subtitle,
+            topic=row.topic,
+            author=author,
             blocks=blocks,
         )
 
     @override
     async def with_id(self, oid: BlogPostID) -> BlogPostView | None:
-        stmt = _select_post_columns().where(blog_posts_table.c.oid == oid)
+        stmt = _select_post_detail_columns().where(
+            blog_posts_table.c.oid == oid,
+        )
         row = (await self._session.execute(stmt)).one_or_none()
         if row is None:
             return None
@@ -249,7 +288,7 @@ class BlogPostReaderAlchemy(BlogPostReader):
 
     @override
     async def published_with_slug(self, slug: str) -> BlogPostView | None:
-        stmt = _select_post_columns().where(
+        stmt = _select_post_detail_columns().where(
             blog_posts_table.c.slug == slug,
             blog_posts_table.c.status == BlogPostStatus.PUBLISHED,
         )
@@ -281,6 +320,9 @@ class BlogPostReaderAlchemy(BlogPostReader):
             stmt = stmt.order_by(blog_posts_table.c.created_at.desc())
         stmt = stmt.limit(pagination.limit).offset(pagination.offset)
         rows = (await self._session.execute(stmt)).all()
+        covers_by_id = await self._resolve_files(
+            FileID(row.cover_file_id) for row in rows if row.cover_file_id is not None
+        )
         return [
             BlogPostSummaryView(
                 oid=BlogPostID(row.oid),
@@ -290,6 +332,11 @@ class BlogPostReaderAlchemy(BlogPostReader):
                 created_at=row.created_at,
                 updated_at=row.updated_at,
                 published_at=row.published_at,
+                cover=(
+                    covers_by_id.get(FileID(row.cover_file_id))
+                    if row.cover_file_id is not None
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -311,4 +358,47 @@ def _select_post_columns() -> sa.Select[Any]:
         blog_posts_table.c.created_at,
         blog_posts_table.c.updated_at,
         blog_posts_table.c.published_at,
+        blog_posts_table.c.cover_file_id,
+    )
+
+
+def _select_post_detail_columns() -> sa.Select[Any]:
+    """Single-post columns plus the editorial byline join.
+
+    Adds ``subtitle`` / ``topic`` and LEFT-joins the
+    ``created_by`` administrator (+ their avatar file) so the reader can
+    resolve a :class:`BlogPostAuthorView`. Used only by the by-id /
+    by-slug single-post reads — the list endpoint keeps the lean
+    :func:`_select_post_columns` (no byline on cards).
+    """
+    author = users_table.alias("blog_author")
+    author_avatar = files_table.alias("blog_author_avatar")
+    return (
+        sa.select(
+            blog_posts_table.c.oid,
+            blog_posts_table.c.title,
+            blog_posts_table.c.slug,
+            blog_posts_table.c.status,
+            blog_posts_table.c.created_at,
+            blog_posts_table.c.updated_at,
+            blog_posts_table.c.published_at,
+            blog_posts_table.c.cover_file_id,
+            blog_posts_table.c.subtitle,
+            blog_posts_table.c.topic,
+            author.c.first_name.label("author_first_name"),
+            author.c.last_name.label("author_last_name"),
+            *file_columns(author_avatar, "author_avatar"),
+        )
+        .select_from(
+            blog_posts_table.outerjoin(
+                author,
+                blog_posts_table.c.created_by == author.c.oid,
+            ).outerjoin(
+                author_avatar,
+                sa.and_(
+                    author.c.avatar_file_id == author_avatar.c.oid,
+                    author_avatar.c.deleted_at.is_(None),
+                ),
+            ),
+        )
     )

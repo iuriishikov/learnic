@@ -37,6 +37,14 @@ from learnic.application.commands.blog_post.change_slug import (
     ChangeBlogPostSlugCommand,
     ChangeBlogPostSlugCommandHandler,
 )
+from learnic.application.commands.blog_post.cover.remove import (
+    RemoveBlogPostCoverCommand,
+    RemoveBlogPostCoverCommandHandler,
+)
+from learnic.application.commands.blog_post.cover.set import (
+    SetBlogPostCoverCommand,
+    SetBlogPostCoverCommandHandler,
+)
 from learnic.application.commands.blog_post.create import (
     CreateBlogPostCommand,
     CreateBlogPostCommandHandler,
@@ -44,6 +52,10 @@ from learnic.application.commands.blog_post.create import (
 from learnic.application.commands.blog_post.delete import (
     DeleteBlogPostCommand,
     DeleteBlogPostCommandHandler,
+)
+from learnic.application.commands.blog_post.edit_meta import (
+    EditBlogPostMetaCommand,
+    EditBlogPostMetaCommandHandler,
 )
 from learnic.application.commands.blog_post.publish import (
     PublishBlogPostCommand,
@@ -131,7 +143,9 @@ from learnic.application.queries.blog_post.list_published import (
 from learnic.entities.blog_post.constants import (
     BLOG_POST_SLUG_MAX_LEN,
     BLOG_POST_SLUG_MIN_LEN,
+    BLOG_POST_SUBTITLE_MAX_LEN,
     BLOG_POST_TITLE_MAX_LEN,
+    BLOG_POST_TOPIC_MAX_LEN,
 )
 from learnic.entities.blog_post.enums import BlogPostStatus
 from learnic.entities.blog_post.errors import BlogPostStatusTransitionError
@@ -159,6 +173,7 @@ from learnic.presentation.http.common.errors.rules import (
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import FileSchema
 from learnic.presentation.http.common.upload_limits import (
+    BLOG_COVER_MAX_BYTES,
     BLOG_IMAGE_BLOCK_MAX_BYTES,
     BLOG_VIDEO_BLOCK_MAX_BYTES,
 )
@@ -208,6 +223,26 @@ _SLUG_FIELD: Final = Field(
     min_length=BLOG_POST_SLUG_MIN_LEN,
     max_length=BLOG_POST_SLUG_MAX_LEN,
     examples=["my-first-post"],
+)
+_SUBTITLE_FIELD: Final = Field(
+    default=None,
+    description=(
+        "Optional deck / standfirst shown under the title on the public "
+        f"post page. Up to {BLOG_POST_SUBTITLE_MAX_LEN} chars "
+        "(`BLOG_POST_SUBTITLE_MAX_LEN`); `null` or blank clears it."
+    ),
+    max_length=BLOG_POST_SUBTITLE_MAX_LEN,
+    examples=["The rise of RESTful APIs, and the tools that tame them."],
+)
+_TOPIC_FIELD: Final = Field(
+    default=None,
+    description=(
+        "Optional topic / category label shown above the title on the "
+        f"public post page. Up to {BLOG_POST_TOPIC_MAX_LEN} chars "
+        "(`BLOG_POST_TOPIC_MAX_LEN`); `null` or blank clears it."
+    ),
+    max_length=BLOG_POST_TOPIC_MAX_LEN,
+    examples=["Design"],
 )
 
 
@@ -393,6 +428,45 @@ def _block_view_to_schema(
 # =============================== post schemas =============================== #
 
 
+class BlogPostAuthorSchema(BaseModel):
+    """Resolved author byline embedded in :class:`BlogPostSchema`.
+
+    ``name`` and ``avatar`` come from the post's creating administrator.
+    The whole object is ``null`` on the post when the creating admin's
+    account is gone.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Olivia Rhye",
+                    "avatar": {
+                        "oid": "550e8400-e29b-41d4-a716-446655440000",
+                        "content_type": "image/jpeg",
+                        "size_bytes": 84_320,
+                        "url": "https://s3.example.com/learnic/avatars/...",
+                    },
+                },
+            ],
+        },
+    )
+
+    name: str = Field(
+        description="Author display name (the creating admin's full name).",
+        examples=["Olivia Rhye"],
+    )
+    avatar: FileSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved author avatar with a short-lived presigned URL, "
+            "or `null` when the author has no avatar — the SPA falls "
+            "back to an initials avatar."
+        ),
+    )
+
+
 class BlogPostSummarySchema(BaseModel):
     """Lightweight post projection for index endpoints (no blocks)."""
 
@@ -408,6 +482,7 @@ class BlogPostSummarySchema(BaseModel):
                     "created_at": "2026-05-29T10:00:00Z",
                     "updated_at": "2026-05-29T12:00:00Z",
                     "published_at": "2026-05-29T12:00:00Z",
+                    "cover": None,
                 },
             ],
         },
@@ -433,8 +508,15 @@ class BlogPostSummarySchema(BaseModel):
     )
     published_at: datetime | None = Field(
         default=None,
+        description=("ISO-8601 UTC publish timestamp, or `null` while in draft."),
+    )
+    cover: FileSchema | None = Field(
+        default=None,
         description=(
-            "ISO-8601 UTC publish timestamp, or `null` while in draft."
+            "Resolved cover image with a short-lived presigned URL, or "
+            "`null` when the post has no cover — the SPA falls back to a "
+            "brand placeholder. The URL expires; re-fetch the list to "
+            "get a fresh one."
         ),
     )
 
@@ -457,6 +539,7 @@ class BlogPostSchema(BaseModel):
                     "created_at": "2026-05-29T10:00:00Z",
                     "updated_at": "2026-05-29T12:00:00Z",
                     "published_at": "2026-05-29T12:00:00Z",
+                    "cover": None,
                     "blocks": [
                         {
                             "type": "html",
@@ -490,8 +573,41 @@ class BlogPostSchema(BaseModel):
     )
     published_at: datetime | None = Field(
         default=None,
+        description=("ISO-8601 UTC publish timestamp, or `null` while in draft."),
+    )
+    cover: FileSchema | None = Field(
+        default=None,
         description=(
-            "ISO-8601 UTC publish timestamp, or `null` while in draft."
+            "Resolved cover image with a short-lived presigned URL, or "
+            "`null` when the post has no cover — the SPA falls back to a "
+            "brand placeholder. The URL expires; re-fetch the post to "
+            "get a fresh one."
+        ),
+    )
+    subtitle: str | None = Field(
+        default=None,
+        description=(
+            "Optional short description shown under the title. Max "
+            f"{BLOG_POST_SUBTITLE_MAX_LEN} chars "
+            "(`BLOG_POST_SUBTITLE_MAX_LEN`), or `null`."
+        ),
+        max_length=BLOG_POST_SUBTITLE_MAX_LEN,
+    )
+    topic: str | None = Field(
+        default=None,
+        description=(
+            "Optional topic / category label shown above the title. Max "
+            f"{BLOG_POST_TOPIC_MAX_LEN} chars (`BLOG_POST_TOPIC_MAX_LEN`), "
+            "or `null`."
+        ),
+        max_length=BLOG_POST_TOPIC_MAX_LEN,
+    )
+    author: BlogPostAuthorSchema | None = Field(
+        default=None,
+        description=(
+            "Resolved author byline (the creating admin's name + avatar "
+            "plus the editorial role line), or `null` when the creating "
+            "admin's account is gone."
         ),
     )
     blocks: list[BlogPostBlockSchema] = Field(
@@ -511,9 +627,19 @@ class BlogPostSchema(BaseModel):
             created_at=view.created_at,
             updated_at=view.updated_at,
             published_at=view.published_at,
-            blocks=[
-                _block_view_to_schema(block) for block in view.blocks
-            ],
+            cover=(
+                FileSchema.model_validate(view.cover)
+                if view.cover is not None
+                else None
+            ),
+            subtitle=view.subtitle,
+            topic=view.topic,
+            author=(
+                BlogPostAuthorSchema.model_validate(view.author)
+                if view.author is not None
+                else None
+            ),
+            blocks=[_block_view_to_schema(block) for block in view.blocks],
         )
 
 
@@ -556,6 +682,34 @@ class ChangeBlogPostSlugSchema(BaseModel):
     )
 
     slug: str = _SLUG_FIELD
+
+
+class EditBlogPostMetaSchema(BaseModel):
+    """Body for `PATCH /admin/blog/posts/{post_id}/meta`.
+
+    Sets the post's editorial metadata wholesale: the topic (category
+    label above the title) and the short description (under the title).
+    Both fields are optional; `null` or a blank string clears the
+    corresponding field. The author's name and avatar are not set here —
+    they come from the post's creating administrator.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "topic": "Design",
+                    "subtitle": (
+                        "How do you create compelling presentations that "
+                        "wow your colleagues and impress your managers?"
+                    ),
+                },
+            ],
+        },
+    )
+
+    subtitle: str | None = _SUBTITLE_FIELD
+    topic: str | None = _TOPIC_FIELD
 
 
 class AddBlogHtmlBlockSchema(BaseModel):
@@ -976,6 +1130,62 @@ async def change_post_slug(
     )
 
 
+@admin_router.patch(
+    "/{post_id}/meta",
+    summary="Edit a blog post's metadata (topic, description)",
+    operation_id="editBlogPostMeta",
+    response_model=BlogPostSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=BLOG_ADMIN_FIELD_MAP,
+)
+async def edit_post_meta(
+    request: Request,
+    payload: EditBlogPostMetaSchema,
+    interactor: FromDishka[EditBlogPostMetaCommandHandler],
+    get_query: FromDishka[GetBlogPostQueryHandler],
+    admin_auth: FromDishka[AdminAuthenticator],
+    post_id: Annotated[UUID, _POST_ID_PATH],
+) -> BlogPostSchema:
+    """Set a post's topic and short description. Admin-only.
+
+    The author's name and avatar are derived from the post's creating
+    administrator and are not editable here; only the optional ``topic``
+    (category label above the title) and ``subtitle`` (short description
+    under the title) are set. Both are replaced wholesale — `null` or a
+    blank string clears the field.
+
+    Args:
+        request: Source of the access cookie.
+        payload: New topic and/or description (either may be `null`).
+        interactor: Injected edit-meta command handler.
+        get_query: Injected query used to return the full updated post
+            after the command commits.
+        admin_auth: Injected admin authenticator.
+        post_id: Target post UUID.
+
+    Returns:
+        ``200 OK`` with the full :class:`BlogPostSchema` reflecting the
+        updated metadata, so the SPA can ``setQueryData`` instead of
+        refetching the post.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotAdminError: HTTP 403.
+        EntityNotFoundError: No post with this id; HTTP 404.
+        FieldError: Subtitle/author-role invariant violated; HTTP 422.
+    """
+    await admin_auth.authenticate_admin(request)
+    await interactor.run(
+        EditBlogPostMetaCommand(
+            post_id=BlogPostID(post_id),
+            subtitle=payload.subtitle,
+            topic=payload.topic,
+        ),
+    )
+    view = await get_query.run(GetBlogPostQuery(post_id=BlogPostID(post_id)))
+    return BlogPostSchema.from_view(view)
+
+
 @admin_router.post(
     "/{post_id}/publish",
     summary="Publish a blog post",
@@ -1085,6 +1295,114 @@ async def delete_post(
     """
     await admin_auth.authenticate_admin(request)
     await interactor.run(DeleteBlogPostCommand(post_id=BlogPostID(post_id)))
+
+
+@admin_router.post(
+    "/{post_id}/cover",
+    summary="Upload (or replace) a blog post's cover image",
+    operation_id="setBlogPostCover",
+    status_code=status.HTTP_201_CREATED,
+    response_model=BlogPostSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=BLOG_ADMIN_FIELD_MAP,
+)
+async def set_cover(
+    request: Request,
+    interactor: FromDishka[SetBlogPostCoverCommandHandler],
+    get_query: FromDishka[GetBlogPostQueryHandler],
+    admin_auth: FromDishka[AdminAuthenticator],
+    post_id: Annotated[UUID, _POST_ID_PATH],
+    file: UploadFile = File(  # noqa: B008
+        description=(
+            "Cover image bytes; `multipart/form-data` field `file`. "
+            "Capped at `BLOG_COVER_MAX_BYTES`; the server reads "
+            "`Content-Type` from the upload."
+        ),
+    ),
+) -> BlogPostSchema:
+    """Upload (or replace) a post's cover image. Admin-only.
+
+    The previous cover (if any) is soft-deleted in the same
+    transaction; only the S3 PUT for the new blob happens
+    out-of-band.
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected set-cover command handler.
+        get_query: Injected query used to return the full updated post
+            after the command commits.
+        admin_auth: Injected admin authenticator.
+        post_id: Target post UUID.
+        file: ``multipart/form-data`` field ``file`` carrying the cover
+            image bytes. Capped at ``BLOG_COVER_MAX_BYTES``.
+
+    Returns:
+        ``201 Created`` with the full :class:`BlogPostSchema` carrying
+        the freshly resolved cover, so the SPA can ``setQueryData``
+        instead of refetching the post.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotAdminError: HTTP 403.
+        EntityNotFoundError: No post with this id; HTTP 404.
+        FileTooLargeError: Cover payload over ``BLOG_COVER_MAX_BYTES``;
+            HTTP 422.
+    """
+    ctx = await admin_auth.authenticate_admin(request)
+    upload = await open_upload(file, max_bytes=BLOG_COVER_MAX_BYTES)
+    await interactor.run(
+        SetBlogPostCoverCommand(
+            actor_id=ctx.user_id,
+            post_id=BlogPostID(post_id),
+            upload=upload,
+        ),
+    )
+    view = await get_query.run(GetBlogPostQuery(post_id=BlogPostID(post_id)))
+    return BlogPostSchema.from_view(view)
+
+
+@admin_router.delete(
+    "/{post_id}/cover",
+    summary="Detach a blog post's cover image",
+    operation_id="removeBlogPostCover",
+    status_code=status.HTTP_200_OK,
+    response_model=BlogPostSchema,
+    dependencies=_AUTH_SECURITY,
+    error_map=ADMIN_MAP,
+)
+async def remove_cover(
+    request: Request,
+    interactor: FromDishka[RemoveBlogPostCoverCommandHandler],
+    get_query: FromDishka[GetBlogPostQueryHandler],
+    admin_auth: FromDishka[AdminAuthenticator],
+    post_id: Annotated[UUID, _POST_ID_PATH],
+) -> BlogPostSchema:
+    """Detach the post's cover and soft-delete the file row. Admin-only.
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected remove-cover command handler.
+        get_query: Injected query used to return the full updated post
+            after the command commits.
+        admin_auth: Injected admin authenticator.
+        post_id: Target post UUID.
+
+    Returns:
+        ``200 OK`` with the full :class:`BlogPostSchema` reflecting the
+        detached cover, so the SPA can ``setQueryData`` instead of
+        refetching the post.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotAdminError: HTTP 403.
+        EntityNotFoundError: No post with this id; HTTP 404.
+    """
+    await admin_auth.authenticate_admin(request)
+    await interactor.run(
+        RemoveBlogPostCoverCommand(post_id=BlogPostID(post_id)),
+    )
+    view = await get_query.run(GetBlogPostQuery(post_id=BlogPostID(post_id)))
+    return BlogPostSchema.from_view(view)
 
 
 # =========================== admin block routes ============================= #

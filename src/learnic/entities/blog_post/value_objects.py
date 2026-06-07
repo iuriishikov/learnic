@@ -4,7 +4,9 @@ from typing import ClassVar
 from learnic.entities.blog_post.constants import (
     BLOG_POST_SLUG_MAX_LEN,
     BLOG_POST_SLUG_MIN_LEN,
+    BLOG_POST_SUBTITLE_MAX_LEN,
     BLOG_POST_TITLE_MAX_LEN,
+    BLOG_POST_TOPIC_MAX_LEN,
 )
 from learnic.entities.blog_post.errors import (
     BlogPostFieldTooLongError,
@@ -57,3 +59,43 @@ class BlogPostSlug(ValueObject):
             raise BlogPostFieldTooLongError("slug", BLOG_POST_SLUG_MAX_LEN)
         if not self._PATTERN.match(self.value):
             raise InvalidBlogPostSlugError("invalid_format")
+
+
+class BlogPostSubtitle(ValueObject):
+    """Optional deck / standfirst shown under the title.
+
+    Only constructed when a subtitle is actually present — the
+    "no subtitle" case is the entity's ``None``, handled at the
+    entity / persistence boundary, never an empty VO. Non-blank and
+    capped at ``BLOG_POST_SUBTITLE_MAX_LEN``.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value.strip():
+            raise EmptyBlogPostFieldError("subtitle")
+        if len(self.value) > BLOG_POST_SUBTITLE_MAX_LEN:
+            raise BlogPostFieldTooLongError(
+                "subtitle",
+                BLOG_POST_SUBTITLE_MAX_LEN,
+            )
+
+
+class BlogPostTopic(ValueObject):
+    """Optional topic / category label ("Design") shown above the title.
+
+    Only constructed when present (absent == entity ``None``); non-blank
+    and capped at ``BLOG_POST_TOPIC_MAX_LEN``.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value.strip():
+            raise EmptyBlogPostFieldError("topic")
+        if len(self.value) > BLOG_POST_TOPIC_MAX_LEN:
+            raise BlogPostFieldTooLongError(
+                "topic",
+                BLOG_POST_TOPIC_MAX_LEN,
+            )

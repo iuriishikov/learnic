@@ -10,3 +10,11 @@ BLOG_POST_TITLE_MAX_LEN: Final = 200
 # an auto-suggested slug derived from the title always fits.
 BLOG_POST_SLUG_MIN_LEN: Final = 3
 BLOG_POST_SLUG_MAX_LEN: Final = 200
+
+# Optional short description / deck shown under the title on the public
+# post page — one or two sentences summarising the article.
+BLOG_POST_SUBTITLE_MAX_LEN: Final = 300
+
+# Optional topic / category label ("Design") shown above the title on
+# the public post page — a single short word or phrase.
+BLOG_POST_TOPIC_MAX_LEN: Final = 80

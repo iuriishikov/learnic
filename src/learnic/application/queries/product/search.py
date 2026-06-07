@@ -8,6 +8,7 @@ from learnic.application.queries.product.get import (
     PaginatedProductsOutput,
     resolve_product_output,
 )
+from learnic.entities.tag.ids import TagID
 
 
 @dataclass(slots=True, frozen=True)
@@ -17,10 +18,15 @@ class SearchPublishedProductsQuery:
     ``q`` is the raw user input — the reader trims and lower-cases
     it internally. Empty / whitespace-only queries are guarded at
     the HTTP boundary (``min_length=2``) and never reach this DTO.
+
+    ``tag_ids`` intersects the full-text result with products
+    carrying every requested tag (AND); empty = no tag filter, so
+    search and the catalog's tag chips compose on one request.
     """
 
     q: str
     pagination: Pagination
+    tag_ids: tuple[TagID, ...] = ()
 
 
 @final
@@ -49,9 +55,11 @@ class SearchPublishedProductsQueryHandler:
         data: SearchPublishedProductsQuery,
     ) -> PaginatedProductsOutput:
         views = await self._reader.search_published(
-            data.q, data.pagination,
+            data.q, data.pagination, data.tag_ids,
         )
-        total = await self._reader.search_published_count(data.q)
+        total = await self._reader.search_published_count(
+            data.q, data.tag_ids,
+        )
         items = [
             await resolve_product_output(view, self._file_storage)
             for view in views

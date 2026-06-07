@@ -8,11 +8,16 @@ from learnic.application.queries.product.get import (
     PaginatedProductsOutput,
     resolve_product_output,
 )
+from learnic.entities.tag.ids import TagID
 
 
 @dataclass(slots=True, frozen=True)
 class GetPublishedProductsQuery:
     pagination: Pagination
+    # Empty tuple = browse the full catalog. Non-empty = restrict to
+    # products carrying every requested tag (AND); pagination + total
+    # are computed over that filtered set by the reader.
+    tag_ids: tuple[TagID, ...] = ()
 
 
 @final
@@ -36,8 +41,10 @@ class GetPublishedProductsQueryHandler:
         self,
         data: GetPublishedProductsQuery,
     ) -> PaginatedProductsOutput:
-        views = await self._reader.published(data.pagination)
-        total = await self._reader.published_count()
+        views = await self._reader.published(
+            data.pagination, data.tag_ids,
+        )
+        total = await self._reader.published_count(data.tag_ids)
         items = [
             await resolve_product_output(view, self._file_storage)
             for view in views

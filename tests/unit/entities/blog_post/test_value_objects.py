@@ -2,7 +2,9 @@ import pytest
 
 from learnic.entities.blog_post.constants import (
     BLOG_POST_SLUG_MAX_LEN,
+    BLOG_POST_SUBTITLE_MAX_LEN,
     BLOG_POST_TITLE_MAX_LEN,
+    BLOG_POST_TOPIC_MAX_LEN,
 )
 from learnic.entities.blog_post.errors import (
     BlogPostFieldTooLongError,
@@ -11,7 +13,9 @@ from learnic.entities.blog_post.errors import (
 )
 from learnic.entities.blog_post.value_objects import (
     BlogPostSlug,
+    BlogPostSubtitle,
     BlogPostTitle,
+    BlogPostTopic,
 )
 
 
@@ -59,3 +63,31 @@ class TestBlogPostSlug:
     def test_too_long_rejected(self) -> None:
         with pytest.raises(BlogPostFieldTooLongError):
             BlogPostSlug("a" * (BLOG_POST_SLUG_MAX_LEN + 1))
+
+
+class TestBlogPostSubtitle:
+    def test_accepts_normal_value(self) -> None:
+        assert BlogPostSubtitle("A short deck").value == "A short deck"
+
+    @pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+    def test_blank_rejected(self, value: str) -> None:
+        with pytest.raises(EmptyBlogPostFieldError):
+            BlogPostSubtitle(value)
+
+    def test_too_long_rejected(self) -> None:
+        with pytest.raises(BlogPostFieldTooLongError):
+            BlogPostSubtitle("x" * (BLOG_POST_SUBTITLE_MAX_LEN + 1))
+
+
+class TestBlogPostTopic:
+    def test_accepts_normal_value(self) -> None:
+        assert BlogPostTopic("Design").value == "Design"
+
+    @pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+    def test_blank_rejected(self, value: str) -> None:
+        with pytest.raises(EmptyBlogPostFieldError):
+            BlogPostTopic(value)
+
+    def test_too_long_rejected(self) -> None:
+        with pytest.raises(BlogPostFieldTooLongError):
+            BlogPostTopic("x" * (BLOG_POST_TOPIC_MAX_LEN + 1))

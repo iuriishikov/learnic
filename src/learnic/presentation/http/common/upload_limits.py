@@ -68,3 +68,7 @@ BLOG_IMAGE_BLOCK_MAX_BYTES: Final = 10 * _MB
 # lesson video block (~30 min of 1080p H.264); longer cuts should be
 # split across posts or hosted externally.
 BLOG_VIDEO_BLOCK_MAX_BYTES: Final = 1024 * _MB
+# Blog post cover — the index/card hero image. Matches the other cover
+# caps (10 MB): comfortably covers a high-resolution banner, still
+# image-only.
+BLOG_COVER_MAX_BYTES: Final = 10 * _MB

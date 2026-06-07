@@ -148,6 +148,8 @@ from learnic.entities.product.enums import (
     ProductVisibility,
 )
 from learnic.entities.product.ids import ProductID
+from learnic.entities.tag.constants import PRODUCT_TAGS_MAX
+from learnic.entities.tag.ids import TagID
 from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
@@ -1345,6 +1347,22 @@ async def get_published(
         ),
         examples=["python", "иванов", "машинное обучение"],
     ),
+    tag_ids: list[UUID] = Query(
+        default_factory=list,
+        max_length=PRODUCT_TAGS_MAX,
+        description=(
+            "Optional tag filter. Repeat the parameter once per tag "
+            "(`?tag_ids=<uuid>&tag_ids=<uuid>`). When one or more are "
+            "supplied, the catalog is restricted to products carrying "
+            "**every** listed tag (AND semantics) — pagination and the "
+            "``X-Total-Count`` header are computed over the filtered "
+            "set, not the full catalog. Composes with ``q`` (search "
+            "intersected with the tag filter). Capped at "
+            f"{PRODUCT_TAGS_MAX} ids (`PRODUCT_TAGS_MAX`, the "
+            "per-product tag limit) — more can never match."
+        ),
+        examples=[["3fa85f64-5717-4562-b3fc-2c963f66afa6"]],
+    ),
 ) -> list[ProductSchema]:
     """Return the public catalog of published products.
 
@@ -1358,6 +1376,11 @@ async def get_published(
       for typos and transliteration. Search is morphology-aware via
       the Russian text-search dictionary ("курсы" matches "курс").
 
+    The optional ``tag_ids`` filter layers on top of **either** mode
+    (AND across the listed tags), so the SPA's tag chips narrow both
+    the plain catalog and a search; pagination and ``X-Total-Count``
+    are always computed over the filtered result set.
+
     Args:
         response: Injected FastAPI response so the handler can set
             the ``X-Total-Count`` header.
@@ -1367,6 +1390,10 @@ async def get_published(
         limit: Page size.
         q: Optional free-text query. When empty / omitted, list mode
             applies; otherwise search mode runs.
+        tag_ids: Optional repeatable tag filter. When non-empty, both
+            modes are restricted to products carrying every listed
+            tag (AND); capped at ``PRODUCT_TAGS_MAX``. Composes with
+            ``q``.
 
     Returns:
         List of :class:`ProductSchema` (body). In list mode ordered
@@ -1377,13 +1404,18 @@ async def get_published(
         numbered page controls without a second round-trip.
     """
     pagination = Pagination(limit=limit, offset=offset)
+    tags = tuple(TagID(tag_id) for tag_id in tag_ids)
     if q is None or not q.strip():
         result = await list_interactor.run(
-            GetPublishedProductsQuery(pagination=pagination),
+            GetPublishedProductsQuery(
+                pagination=pagination, tag_ids=tags,
+            ),
         )
     else:
         result = await search_interactor.run(
-            SearchPublishedProductsQuery(q=q, pagination=pagination),
+            SearchPublishedProductsQuery(
+                q=q, pagination=pagination, tag_ids=tags,
+            ),
         )
     response.headers["X-Total-Count"] = str(result.total)
     return [ProductSchema.from_output(view) for view in result.items]

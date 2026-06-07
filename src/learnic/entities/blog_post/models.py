@@ -8,9 +8,12 @@ from learnic.entities.blog_post.errors import BlogPostStatusTransitionError
 from learnic.entities.blog_post.ids import BlogPostID
 from learnic.entities.blog_post.value_objects import (
     BlogPostSlug,
+    BlogPostSubtitle,
     BlogPostTitle,
+    BlogPostTopic,
 )
 from learnic.entities.common.base_entity import BaseEntity
+from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import UserID
 
 
@@ -38,16 +41,47 @@ class BlogPost(BaseEntity[BlogPostID]):
     created_at: datetime
     updated_at: datetime
     published_at: datetime | None = None
+    cover_file_id: FileID | None = None
+    subtitle: BlogPostSubtitle | None = None
+    topic: BlogPostTopic | None = None
 
     @property
     def is_published(self) -> bool:
         return self.status is BlogPostStatus.PUBLISHED
+
+    def edit_meta(
+        self,
+        subtitle: BlogPostSubtitle | None,
+        topic: BlogPostTopic | None,
+    ) -> None:
+        """Replace the post's editorial metadata.
+
+        Both fields are set wholesale (``None`` clears): the ``subtitle``
+        (short description under the title) and the ``topic`` (category
+        label above the title). The author's name and avatar are not
+        stored here — they are resolved from ``created_by`` on the read
+        side.
+        """
+        self.subtitle = subtitle
+        self.topic = topic
 
     def rename(self, new_title: BlogPostTitle) -> None:
         self.title = new_title
 
     def change_slug(self, new_slug: BlogPostSlug) -> None:
         self.slug = new_slug
+
+    def set_cover(self, file_id: FileID) -> FileID | None:
+        """Attach ``file_id`` as cover, returning the previous one (if any)."""
+        previous = self.cover_file_id
+        self.cover_file_id = file_id
+        return previous
+
+    def remove_cover(self) -> FileID | None:
+        """Detach the cover, returning the previous file id (if any)."""
+        previous = self.cover_file_id
+        self.cover_file_id = None
+        return previous
 
     def publish(self) -> None:
         """Move the post to ``PUBLISHED`` and stamp ``published_at``.
