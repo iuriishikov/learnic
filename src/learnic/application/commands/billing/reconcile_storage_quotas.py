@@ -49,6 +49,9 @@ from learnic.application.common.persistence.transaction import (
     Transaction,
 )
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
+)
 from learnic.entities.billing.constants import (
     OVER_QUOTA_GRACE_PERIOD_DAYS,
     OVER_QUOTA_NOTIFICATION_COOLDOWN_DAYS,
@@ -107,6 +110,7 @@ class ReconcileStorageQuotasCommandHandler:
         file_uploads: FileUploadService,
         publisher: NotificationPublisher,
         scheduler_lock: GlobalSchedulerLock,
+        quota_publisher: StorageQuotaUsagePublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
@@ -117,6 +121,7 @@ class ReconcileStorageQuotasCommandHandler:
         self._file_uploads: Final = file_uploads
         self._publisher: Final = publisher
         self._scheduler_lock: Final = scheduler_lock
+        self._quota_publisher: Final = quota_publisher
 
     async def run(
         self,
@@ -285,6 +290,8 @@ class ReconcileStorageQuotasCommandHandler:
             freed_bytes=freed,
         )
         await self._publisher.publish(notification)
+        if deleted_count:
+            await self._quota_publisher.usage_changed(user_id)
         summary.enforcements += 1
 
 

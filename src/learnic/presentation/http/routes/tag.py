@@ -3,9 +3,13 @@
 Tags are global and shared: any authenticated user can search the
 pool, and any user with ``edit_description`` on a product can
 attach existing tags or mint new ones via the get-or-create path
-on ``PUT /products/{product_id}/tags``. Real-time deltas land on
-the product event channel (``tags_changed``); see the
-``## WebSocket channels`` section in the OpenAPI description.
+on ``PUT /products/{product_id}/tags``. The popular-tags slice
+(``GET /tags/popular``) is the lone public endpoint here — it powers
+the anonymous marketplace and the site-header "find note" menu, and
+exposes only tag names/colours already visible on public product
+cards. Real-time deltas land on the product event channel
+(``tags_changed``); see the ``## WebSocket channels`` section in the
+OpenAPI description.
 """
 
 from typing import Annotated, Final, Self
@@ -319,13 +323,9 @@ _POPULAR_LIMIT_MAX: Final = 50
     summary="Return the most-used tags across published products",
     operation_id="getPopularTags",
     response_model=TagListSchema,
-    dependencies=_AUTH_SECURITY,
-    error_map=AUTHENTICATED_WITH_FIELD_MAP,
 )
 async def get_popular_tags(
-    request: Request,
     interactor: FromDishka[GetPopularTagsQueryHandler],
-    auth: FromDishka[Authenticator],
     limit: Annotated[
         int,
         Query(
@@ -342,18 +342,19 @@ async def get_popular_tags(
 ) -> TagListSchema:
     """Return top-``limit`` tags ordered by usage count.
 
-    Backs the marketplace filter chip row — replaces the previous
-    "sample 500 products + aggregate in the SPA" workaround with a
-    single SQL aggregate against ``product_tags`` joined to
-    ``products`` (only ``PUBLISHED`` rows are counted; drafts and
-    archives are invisible to the marketplace anyway). Tagged tags
-    that no published product carries are omitted; ties on usage
-    count are broken by name ascending so the chip order is stable.
+    Public (unauthenticated). Backs the public marketplace filter
+    chip row and the "find note" menu in the anonymous site header —
+    both render before login, so this slice must be reachable without
+    an access cookie. A single SQL aggregate against
+    ``product_tags`` joined to ``products`` (only ``PUBLISHED`` rows
+    are counted; drafts and archives are invisible to the marketplace
+    anyway). The data is non-sensitive — tag names and colours already
+    surface on every public product card. Tags that no published
+    product carries are omitted; ties on usage count are broken by
+    name ascending so the chip order is stable.
 
     Args:
-        request: Source of the access-token cookie.
         interactor: Injected popular-tags query handler.
-        auth: Injected authenticator.
         limit: Cap on the returned slice. Validated against
             ``_POPULAR_LIMIT_MAX`` so a misbehaving client cannot
             ask for the entire tag pool through this endpoint.
@@ -361,11 +362,7 @@ async def get_popular_tags(
     Returns:
         :class:`TagListSchema` of at most ``limit`` :class:`TagSchema`
         items, ordered by usage count descending.
-
-    Raises:
-        InvalidTokenError: Missing or denied access cookie; HTTP 401.
     """
-    await auth.authenticate(request)
     views = await interactor.run(GetPopularTagsQuery(limit=limit))
     return TagListSchema(items=[TagSchema.from_view(v) for v in views])
 

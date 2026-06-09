@@ -55,6 +55,7 @@ from learnic.infrastructure.persistence.blocks.registry import (
 from learnic.infrastructure.persistence.models.note_block import (
     code_blocks_table,
     file_blocks_table,
+    function_graph_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -76,6 +77,7 @@ from learnic.infrastructure.persistence.models.note_release import (
     note_release_blocks_table,
     note_release_code_blocks_table,
     note_release_file_blocks_table,
+    note_release_function_graph_blocks_table,
     note_release_html_blocks_table,
     note_release_katex_blocks_table,
     note_release_lessons_table,
@@ -466,6 +468,9 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 photo_collage_blocks_table.c.title.label(
                     "photo_collage_title",
                 ),
+                function_graph_blocks_table.c.config.label(
+                    "function_graph_config",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -507,6 +512,11 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 .outerjoin(
                     photo_collage_blocks_table,
                     lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    function_graph_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == function_graph_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == release.product_id)
@@ -738,6 +748,9 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
                     note_release_photo_collage_blocks_table.c.title.label(
                         "photo_collage_title",
                     ),
+                    note_release_function_graph_blocks_table.c.config.label(
+                        "function_graph_config",
+                    ),
                 )
                 .select_from(
                     note_release_blocks_table.outerjoin(
@@ -789,6 +802,11 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
                         note_release_photo_collage_blocks_table,
                         note_release_blocks_table.c.oid
                         == note_release_photo_collage_blocks_table.c.oid,
+                    )
+                    .outerjoin(
+                        note_release_function_graph_blocks_table,
+                        note_release_blocks_table.c.oid
+                        == note_release_function_graph_blocks_table.c.oid,
                     ),
                 )
                 .where(note_release_blocks_table.c.release_id == release_id)
@@ -917,6 +935,9 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
             note_release_photo_collage_blocks_table.c.title.label(
                 "photo_collage_title",
             ),
+            note_release_function_graph_blocks_table.c.config.label(
+                "function_graph_config",
+            ),
         )
         .select_from(
             note_release_blocks_table.join(
@@ -973,6 +994,11 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
                 note_release_photo_collage_blocks_table,
                 note_release_blocks_table.c.oid
                 == note_release_photo_collage_blocks_table.c.oid,
+            )
+            .outerjoin(
+                note_release_function_graph_blocks_table,
+                note_release_blocks_table.c.oid
+                == note_release_function_graph_blocks_table.c.oid,
             ),
         )
         .where(note_release_blocks_table.c.oid == oid)

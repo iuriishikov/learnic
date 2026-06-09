@@ -19,6 +19,9 @@ from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.storage.file_uploads import FileUploadService
 from learnic.application.common.storage.upload import IncomingUpload
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
+)
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_block.ids import LessonBlockID
 from learnic.entities.note_block.models import FileBlock
@@ -59,6 +62,7 @@ class UpdateFileBlockCommandHandler:
         file_uploads: FileUploadService,
         entitlement: EntitlementService,
         event_bus: ContentEventBus,
+        quota_publisher: StorageQuotaUsagePublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -67,6 +71,7 @@ class UpdateFileBlockCommandHandler:
         self._file_uploads: Final = file_uploads
         self._entitlement: Final = entitlement
         self._event_bus: Final = event_bus
+        self._quota_publisher: Final = quota_publisher
 
     async def run(self, data: UpdateFileBlockCommand) -> None:
         block = await self._block_gateway.with_id(data.block_id)
@@ -115,3 +120,5 @@ class UpdateFileBlockCommandHandler:
             product_id=block.product_id,
             actor_id=data.actor_id,
         )
+        if data.upload is not None:
+            await self._quota_publisher.usage_changed(product.author_id)

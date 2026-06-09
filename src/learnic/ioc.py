@@ -53,6 +53,12 @@ from learnic.application.queries.auth.token_status import (
 from learnic.application.commands.note_block.add_code import (
     AddCodeBlockCommandHandler,
 )
+from learnic.application.commands.note_block.add_function_graph import (
+    AddFunctionGraphBlockCommandHandler,
+)
+from learnic.application.commands.note_block.update_function_graph import (
+    UpdateFunctionGraphBlockCommandHandler,
+)
 from learnic.application.commands.blog_post.change_slug import (
     ChangeBlogPostSlugCommandHandler,
 )
@@ -109,6 +115,9 @@ from learnic.application.commands.note_block.check_answer import (
 )
 from learnic.application.commands.note_block.reveal_answer import (
     RevealBlockAnswerCommandHandler,
+)
+from learnic.application.queries.note_block_answer.list_mine import (
+    ListMyBlockAnswersQueryHandler,
 )
 from learnic.application.commands.note_block.add_html import (
     AddHtmlBlockCommandHandler,
@@ -196,6 +205,9 @@ from learnic.application.commands.enrollment.enroll_into_product import (
 )
 from learnic.application.commands.enrollment.repin import (
     RePinNoteEnrollmentCommandHandler,
+)
+from learnic.application.commands.enrollment.self_repin import (
+    SelfRePinNoteEnrollmentCommandHandler,
 )
 from learnic.application.commands.note_lesson.add import (
     AddNoteLessonCommandHandler,
@@ -478,6 +490,10 @@ from learnic.application.common.persistence.enrollment import (
     EnrollmentGateway,
     EnrollmentReader,
 )
+from learnic.application.common.persistence.note_block_answer import (
+    NoteBlockAnswerGateway,
+    NoteBlockAnswerReader,
+)
 from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.application.common.persistence.note_lesson import (
     NoteLessonGateway,
@@ -511,6 +527,9 @@ from learnic.application.commands.billing.reconcile_storage_quotas import (
 from learnic.application.commands.file.purge_from_storage import (
     PurgeFileFromStorageCommandHandler,
 )
+from learnic.application.queries.billing.get_note_storage import (
+    GetNoteStorageQueryHandler,
+)
 from learnic.application.queries.billing.get_note_storage_remaining import (
     GetNoteStorageRemainingQueryHandler,
 )
@@ -543,6 +562,12 @@ from learnic.application.common.notifications.publisher import (
 )
 from learnic.application.common.notifications.reader import (
     NotificationReader,
+)
+from learnic.application.common.storage_quota.event_bus import (
+    StorageQuotaEventBus,
+)
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
 )
 from learnic.entities.notification.enums import NotificationChannel
 from learnic.application.common.notification_preferences.gateway import (
@@ -740,6 +765,9 @@ from learnic.application.queries.enrollment.list_for_product import (
 from learnic.application.queries.enrollment.list_for_student import (
     GetStudentEnrollmentsQueryHandler,
 )
+from learnic.application.queries.enrollment.list_releases import (
+    ListEnrollmentReleasesQueryHandler,
+)
 from learnic.application.queries.product_qa.list import (
     GetProductQAListQueryHandler,
 )
@@ -801,6 +829,10 @@ from learnic.infrastructure.persistence.adapters.enrollment import (
     EnrollmentMapperAlchemy,
     EnrollmentReaderAlchemy,
 )
+from learnic.infrastructure.persistence.adapters.note_block_answer import (
+    NoteBlockAnswerMapperAlchemy,
+    NoteBlockAnswerReaderAlchemy,
+)
 from learnic.infrastructure.persistence.adapters.note_lesson import (
     NoteLessonMapperAlchemy,
 )
@@ -844,6 +876,9 @@ from learnic.infrastructure.notifications.event_bus_redis import (
 )
 from learnic.infrastructure.notifications.notifier import NotifierService
 from learnic.infrastructure.notifications.specs import default_registry
+from learnic.infrastructure.storage_quota.event_bus_redis import (
+    StorageQuotaEventBusRedis,
+)
 from learnic.infrastructure.persistence.adapters.notification import (
     NotificationGatewayAlchemy,
     NotificationReaderAlchemy,
@@ -1171,6 +1206,14 @@ class GatewaysProvider(Provider):
     enrollment_reader = provide(
         EnrollmentReaderAlchemy,
         provides=EnrollmentReader,
+    )
+    note_block_answer_gateway = provide(
+        NoteBlockAnswerMapperAlchemy,
+        provides=NoteBlockAnswerGateway,
+    )
+    note_block_answer_reader = provide(
+        NoteBlockAnswerReaderAlchemy,
+        provides=NoteBlockAnswerReader,
     )
     note_module_gateway = provide(
         NoteModuleMapperAlchemy,
@@ -1584,6 +1627,15 @@ class ConfirmEventsProvider(Provider):
     event_bus = provide(ConfirmEventBusRedis, provides=ConfirmEventBus)
 
 
+class StorageQuotaEventsProvider(Provider):
+    scope = Scope.APP
+
+    event_bus = provide(
+        StorageQuotaEventBusRedis,
+        provides=StorageQuotaEventBus,
+    )
+
+
 class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
@@ -1682,8 +1734,12 @@ class InteractorsProvider(Provider):
     enroll_into_product = provide(EnrollIntoProductCommandHandler)
     complete_enrollment = provide(CompleteEnrollmentCommandHandler)
     repin_note_enrollment = provide(RePinNoteEnrollmentCommandHandler)
+    self_repin_note_enrollment = provide(
+        SelfRePinNoteEnrollmentCommandHandler,
+    )
     get_product_enrollments = provide(GetProductEnrollmentsQueryHandler)
     get_student_enrollments = provide(GetStudentEnrollmentsQueryHandler)
+    list_enrollment_releases = provide(ListEnrollmentReleasesQueryHandler)
 
     add_note_module = provide(AddNoteModuleCommandHandler)
     rename_note_module = provide(RenameNoteModuleCommandHandler)
@@ -1701,6 +1757,12 @@ class InteractorsProvider(Provider):
     add_katex_block = provide(AddKatexBlockCommandHandler)
     add_rutube_video_block = provide(AddRutubeVideoBlockCommandHandler)
     add_code_block = provide(AddCodeBlockCommandHandler)
+    add_function_graph_block = provide(
+        AddFunctionGraphBlockCommandHandler,
+    )
+    update_function_graph_block = provide(
+        UpdateFunctionGraphBlockCommandHandler,
+    )
     add_single_choice_block = provide(AddSingleChoiceBlockCommandHandler)
     add_multi_choice_block = provide(AddMultiChoiceBlockCommandHandler)
     add_text_input_block = provide(AddTextInputBlockCommandHandler)
@@ -1728,10 +1790,12 @@ class InteractorsProvider(Provider):
         UpdatePhotoCollageTitleCommandHandler,
     )
     entitlement_service = provide(EntitlementService)
+    storage_quota_publisher = provide(StorageQuotaUsagePublisher)
     get_my_subscription = provide(GetMySubscriptionQueryHandler)
     get_note_storage_remaining = provide(
         GetNoteStorageRemainingQueryHandler,
     )
+    get_note_storage = provide(GetNoteStorageQueryHandler)
     reconcile_storage_quotas = provide(
         ReconcileStorageQuotasCommandHandler,
     )
@@ -1740,6 +1804,7 @@ class InteractorsProvider(Provider):
     )
     check_block_answer = provide(CheckBlockAnswerCommandHandler)
     reveal_block_answer = provide(RevealBlockAnswerCommandHandler)
+    list_my_block_answers = provide(ListMyBlockAnswersQueryHandler)
     reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
     delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
     get_note_draft = provide(GetNoteDraftQueryHandler)
@@ -1900,6 +1965,7 @@ def setup_providers(configs: Configs) -> AsyncContainer:
         CollaborationProvider(),
         ProductEventsProvider(),
         NotificationEventsProvider(),
+        StorageQuotaEventsProvider(),
         NotificationChannelsProvider(),
         StatisticsProvider(),
         EnrollmentStrategiesProvider(),

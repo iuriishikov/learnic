@@ -163,3 +163,69 @@ class CollageItemsMismatchError(FieldError):
     trying to drop an item? add one? the dedicated endpoints exist
     for that) and surfaces here.
     """
+
+
+class InvalidGraphConfigError(FieldError):
+    """Raised when a function-graph config is structurally malformed.
+
+    Covers the generic shape failures (not a JSON object, a required
+    key missing or of the wrong type, an unknown object ``kind``).
+    ``reason`` is a short machine-readable token.
+    """
+
+    reason: str
+
+
+class UnsupportedGraphSchemaVersionError(FieldError):
+    """Raised when a function-graph config has an unknown schema version."""
+
+    version: int
+
+
+class InvalidGraphViewportError(FieldError):
+    """Raised when a function-graph viewport is non-finite or inverted."""
+
+    reason: str
+
+
+class TooManyGraphObjectsError(FieldError):
+    """Raised when a config exceeds ``FUNCTION_GRAPH_MAX_OBJECTS``."""
+
+    limit: int
+
+
+class TooManyGraphParametersError(FieldError):
+    """Raised when a config exceeds ``FUNCTION_GRAPH_MAX_PARAMS``."""
+
+    limit: int
+
+
+class InvalidGraphParameterError(FieldError):
+    """Raised when a parameter is malformed or its name collides.
+
+    ``reason`` is one of ``"name"`` (invalid identifier / too long),
+    ``"duplicate"`` (name reused), ``"range"`` (``min``/``max``/
+    ``value`` not finite or ``min <= value <= max`` violated),
+    ``"step"`` (non-positive step).
+    """
+
+    reason: str
+
+
+class UnsafeGraphExpressionError(FieldError):
+    """Raised when an expression uses characters outside the safe set.
+
+    Expressions are persisted verbatim and evaluated only client-side
+    by the plotting engine; the whitelist (digits, latin letters,
+    ``_``, whitespace and ``+ - * / ^ ( ) . ,``) keeps a malicious
+    payload from reaching the renderer. ``reason`` is ``"chars"`` for a
+    forbidden character or ``"length"`` when too long.
+    """
+
+    reason: str
+
+
+class GraphConfigTooLargeError(FieldError):
+    """Raised when the serialised config exceeds ``GRAPH_CONFIG_MAX_LEN``."""
+
+    limit: int

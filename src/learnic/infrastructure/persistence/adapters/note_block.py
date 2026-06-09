@@ -16,6 +16,7 @@ from learnic.entities.note_block.models import (
     CodeTab,
     CollageItem,
     FileBlock,
+    FunctionGraphBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
@@ -36,6 +37,7 @@ from learnic.infrastructure.persistence.blocks.registry import (
 from learnic.infrastructure.persistence.models.note_block import (
     code_blocks_table,
     file_blocks_table,
+    function_graph_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -236,6 +238,7 @@ def _select_blocks() -> sa.Select[Any]:
         video_file_blocks_table.c.file_id.label("video_file_block_file_id"),
         video_file_blocks_table.c.title.label("video_file_block_title"),
         photo_collage_blocks_table.c.title.label("photo_collage_title"),
+        function_graph_blocks_table.c.config.label("function_graph_config"),
     ).select_from(
         lesson_blocks_table.outerjoin(
             html_blocks_table,
@@ -276,6 +279,10 @@ def _select_blocks() -> sa.Select[Any]:
         .outerjoin(
             photo_collage_blocks_table,
             lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
+        )
+        .outerjoin(
+            function_graph_blocks_table,
+            lesson_blocks_table.c.oid == function_graph_blocks_table.c.oid,
         ),
     )
 
@@ -456,6 +463,42 @@ class LessonBlockGatewayAlchemy(LessonBlockGateway):
             sa.update(code_blocks_table)
             .where(code_blocks_table.c.oid == block.oid)
             .values(tabs=_tabs_to_jsonb(block.tabs)),
+        )
+        await self._session.execute(
+            sa.update(lesson_blocks_table)
+            .where(lesson_blocks_table.c.oid == block.oid)
+            .values(updated_at=sa.func.now()),
+        )
+
+    @override
+    async def add_function_graph(self, block: FunctionGraphBlock) -> None:
+        await self._session.execute(
+            sa.insert(lesson_blocks_table).values(
+                oid=block.oid,
+                lesson_id=block.lesson_id,
+                product_id=block.product_id,
+                type=BlockType.FUNCTION_GRAPH.value,
+                position=block.position,
+                created_at=block.created_at,
+                updated_at=block.updated_at,
+            ),
+        )
+        await self._session.execute(
+            sa.insert(function_graph_blocks_table).values(
+                oid=block.oid,
+                config=block.config.value,
+            ),
+        )
+
+    @override
+    async def update_function_graph(
+        self,
+        block: FunctionGraphBlock,
+    ) -> None:
+        await self._session.execute(
+            sa.update(function_graph_blocks_table)
+            .where(function_graph_blocks_table.c.oid == block.oid)
+            .values(config=block.config.value),
         )
         await self._session.execute(
             sa.update(lesson_blocks_table)

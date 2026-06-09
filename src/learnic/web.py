@@ -550,6 +550,122 @@ WS push as the *trigger* to call `/wait` once instead of polling.
 Client → server messages are not interpreted — silence is read as
 "may break in future" by SPA teams, so do not send anything.
 
+### `WS /users/me/storage` — live storage-quota meter
+
+Read-only push of the caller's storage-quota pool — plan code,
+byte cap, used and remaining bytes — so a quota meter updates the
+moment an upload, replace, delete, or reconcile eviction commits.
+The quota owner is derived from the access cookie; there is no
+path parameter. A collaborator who needs the *note author's* pool
+(the one their uploads are charged against) uses
+`GET /notes/{note_id}/storage-remaining` instead — this channel
+always shows the connecting user's own pool.
+
+**No REST bootstrap is needed.** The server pushes a full
+`snapshot` envelope immediately after the handshake, and again on
+every reconnect. No replay buffer; the post-reconnect `snapshot`
+already reflects everything missed while offline.
+
+**Authentication.** Standard `accessCookie` HttpOnly cookie sent
+by the browser on the WS handshake. Failure closes with `4401`
+before `accept`.
+
+**Server → client envelopes.** The discriminator is `kind`; both
+kinds carry the identical FULL snapshot of the pool (never a
+delta), with field names mirroring `NoteStorageRemainingSchema`:
+
+```json
+{
+  "kind": "snapshot",
+  "plan_code": "FREE",
+  "storage_bytes_max": 2147483648,
+  "storage_bytes_used": 1572864000,
+  "storage_bytes_remaining": 574619648,
+  "occurred_at": "<ISO 8601>"
+}
+```
+
+```json
+{ "kind": "usage_changed", ... same fields as `snapshot` ... }
+```
+
+**`kind` values** (drawn from `StorageQuotaEventKind`):
+
+- `snapshot` — sent once right after `accept` (and after every
+  reconnect); the client replaces its meter state wholesale.
+- `usage_changed` — a quota-changing operation committed (file /
+  video / collage block added, replaced, or removed; lesson,
+  module, or note deleted; reconcile-job eviction). Apply exactly
+  like `snapshot`.
+
+Every envelope is self-contained — apply directly, no refetch is
+ever required. Publish order across concurrent commits is not
+guaranteed: keep the envelope with the newest `occurred_at` and
+drop older ones. `storage_bytes_remaining` is clamped to `0` —
+an over-quota pool (e.g. after a plan downgrade) reports `0`
+free, never a negative number.
+
+Client → server messages are not interpreted — silence is read as
+"may break in future" by SPA teams, so do not send anything.
+
+### `WS /notes/{note_id}/storage` — live per-note storage panel
+
+Read-only push for the editor's storage card: how many bytes THIS
+note's files occupy (`note_storage_bytes_used`) plus the note
+author's pool (cap / used / remaining — same fields as
+`WS /users/me/storage`). Quota is anchored on the note author, so
+collaborators and the author watching the same note see identical
+numbers. Events fire on every committed mutation of the AUTHOR'S
+pool — an upload into a sibling note moves
+`storage_bytes_remaining` here too.
+
+**No REST bootstrap is needed.** A full `snapshot` envelope is
+pushed right after the handshake and again on every reconnect.
+The REST twin with the same shape is
+`GET /notes/{note_id}/storage` (operation `getNoteStorage`).
+
+**Authentication and authorization.** Standard `accessCookie` on
+the handshake; the actor must hold `EDIT_LESSONS` on the note —
+the same gate as the upload commands. Close codes: `4401`
+(missing/denied cookie), `4404` (no such note), `4403` (actor
+lacks `EDIT_LESSONS`) — all before `accept`.
+
+**Server → client envelopes.** The discriminator is `kind`; both
+kinds carry the identical FULL snapshot (never a delta):
+
+```json
+{
+  "kind": "snapshot",
+  "plan_code": "FREE",
+  "note_storage_bytes_used": 367001600,
+  "storage_bytes_max": 2147483648,
+  "storage_bytes_used": 1879048192,
+  "storage_bytes_remaining": 268435456,
+  "occurred_at": "<ISO 8601>"
+}
+```
+
+```json
+{ "kind": "usage_changed", ... same fields as `snapshot` ... }
+```
+
+**`kind` values** (drawn from `StorageQuotaEventKind`):
+
+- `snapshot` — sent once right after `accept` (and after every
+  reconnect); the client replaces its card state wholesale.
+- `usage_changed` — a quota-changing operation committed anywhere
+  in the author's pool. Apply exactly like `snapshot`.
+
+`note_storage_bytes_used` counts files referenced from this
+note's blocks only (file / video-file / photo-collage),
+deduplicated, soft-deleted excluded, cover not counted — so
+`note_storage_bytes_used <= storage_bytes_used` always holds.
+Same staleness rule as the per-user channel: keep the envelope
+with the newest `occurred_at`, drop older ones.
+
+Client → server messages are not interpreted — silence is read as
+"may break in future" by SPA teams, so do not send anything.
+
 ### `WS /presence/ws` — bidirectional presence
 
 Holding the socket open marks the connecting user online; closing it
@@ -701,7 +817,8 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "creation surfaces as HTTP 413 `StorageQuotaExceeded` — "
             "the response body carries `plan_code`, `used_bytes`, "
             "`attempted_bytes`, and `limit_bytes` so the SPA can render "
-            "an actionable message."
+            "an actionable message. A live quota meter is pushed over "
+            "`WS /users/me/storage` — see `## WebSocket channels`."
         ),
     },
     {

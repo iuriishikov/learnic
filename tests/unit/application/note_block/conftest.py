@@ -119,6 +119,19 @@ def fake_event_bus() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_quota_publisher() -> AsyncMock:
+    """Stub ``StorageQuotaUsagePublisher`` for quota-changing handlers.
+
+    Only ``usage_changed`` is exercised; tests assert it is awaited
+    once with the note author's id on storage-changing paths and not
+    awaited on title-only / non-file paths.
+    """
+    publisher = AsyncMock()
+    publisher.usage_changed = AsyncMock()
+    return publisher
+
+
+@pytest.fixture
 def author_id() -> UserID:
     return UserID(uuid.uuid4())
 

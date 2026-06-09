@@ -9,11 +9,14 @@ Two routers ship here:
 * ``router`` — ``/users/me/subscription`` for the caller-scoped read
   (CLAUDE.md rule 14: "everything about the authenticated user" is
   namespaced under ``/users/me/...``).
-* ``note_router`` — ``/notes/{note_id}/storage-remaining``
-  nests under the parent note (rule 14: sub-resources mirror the
-  aggregate tree). The endpoint reports the *note author's* free
-  bytes so a collaborator opening an editor sees the same number
-  the author would; both share one quota pool.
+* ``note_router`` — ``/notes/{note_id}/storage-remaining`` and
+  ``/notes/{note_id}/storage`` nest under the parent note (rule
+  14: sub-resources mirror the aggregate tree). Both report the
+  *note author's* pool so a collaborator opening an editor sees
+  the same numbers the author would; ``/storage`` additionally
+  carries the note's own share of the pool for the editor's
+  storage card. The matching live channel is
+  ``WS /notes/{note_id}/storage`` (see ``## WebSocket channels``).
 """
 
 from typing import Final
@@ -24,6 +27,11 @@ from fastapi import Depends, Path, Request
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from learnic.application.queries.billing.get_note_storage import (
+    GetNoteStorageQuery,
+    GetNoteStorageQueryHandler,
+    NoteStorageView,
+)
 from learnic.application.queries.billing.get_note_storage_remaining import (
     NoteStorageRemainingView,
     GetNoteStorageRemainingQuery,
@@ -312,6 +320,130 @@ async def get_note_storage_remaining(
     )
     return NoteStorageRemainingSchema(
         plan_code=view.plan_code,
+        storage_bytes_max=view.storage_bytes_max,
+        storage_bytes_used=view.storage_bytes_used,
+        storage_bytes_remaining=view.storage_bytes_remaining,
+    )
+
+
+class NoteStorageSchema(BaseModel):
+    """Response for ``GET /notes/{note_id}/storage``.
+
+    The editor's storage card in one read: how many bytes THIS
+    note's files occupy plus the author's whole-pool numbers. The
+    pool fields match ``NoteStorageRemainingSchema`` exactly; the
+    live counterpart with the same shape is
+    ``WS /notes/{note_id}/storage`` (see ``## WebSocket
+    channels``), which pushes a ``snapshot`` on connect — poll-free
+    SPAs can skip this endpoint entirely.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "plan_code": "FREE",
+                    "note_storage_bytes_used": 367001600,
+                    "storage_bytes_max": 2147483648,
+                    "storage_bytes_used": 1879048192,
+                    "storage_bytes_remaining": 268435456,
+                },
+            ],
+        },
+    )
+
+    plan_code: str = Field(
+        description=(
+            "Plan code of the **note author** — the quota owner."
+        ),
+        examples=["FREE", "BETA"],
+    )
+    note_storage_bytes_used: int = Field(
+        description=(
+            "Bytes occupied by files referenced from THIS note's "
+            "blocks only (file / video-file / photo-collage; "
+            "deduplicated, soft-deleted excluded, cover not "
+            "counted). Always <= ``storage_bytes_used``."
+        ),
+        examples=[367001600],
+        ge=0,
+    )
+    storage_bytes_max: int = Field(
+        description=(
+            "Plan cap in bytes for the note author's storage pool."
+        ),
+        examples=[2147483648],
+    )
+    storage_bytes_used: int = Field(
+        description=(
+            "Bytes currently used across **all** of the note "
+            "author's products (not just this note). Files "
+            "referenced by multiple blocks count once."
+        ),
+        examples=[1879048192],
+    )
+    storage_bytes_remaining: int = Field(
+        description=(
+            "How many more bytes can be uploaded before the "
+            "author's quota is hit. Computed as ``max(0, "
+            "storage_bytes_max - storage_bytes_used)``. "
+            "**Informational** — re-validated under an advisory "
+            "lock when an actual upload is attempted."
+        ),
+        examples=[268435456],
+        ge=0,
+    )
+
+
+@note_router.get(
+    "/{note_id}/storage",
+    summary="This note's storage usage plus the author's pool headroom",
+    operation_id="getNoteStorage",
+    dependencies=_AUTH_SECURITY,
+    response_model=NoteStorageSchema,
+    error_map=AUTHENTICATED_AUTHORIZED_FIELD_MAP,
+)
+async def get_note_storage(
+    request: Request,
+    interactor: FromDishka[GetNoteStorageQueryHandler],
+    auth: FromDishka[Authenticator],
+    note_id: UUID = _NOTE_ID_PATH,
+) -> NoteStorageSchema:
+    """Report this note's usage and the author's pool in one read.
+
+    Quota is anchored on the product author, not the actor. A
+    collaborator and the author calling this endpoint on the same
+    note get the same numbers — they share one quota pool. The
+    actor must hold ``EDIT_LESSONS`` on the note (same gate as
+    the file-block upload commands).
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected query handler.
+        auth: Injected authenticator.
+        note_id: UUID of the note product to read for.
+
+    Returns:
+        ``200 OK`` with :class:`NoteStorageSchema`.
+
+    Raises:
+        InvalidTokenError: HTTP 401 — missing or denied access cookie.
+        EntityNotFoundError: HTTP 404 — no such note.
+        InsufficientPermissionsError: HTTP 403 — actor lacks
+            ``EDIT_LESSONS`` on the note.
+        FieldError: HTTP 422 — malformed input (unlikely for a
+            UUID path param, mapped for completeness).
+    """
+    ctx = await auth.authenticate(request)
+    view: NoteStorageView = await interactor.run(
+        GetNoteStorageQuery(
+            actor_id=ctx.user_id,
+            note_id=ProductID(note_id),
+        ),
+    )
+    return NoteStorageSchema(
+        plan_code=view.plan_code,
+        note_storage_bytes_used=view.note_storage_bytes_used,
         storage_bytes_max=view.storage_bytes_max,
         storage_bytes_used=view.storage_bytes_used,
         storage_bytes_remaining=view.storage_bytes_remaining,

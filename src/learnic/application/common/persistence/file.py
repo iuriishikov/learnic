@@ -4,6 +4,8 @@ from typing import Protocol
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
+from learnic.entities.note_lesson.ids import NoteLessonID
+from learnic.entities.note_module.ids import NoteModuleID
 from learnic.entities.product.ids import ProductID
 
 
@@ -161,5 +163,34 @@ class FilesReader(Protocol):
         when the product is hard-deleted (FKs are
         ``ON DELETE SET NULL``, so without this sweep the rows
         would linger as orphans).
+        """
+        ...
+
+    async def file_ids_for_lesson(
+        self,
+        lesson_id: NoteLessonID,
+    ) -> list[FileID]:
+        """Return every live file referenced from one lesson's blocks.
+
+        Same three file-backed block paths as
+        :meth:`file_ids_for_product`, scoped to a single lesson (no
+        cover — lessons have none). Deduplicated, soft-deleted
+        excluded. Used by ``DeleteNoteLessonCommandHandler`` to
+        sweep file rows BEFORE the lesson cascade drops the block
+        rows — afterwards the union-walk would return nothing and
+        the files would linger as quota-invisible S3 orphans.
+        """
+        ...
+
+    async def file_ids_for_module(
+        self,
+        module_id: NoteModuleID,
+    ) -> list[FileID]:
+        """Return every live file referenced from one module's blocks.
+
+        Joins blocks through their lessons to the module —
+        otherwise identical to :meth:`file_ids_for_lesson`. Used by
+        ``DeleteNoteModuleCommandHandler``, whose cascade drops
+        lessons and blocks in one statement.
         """
         ...

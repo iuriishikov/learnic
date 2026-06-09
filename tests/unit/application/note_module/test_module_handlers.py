@@ -28,10 +28,10 @@ from learnic.application.common.errors import (
     InsufficientPermissionsError,
     InvalidReorderError,
 )
+from learnic.entities.file.ids import FileID
 from learnic.entities.note_module.ids import NoteModuleID
 from learnic.entities.note_module.models import NoteModule
 from learnic.entities.note_module.value_objects import ModuleTitle
-from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.user.models import UserID
@@ -493,7 +493,10 @@ async def test_delete_module_calls_gateway(
     fake_authorizer: AsyncMock,
     fake_product_gateway: AsyncMock,
     fake_module_gateway: AsyncMock,
+    fake_files_reader: AsyncMock,
+    fake_file_uploads: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_module: NoteModule,
     author_id: UserID,
@@ -505,7 +508,10 @@ async def test_delete_module_calls_gateway(
         authorizer=fake_authorizer,
         product_gateway=fake_product_gateway,
         module_gateway=fake_module_gateway,
+        files_reader=fake_files_reader,
+        file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
 
     await handler.run(
@@ -515,4 +521,114 @@ async def test_delete_module_calls_gateway(
         ),
     )
     fake_module_gateway.delete.assert_awaited_once_with(note_module)
+    fake_transaction.commit.assert_awaited_once()
+
+
+async def test_delete_module_with_files_sweeps_and_publishes_quota(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_module_gateway: AsyncMock,
+    fake_files_reader: AsyncMock,
+    fake_file_uploads: AsyncMock,
+    fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
+    note_product: Product,
+    note_module: NoteModule,
+    author_id: UserID,
+) -> None:
+    file_a = FileID(uuid.uuid4())
+    file_b = FileID(uuid.uuid4())
+    fake_product_gateway.with_id.return_value = note_product
+    fake_module_gateway.with_id.return_value = note_module
+    fake_files_reader.file_ids_for_module.return_value = [file_a, file_b]
+
+    # Shared parent so we can assert relative call ordering between
+    # the file-ref snapshot and the cascading delete.
+    recorder = MagicMock()
+    recorder.attach_mock(
+        fake_files_reader.file_ids_for_module,
+        "file_ids_for_module",
+    )
+    recorder.attach_mock(fake_module_gateway.delete, "delete")
+
+    handler = DeleteNoteModuleCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        module_gateway=fake_module_gateway,
+        files_reader=fake_files_reader,
+        file_uploads=fake_file_uploads,
+        event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
+    )
+
+    await handler.run(
+        DeleteNoteModuleCommand(
+            actor_id=author_id,
+            module_id=NoteModuleID(note_module.oid),
+        ),
+    )
+
+    # One soft-delete per snapshotted file id.
+    assert fake_file_uploads.soft_delete_previous.await_count == 2
+    swept = [
+        call.args[0]
+        for call in fake_file_uploads.soft_delete_previous.await_args_list
+    ]
+    assert swept == [file_a, file_b]
+
+    fake_module_gateway.delete.assert_awaited_once_with(note_module)
+    fake_transaction.commit.assert_awaited_once()
+    fake_event_bus.publish.assert_awaited_once()
+
+    # Quota is published once, AFTER commit, keyed by the note author.
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )
+
+    # The file-ref snapshot must precede the cascading delete —
+    # afterwards the lesson + block rows are gone.
+    ordered = [name for name, _, _ in recorder.mock_calls]
+    assert ordered.index("file_ids_for_module") < ordered.index("delete")
+
+
+async def test_delete_module_without_files_skips_quota(
+    fake_transaction: AsyncMock,
+    fake_authorizer: AsyncMock,
+    fake_product_gateway: AsyncMock,
+    fake_module_gateway: AsyncMock,
+    fake_files_reader: AsyncMock,
+    fake_file_uploads: AsyncMock,
+    fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
+    note_product: Product,
+    note_module: NoteModule,
+    author_id: UserID,
+) -> None:
+    fake_product_gateway.with_id.return_value = note_product
+    fake_module_gateway.with_id.return_value = note_module
+    fake_files_reader.file_ids_for_module.return_value = []
+    handler = DeleteNoteModuleCommandHandler(
+        transaction=fake_transaction,
+        authorizer=fake_authorizer,
+        product_gateway=fake_product_gateway,
+        module_gateway=fake_module_gateway,
+        files_reader=fake_files_reader,
+        file_uploads=fake_file_uploads,
+        event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
+    )
+
+    await handler.run(
+        DeleteNoteModuleCommand(
+            actor_id=author_id,
+            module_id=NoteModuleID(note_module.oid),
+        ),
+    )
+
+    fake_file_uploads.soft_delete_previous.assert_not_awaited()
+    fake_quota_publisher.usage_changed.assert_not_awaited()
+    # Content event still fires even when no files were touched.
+    fake_event_bus.publish.assert_awaited_once()
     fake_transaction.commit.assert_awaited_once()

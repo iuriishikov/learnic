@@ -115,6 +115,7 @@ async def test_update_file_block_credits_freed_bytes_on_replace(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     file_block: FileBlock,
     author_id: UserID,
@@ -133,6 +134,7 @@ async def test_update_file_block_credits_freed_bytes_on_replace(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     payload = b"replacement-bytes"
     upload = FakeUpload(content_type="application/pdf", size=len(payload))
@@ -159,6 +161,10 @@ async def test_update_file_block_credits_freed_bytes_on_replace(
         previous_id,
     )
     fake_transaction.commit.assert_awaited_once()
+    # Replacing the backing file changes the owner's usage — publish.
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )
 
 
 async def test_update_file_block_title_only_skips_quota(
@@ -169,6 +175,7 @@ async def test_update_file_block_title_only_skips_quota(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     file_block: FileBlock,
     author_id: UserID,
@@ -184,6 +191,7 @@ async def test_update_file_block_title_only_skips_quota(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     await handler.run(
         UpdateFileBlockCommand(
@@ -199,6 +207,8 @@ async def test_update_file_block_title_only_skips_quota(
     fake_file_uploads.previous_file_size.assert_not_called()
     fake_file_uploads.upload_stream.assert_not_called()
     fake_transaction.commit.assert_awaited_once()
+    # A title-only edit frees / consumes no storage — no publish.
+    fake_quota_publisher.usage_changed.assert_not_awaited()
 
 
 async def test_update_video_file_block_credits_freed_bytes_on_replace(
@@ -209,6 +219,7 @@ async def test_update_video_file_block_credits_freed_bytes_on_replace(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     video_file_block: VideoFileBlock,
     author_id: UserID,
@@ -226,6 +237,7 @@ async def test_update_video_file_block_credits_freed_bytes_on_replace(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     payload = b"\x00\x01\x02 video bytes"
     upload = FakeUpload(content_type="video/mp4", size=len(payload))
@@ -248,3 +260,6 @@ async def test_update_video_file_block_credits_freed_bytes_on_replace(
     )
     fake_entitlement.ensure_can_upload.assert_not_called()
     fake_transaction.commit.assert_awaited_once()
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )

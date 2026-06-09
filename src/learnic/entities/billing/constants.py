@@ -1,7 +1,7 @@
 from typing import Final
 
 # Storage budget in bytes for the free tier — 2 GiB.
-FREE_PLAN_STORAGE_BYTES: Final = 2 * 1024 * 1024 * 1024
+FREE_PLAN_STORAGE_BYTES: Final = 0.5 * 1024 * 1024 * 1024
 # Storage budget in bytes for the BETA tier — 50 GiB. Assigned
 # manually until the payment integration lands.
 BETA_PLAN_STORAGE_BYTES: Final = 50 * 1024 * 1024 * 1024

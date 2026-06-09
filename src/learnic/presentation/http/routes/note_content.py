@@ -19,6 +19,10 @@ from learnic.application.commands.note_block.add_file import (
     AddFileBlockCommand,
     AddFileBlockCommandHandler,
 )
+from learnic.application.commands.note_block.add_function_graph import (
+    AddFunctionGraphBlockCommand,
+    AddFunctionGraphBlockCommandHandler,
+)
 from learnic.application.commands.note_block.add_photo_collage import (
     AddPhotoCollageBlockCommand,
     AddPhotoCollageBlockCommandHandler,
@@ -67,6 +71,10 @@ from learnic.application.commands.note_block.update_code import (
 from learnic.application.commands.note_block.update_file import (
     UpdateFileBlockCommand,
     UpdateFileBlockCommandHandler,
+)
+from learnic.application.commands.note_block.update_function_graph import (
+    UpdateFunctionGraphBlockCommand,
+    UpdateFunctionGraphBlockCommandHandler,
 )
 from learnic.application.commands.note_block.add_photo_collage_item import (
     AddPhotoCollageItemCommand,
@@ -175,6 +183,7 @@ from learnic.application.common.persistence.note_content import (
     DraftLessonView,
     DraftModuleView,
     FileBlockView,
+    FunctionGraphBlockView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
@@ -201,6 +210,9 @@ from learnic.entities.note_block.constants import (
     CODE_BLOCK_MAX_LEN,
     CODE_BLOCK_MAX_TABS,
     CODE_TAB_LABEL_MAX_LEN,
+    FUNCTION_GRAPH_MAX_OBJECTS,
+    FUNCTION_GRAPH_MAX_PARAMS,
+    GRAPH_CONFIG_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
     PHOTO_COLLAGE_CAPTION_MAX_LEN,
@@ -681,6 +693,77 @@ class CodeBlockSchema(BaseModel):
         )
 
 
+_GRAPH_CONFIG_EXAMPLE: Final[Any] = {
+    "schema_version": 1,
+    "interactive": True,
+    "viewport": {"x_min": -6.5, "x_max": 6.5, "y_min": -3.5, "y_max": 3.5},
+    "axes": {
+        "show_x": True,
+        "show_y": True,
+        "show_grid": True,
+        "x_label": "x",
+        "y_label": "y",
+    },
+    "parameters": [
+        {"name": "a", "min": -3, "max": 3, "step": 0.1, "value": 1.5},
+        {"name": "b", "min": 0.2, "max": 4, "step": 0.1, "value": 1},
+    ],
+    "objects": [
+        {
+            "kind": "function",
+            "expr": "a*sin(b*x)",
+            "label": "a·sin(b·x)",
+            "visible": True,
+            "style": {"color": "brand", "width": 2.5, "dash": "solid"},
+        },
+    ],
+}
+
+
+class FunctionGraphBlockSchema(BaseModel):
+    """Function-graph lesson-block projection (read-only).
+
+    ``config`` is the whole graph spec (snake_case) mirroring the
+    frontend ``GraphSpec``: ``schema_version`` (currently 1), an
+    ``interactive`` flag, a ``viewport`` (``x_min`` / ``x_max`` /
+    ``y_min`` / ``y_max``), optional ``axes``, up to
+    ``FUNCTION_GRAPH_MAX_PARAMS`` parameter sliders, and up to
+    ``FUNCTION_GRAPH_MAX_OBJECTS`` plotted objects discriminated by
+    ``kind`` (``function`` / ``parametric`` / ``implicit`` / ``point``
+    / ``segment`` / ``vertical_line``). Expressions are restricted to a
+    safe character set and evaluated only client-side (JSXGraph); the
+    server validates the structure via ``GraphConfig`` but carries the
+    payload opaquely here.
+    """
+
+    type: Literal[BlockType.FUNCTION_GRAPH] = Field(
+        default=BlockType.FUNCTION_GRAPH,
+        description="Discriminator — always `function_graph` here.",
+    )
+    oid: UUID = Field(examples=["a7b8c9d0-1e2f-4a3b-5c6d-7e8f9a0b1c2d"])
+    position: int = Field(examples=[4])
+    config: dict[str, Any] = Field(
+        description=(
+            "Graph spec object (snake_case). Mirrors the frontend "
+            "`GraphSpec`. Validated server-side by `GraphConfig`; "
+            f"serialised size capped at {GRAPH_CONFIG_MAX_LEN} bytes "
+            "(`GRAPH_CONFIG_MAX_LEN`). At most "
+            f"{FUNCTION_GRAPH_MAX_OBJECTS} objects and "
+            f"{FUNCTION_GRAPH_MAX_PARAMS} parameters."
+        ),
+        examples=[_GRAPH_CONFIG_EXAMPLE],
+    )
+
+    @classmethod
+    def from_view(cls, view: FunctionGraphBlockView) -> Self:
+        return cls(
+            type=BlockType.FUNCTION_GRAPH,
+            oid=view.oid,
+            position=view.position,
+            config=view.config,
+        )
+
+
 class ChoiceOptionSchema(BaseModel):
     """One selectable option inside a choice block (read-only)."""
 
@@ -996,6 +1079,7 @@ _LessonBlockSchemaUnion = (
     | FileBlockSchema
     | VideoFileBlockSchema
     | PhotoCollageBlockSchema
+    | FunctionGraphBlockSchema
 )
 
 LessonBlockSchema = Annotated[_LessonBlockSchemaUnion, Discriminator("type")]
@@ -1020,6 +1104,8 @@ def _block_view_to_schema(view: LessonBlockView) -> _LessonBlockSchemaUnion:
         return VideoFileBlockSchema.from_view(view)
     if isinstance(view, PhotoCollageBlockView):
         return PhotoCollageBlockSchema.from_view(view)
+    if isinstance(view, FunctionGraphBlockView):
+        return FunctionGraphBlockSchema.from_view(view)
     return RutubeVideoBlockSchema.from_view(view)
 
 
@@ -1779,6 +1865,50 @@ class UpdateCodeBlockSchema(BaseModel):
     )
 
 
+class AddFunctionGraphBlockSchema(BaseModel):
+    """Body for ``POST .../lessons/{lesson_id}/blocks/function-graph``.
+
+    ``config`` is the full graph spec (snake_case — see
+    :class:`FunctionGraphBlockSchema`). Validated server-side by
+    ``GraphConfig``; an empty ``objects`` list is accepted so the
+    author can add curves in the editor after creating the block.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"config": _GRAPH_CONFIG_EXAMPLE}]},
+    )
+
+    config: dict[str, Any] = Field(
+        description=(
+            "Graph spec object (snake_case). Mirrors the frontend "
+            "`GraphSpec`. Validated server-side by `GraphConfig`; "
+            f"serialised size capped at {GRAPH_CONFIG_MAX_LEN} bytes "
+            "(`GRAPH_CONFIG_MAX_LEN`)."
+        ),
+        examples=[_GRAPH_CONFIG_EXAMPLE],
+    )
+
+
+class UpdateFunctionGraphBlockSchema(BaseModel):
+    """Body for ``PATCH .../blocks/{block_id}/function-graph``.
+
+    Replaces the entire graph config.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"config": _GRAPH_CONFIG_EXAMPLE}]},
+    )
+
+    config: dict[str, Any] = Field(
+        description=(
+            "Full new graph spec — replaces the existing config. "
+            f"Serialised size capped at {GRAPH_CONFIG_MAX_LEN} bytes "
+            "(`GRAPH_CONFIG_MAX_LEN`)."
+        ),
+        examples=[_GRAPH_CONFIG_EXAMPLE],
+    )
+
+
 class ChoiceOptionDraftPayload(BaseModel):
     """One option entry submitted by the author.
 
@@ -2205,6 +2335,103 @@ async def update_katex_block(
             actor_id=ctx.user_id,
             block_id=LessonBlockID(block_id),
             source=payload.source,
+        ),
+    )
+
+
+@router.post(
+    "/{note_id}/lessons/{lesson_id}/blocks/function-graph",
+    summary="Add a function-graph block to a lesson",
+    operation_id="addFunctionGraphBlock",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=_AUTH_SECURITY,
+    response_model=CreatedLessonBlockSchema,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+)
+async def add_function_graph_block(
+    request: Request,
+    payload: AddFunctionGraphBlockSchema,
+    interactor: FromDishka[AddFunctionGraphBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    note_id: Annotated[UUID, _NOTE_ID_PATH],
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> CreatedLessonBlockSchema:
+    """Append a function-graph block to the lesson. Author-only.
+
+    Args:
+        request: Source of the access cookie.
+        payload: Graph config (validated server-side by `GraphConfig`).
+        interactor: Injected handler.
+        auth: Injected authenticator.
+        note_id: Note product UUID.
+        lesson_id: Target lesson UUID.
+
+    Returns:
+        ``201 Created`` with the new block's UUID.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        FieldError: HTTP 422 — the config violates a `GraphConfig`
+            invariant (bad viewport, unsafe expression, caps, …).
+    """
+    del note_id
+    ctx = await auth.authenticate(request)
+    oid = await interactor.run(
+        AddFunctionGraphBlockCommand(
+            actor_id=ctx.user_id,
+            lesson_id=NoteLessonID(lesson_id),
+            config=payload.config,
+        ),
+    )
+    return CreatedLessonBlockSchema(oid=oid)
+
+
+@router.patch(
+    "/{note_id}/blocks/{block_id}/function-graph",
+    summary="Replace a function-graph block's config",
+    operation_id="updateFunctionGraphBlock",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongBlockTypeError: WRONG_BLOCK_TYPE_RULE},
+)
+async def update_function_graph_block(
+    request: Request,
+    payload: UpdateFunctionGraphBlockSchema,
+    interactor: FromDishka[UpdateFunctionGraphBlockCommandHandler],
+    auth: FromDishka[Authenticator],
+    note_id: Annotated[UUID, _NOTE_ID_PATH],
+    block_id: Annotated[UUID, _BLOCK_ID_PATH],
+) -> None:
+    """Replace the config of an existing function-graph block.
+
+    Args:
+        request: Access cookie source.
+        payload: New full graph config.
+        interactor: Injected handler.
+        auth: Injected authenticator.
+        note_id: Note product UUID.
+        block_id: Target block UUID.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        NotResourceOwnerError: HTTP 403.
+        EntityNotFoundError: HTTP 404.
+        WrongBlockTypeError: HTTP 409 — block isn't `function_graph`.
+        FieldError: HTTP 422.
+    """
+    del note_id
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        UpdateFunctionGraphBlockCommand(
+            actor_id=ctx.user_id,
+            block_id=LessonBlockID(block_id),
+            config=payload.config,
         ),
     )
 

@@ -170,6 +170,28 @@ code_blocks_table = sa.Table(
 )
 
 
+# ``config`` is the whole function-graph spec as one JSONB object
+# (functions / curves / points / parameter sliders / viewport / axes).
+# Stored opaque — the application never queries inside it; structural
+# and expression-safety invariants are enforced upstream by
+# :class:`GraphConfig`'s ``__post_init__`` so the DB stores trusted data.
+function_graph_blocks_table = sa.Table(
+    "function_graph_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("lesson_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "config",
+        JSONB,
+        nullable=False,
+    ),
+)
+
+
 # ``options`` for both choice subtypes is a JSONB array of
 # ``{"oid": "<uuid>", "label": "<str>"}`` objects — same denormalized
 # rationale as ``code_blocks.tabs`` (opaque to SQL, invariants enforced

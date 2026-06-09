@@ -11,7 +11,12 @@ from learnic.application.common.persistence.file import (
 )
 from learnic.entities.file.ids import FileID
 from learnic.entities.file.models import File
+from learnic.entities.note_lesson.ids import NoteLessonID
+from learnic.entities.note_module.ids import NoteModuleID
 from learnic.entities.product.ids import ProductID
+from learnic.infrastructure.persistence.models.note_lesson import (
+    note_lessons_table,
+)
 from learnic.infrastructure.persistence.models.note_block import (
     file_blocks_table,
     lesson_blocks_table,
@@ -154,6 +159,150 @@ class FilesReaderAlchemy(FilesReader):
             collage_path,
             cover_path,
         ).subquery("product_file_ids")
+        stmt = (
+            sa.select(union.c.file_id)
+            .distinct()
+            .join_from(
+                union,
+                files_table,
+                files_table.c.oid == union.c.file_id,
+            )
+            .where(files_table.c.deleted_at.is_(None))
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [FileID(row.file_id) for row in rows]
+
+    @override
+    async def file_ids_for_lesson(
+        self,
+        lesson_id: NoteLessonID,
+    ) -> list[FileID]:
+        file_path = (
+            sa.select(file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.lesson_id == lesson_id,
+                file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        video_path = (
+            sa.select(video_file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                video_file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == video_file_blocks_table.c.oid,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.lesson_id == lesson_id,
+                video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        collage_path = (
+            sa.select(
+                photo_collage_items_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                photo_collage_items_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == photo_collage_items_table.c.block_id,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.lesson_id == lesson_id,
+                photo_collage_items_table.c.file_id.is_not(None),
+            )
+        )
+        union = sa.union_all(
+            file_path,
+            video_path,
+            collage_path,
+        ).subquery("lesson_file_ids")
+        stmt = (
+            sa.select(union.c.file_id)
+            .distinct()
+            .join_from(
+                union,
+                files_table,
+                files_table.c.oid == union.c.file_id,
+            )
+            .where(files_table.c.deleted_at.is_(None))
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [FileID(row.file_id) for row in rows]
+
+    @override
+    async def file_ids_for_module(
+        self,
+        module_id: NoteModuleID,
+    ) -> list[FileID]:
+        file_path = (
+            sa.select(file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+                ).join(
+                    note_lessons_table,
+                    note_lessons_table.c.oid
+                    == lesson_blocks_table.c.lesson_id,
+                ),
+            )
+            .where(
+                note_lessons_table.c.module_id == module_id,
+                file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        video_path = (
+            sa.select(video_file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                video_file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == video_file_blocks_table.c.oid,
+                ).join(
+                    note_lessons_table,
+                    note_lessons_table.c.oid
+                    == lesson_blocks_table.c.lesson_id,
+                ),
+            )
+            .where(
+                note_lessons_table.c.module_id == module_id,
+                video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        collage_path = (
+            sa.select(
+                photo_collage_items_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                photo_collage_items_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == photo_collage_items_table.c.block_id,
+                ).join(
+                    note_lessons_table,
+                    note_lessons_table.c.oid
+                    == lesson_blocks_table.c.lesson_id,
+                ),
+            )
+            .where(
+                note_lessons_table.c.module_id == module_id,
+                photo_collage_items_table.c.file_id.is_not(None),
+            )
+        )
+        union = sa.union_all(
+            file_path,
+            video_path,
+            collage_path,
+        ).subquery("module_file_ids")
         stmt = (
             sa.select(union.c.file_id)
             .distinct()

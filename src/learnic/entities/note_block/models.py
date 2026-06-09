@@ -45,6 +45,7 @@ from learnic.entities.note_block.value_objects import (
     CodeSource,
     CodeTabLabel,
     CollageCaption,
+    GraphConfig,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -905,6 +906,54 @@ class PhotoCollageBlock(BaseEntity[LessonBlockID]):
         )
 
 
+@dataclass
+class FunctionGraphBlock(BaseEntity[LessonBlockID]):
+    """A draft interactive function-graph block (GeoGebra-like).
+
+    Passive display block — no checkable answer, so it falls through
+    the answer-grading path like ``html`` / ``katex`` / ``code``. The
+    whole graph spec (functions, parametric / implicit curves, points,
+    parameter sliders, viewport, axes) lives in one :class:`GraphConfig`
+    payload, validated server-side and rendered client-side by JSXGraph.
+    """
+
+    lesson_id: NoteLessonID
+    product_id: ProductID
+    config: GraphConfig
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def type(self) -> BlockType:
+        return BlockType.FUNCTION_GRAPH
+
+    def update_config(self, new_config: GraphConfig) -> None:
+        self.config = new_config
+
+    def change_position(self, new_position: int) -> None:
+        self.position = new_position
+
+    @classmethod
+    def create(
+        cls,
+        lesson_id: NoteLessonID,
+        product_id: ProductID,
+        config: GraphConfig,
+        position: int,
+    ) -> Self:
+        now = datetime.now(timezone.utc)
+        return cls(
+            oid=LessonBlockID(uuid.uuid4()),
+            lesson_id=lesson_id,
+            product_id=product_id,
+            config=config,
+            position=position,
+            created_at=now,
+            updated_at=now,
+        )
+
+
 LessonBlock = (
     HtmlBlock
     | KatexBlock
@@ -916,4 +965,5 @@ LessonBlock = (
     | FileBlock
     | VideoFileBlock
     | PhotoCollageBlock
+    | FunctionGraphBlock
 )

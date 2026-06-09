@@ -7,7 +7,6 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
 )
-from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.application.common.persistence.note_content import (
     NoteDraftView,
     DraftLessonView,

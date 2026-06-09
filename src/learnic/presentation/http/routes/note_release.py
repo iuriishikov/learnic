@@ -25,6 +25,13 @@ from learnic.application.commands.note_release.create import (
     CreateNoteReleaseCommand,
     CreateNoteReleaseCommandHandler,
 )
+from learnic.application.common.persistence.note_block_answer import (
+    NoteBlockAnswerView,
+)
+from learnic.application.queries.note_block_answer.list_mine import (
+    ListMyBlockAnswersQuery,
+    ListMyBlockAnswersQueryHandler,
+)
 from learnic.application.common.errors import (
     EntityNotFoundError,
     WrongBlockTypeError,
@@ -62,6 +69,11 @@ from learnic.application.queries.note_release.list_for_product import (
 )
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_block.ids import ChoiceOptionID, LessonBlockID
+from learnic.entities.note_block_answer.models import (
+    SubmittedMultiChoice,
+    SubmittedSingleChoice,
+    SubmittedTextAnswer,
+)
 from learnic.entities.note_release.constants import RELEASE_NOTES_MAX_LEN
 from learnic.entities.note_release.enums import NoteReleaseKind
 from learnic.entities.note_release.ids import NoteReleaseID
@@ -640,6 +652,44 @@ RevealedAnswerSchema = Annotated[
 ]
 
 
+class SavedBlockAnswerSchema(BaseModel):
+    """One persisted learner submission for an interactive block.
+
+    Returned by ``GET /notes/{note_id}/release-blocks/answers`` so the
+    SPA can restore the student's selection together with the
+    correct/incorrect verdict on reload. ``submission`` reuses the
+    check-payload union shape (single / multi / text).
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "block_id": "d1e2f3a4-5b6c-4d7e-8f90-1a2b3c4d5e6f",
+                    "is_correct": True,
+                    "submission": {
+                        "type": "single_choice",
+                        "option_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                    },
+                },
+            ],
+        },
+    )
+
+    block_id: UUID = Field(
+        description="Release-side block UUID the submission belongs to.",
+    )
+    is_correct: bool = Field(
+        description="Whether the saved submission matched the answer key.",
+    )
+    submission: CheckBlockAnswerSchema = Field(
+        description=(
+            "The student's saved submission, same discriminated shape "
+            "as the `POST .../check` request body."
+        ),
+    )
+
+
 # ============================== routes ============================== #
 
 
@@ -992,3 +1042,78 @@ async def reveal_block_answer(
         ),
     )
     return _to_reveal_schema(answer)
+
+
+def _to_submission_schema(
+    submission: SubmittedSingleChoice
+    | SubmittedMultiChoice
+    | SubmittedTextAnswer,
+) -> CheckSingleChoicePayload | CheckMultiChoicePayload | CheckTextInputPayload:
+    if isinstance(submission, SubmittedSingleChoice):
+        return CheckSingleChoicePayload(
+            option_id=UUID(str(submission.option_id)),
+        )
+    if isinstance(submission, SubmittedMultiChoice):
+        return CheckMultiChoicePayload(
+            option_ids=sorted(UUID(str(o)) for o in submission.option_ids),
+        )
+    if isinstance(submission, SubmittedTextAnswer):
+        return CheckTextInputPayload(answer=submission.answer)
+    raise AssertionError(  # pragma: no cover  # mypy exhaustiveness
+        f"Unhandled submission variant: {type(submission).__name__}",
+    )
+
+
+def _to_saved_answer_schema(view: NoteBlockAnswerView) -> SavedBlockAnswerSchema:
+    return SavedBlockAnswerSchema(
+        block_id=UUID(str(view.block_id)),
+        is_correct=view.is_correct,
+        submission=_to_submission_schema(view.submission),
+    )
+
+
+@student_router.get(
+    "/{note_id}/release-blocks/answers",
+    summary="List the current student's saved answers for a note",
+    operation_id="listMyBlockAnswers",
+    dependencies=_AUTH_SECURITY,
+    response_model=list[SavedBlockAnswerSchema],
+    error_map=AUTHENTICATED_MAP,
+)
+async def list_my_block_answers(
+    request: Request,
+    interactor: FromDishka[ListMyBlockAnswersQueryHandler],
+    auth: FromDishka[Authenticator],
+    note_id: Annotated[UUID, _NOTE_ID_PATH],
+) -> list[SavedBlockAnswerSchema]:
+    """Return the caller's saved submissions for this note.
+
+    Scoped to the release the caller is pinned to (their active
+    enrollment), so the answers line up with the content returned by
+    ``GET /notes/{note_id}/content``. A signed-in caller who is not
+    actively enrolled (or for whom the product is not a note) simply
+    has no saved answers — the endpoint returns an empty list rather
+    than an error, so the SPA can call it unconditionally on load.
+
+    Args:
+        request: Source of the access cookie.
+        interactor: Injected handler.
+        auth: Injected authenticator.
+        note_id: Note product UUID.
+
+    Returns:
+        A list of :class:`SavedBlockAnswerSchema` (possibly empty) —
+        one entry per interactive block the caller has answered, each
+        carrying the saved submission and its correctness verdict.
+
+    Raises:
+        InvalidTokenError: HTTP 401 — missing or denied access cookie.
+    """
+    ctx = await auth.authenticate(request)
+    views = await interactor.run(
+        ListMyBlockAnswersQuery(
+            actor_id=ctx.user_id,
+            product_id=ProductID(note_id),
+        ),
+    )
+    return [_to_saved_answer_schema(v) for v in views]

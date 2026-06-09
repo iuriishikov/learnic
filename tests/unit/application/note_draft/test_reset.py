@@ -19,7 +19,6 @@ from learnic.entities.note_release.models import NoteRelease
 from learnic.entities.note_release.value_objects import (
     NoteReleaseVersion,
 )
-from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product.models import Product
 from learnic.entities.product.value_objects import ProductTitle

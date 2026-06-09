@@ -26,6 +26,7 @@ from learnic.infrastructure.persistence.blocks.registry import spec_for_row
 from learnic.infrastructure.persistence.models.note_block import (
     code_blocks_table,
     file_blocks_table,
+    function_graph_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     lesson_blocks_table,
@@ -223,6 +224,9 @@ class NoteContentReaderAlchemy(NoteContentReader):
                     "video_file_block_title",
                 ),
                 photo_collage_blocks_table.c.title.label("photo_collage_title"),
+                function_graph_blocks_table.c.config.label(
+                    "function_graph_config",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -264,6 +268,11 @@ class NoteContentReaderAlchemy(NoteContentReader):
                 .outerjoin(
                     photo_collage_blocks_table,
                     lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    function_graph_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == function_graph_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == product_id)
@@ -386,6 +395,9 @@ class NoteContentReaderAlchemy(NoteContentReader):
                     "video_file_block_title",
                 ),
                 photo_collage_blocks_table.c.title.label("photo_collage_title"),
+                function_graph_blocks_table.c.config.label(
+                    "function_graph_config",
+                ),
             )
             .select_from(
                 lesson_blocks_table.outerjoin(
@@ -427,6 +439,11 @@ class NoteContentReaderAlchemy(NoteContentReader):
                 .outerjoin(
                     photo_collage_blocks_table,
                     lesson_blocks_table.c.oid == photo_collage_blocks_table.c.oid,
+                )
+                .outerjoin(
+                    function_graph_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == function_graph_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.oid == block_id)

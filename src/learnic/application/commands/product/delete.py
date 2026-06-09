@@ -15,6 +15,9 @@ from learnic.application.common.product_events import (
     publish_product_event,
 )
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
+)
 from learnic.entities.product.enums import ProductStatus
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
@@ -45,12 +48,14 @@ class DeleteProductCommandHandler:
         files_reader: FilesReader,
         file_uploads: FileUploadService,
         event_bus: ProductEventBus,
+        quota_publisher: StorageQuotaUsagePublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._product_gateway: Final = product_gateway
         self._files_reader: Final = files_reader
         self._file_uploads: Final = file_uploads
         self._event_bus: Final = event_bus
+        self._quota_publisher: Final = quota_publisher
 
     async def run(self, data: DeleteProductCommand) -> None:
         product = await self._product_gateway.with_id(data.product_id)
@@ -64,6 +69,7 @@ class DeleteProductCommandHandler:
                 product.status.value,
             )
         product_id = product.oid
+        author_id = product.author_id
         # Snapshot every file the product currently references
         # (cover + file/video/collage block contents) BEFORE the
         # cascade — afterwards the block rows are gone and the
@@ -81,3 +87,5 @@ class DeleteProductCommandHandler:
             product_id=product_id,
             actor_id=data.actor_id,
         )
+        if file_ids:
+            await self._quota_publisher.usage_changed(author_id)

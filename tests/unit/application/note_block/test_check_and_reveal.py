@@ -30,7 +30,6 @@ from learnic.entities.note_block.models import (
     TextInputBlock,
 )
 from learnic.entities.note_release.ids import NoteReleaseID
-from learnic.entities.enrollment.enums import EnrollmentStatus
 from learnic.entities.enrollment.models import Enrollment
 from learnic.entities.product.models import Product
 from learnic.entities.user.models import UserID

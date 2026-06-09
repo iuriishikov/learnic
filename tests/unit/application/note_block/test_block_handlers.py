@@ -593,6 +593,7 @@ async def test_delete_block_calls_gateway(
     fake_block_gateway: AsyncMock,
     fake_file_uploads: MagicMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     html_block: HtmlBlock,
     author_id: UserID,
@@ -606,6 +607,7 @@ async def test_delete_block_calls_gateway(
         block_gateway=fake_block_gateway,
         file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     await handler.run(
         DeleteLessonBlockCommand(
@@ -617,6 +619,8 @@ async def test_delete_block_calls_gateway(
     # A non-file block holds no backing file to purge.
     fake_file_uploads.soft_delete_previous.assert_not_called()
     fake_transaction.commit.assert_awaited_once()
+    # No file freed → the owner's usage is unchanged → no publish.
+    fake_quota_publisher.usage_changed.assert_not_awaited()
 
 
 async def test_delete_block_missing_raises(
@@ -626,6 +630,7 @@ async def test_delete_block_missing_raises(
     fake_block_gateway: AsyncMock,
     fake_file_uploads: MagicMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     author_id: UserID,
 ) -> None:
     fake_block_gateway.with_id.return_value = None
@@ -636,6 +641,7 @@ async def test_delete_block_missing_raises(
         block_gateway=fake_block_gateway,
         file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(
@@ -654,6 +660,7 @@ async def test_delete_file_block_purges_backing_file(
     fake_block_gateway: AsyncMock,
     fake_file_uploads: MagicMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     file_block: FileBlock,
     author_id: UserID,
@@ -671,6 +678,7 @@ async def test_delete_file_block_purges_backing_file(
         block_gateway=fake_block_gateway,
         file_uploads=fake_file_uploads,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     await handler.run(
         DeleteLessonBlockCommand(
@@ -684,6 +692,11 @@ async def test_delete_file_block_purges_backing_file(
         file_block.file_id,
     )
     fake_transaction.commit.assert_awaited_once()
+    # Deleting a file-backed block frees storage → publish a snapshot
+    # keyed on the note author.
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )
 
 
 # ---- add_code ----

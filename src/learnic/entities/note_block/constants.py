@@ -60,3 +60,30 @@ PHOTO_COLLAGE_MIN_ITEMS: Final = 1
 # (a 3x4 grid) without producing a layout the editor can't render
 # legibly.
 PHOTO_COLLAGE_MAX_ITEMS: Final = 12
+
+# Function-graph block. The whole graph spec is one JSONB ``config``
+# object; these bound its structural size so a single block can't blow
+# up the payload. Expressions are evaluated only client-side (JSXGraph),
+# never on the server — the backend just enforces a safe character set
+# and these caps.
+# Current/only supported config schema version.
+FUNCTION_GRAPH_SCHEMA_VERSION: Final = 1
+# Max plotted objects (functions / curves / points / segments / lines).
+# Above ~20 a single graph stops being legible.
+FUNCTION_GRAPH_MAX_OBJECTS: Final = 20
+# Max parameter sliders referenced by expressions (a, b, k, …).
+FUNCTION_GRAPH_MAX_PARAMS: Final = 8
+# Max length of one expression string (`a*sin(b*x)`, `x^2+y^2-4`, …).
+GRAPH_EXPR_MAX_LEN: Final = 256
+# Max length of an object's optional plain-text label.
+GRAPH_LABEL_MAX_LEN: Final = 80
+# Max length of an axis label (`x`, `t, с`, …).
+GRAPH_AXIS_LABEL_MAX_LEN: Final = 32
+# Max length of a parameter identifier.
+GRAPH_PARAM_NAME_MAX_LEN: Final = 16
+# Max length of a per-object style colour token (hex or design-token
+# name like ``brand`` / ``muted-foreground``).
+GRAPH_STYLE_COLOR_MAX_LEN: Final = 32
+# Overall byte cap on the serialised config JSON — same order of
+# magnitude as HTML / KaTeX bodies.
+GRAPH_CONFIG_MAX_LEN: Final = 50_000

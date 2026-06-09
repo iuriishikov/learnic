@@ -5,6 +5,7 @@ from learnic.entities.note_block.models import (
     CodeBlock,
     CollageItem,
     FileBlock,
+    FunctionGraphBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
@@ -71,6 +72,16 @@ class LessonBlockGateway(Protocol):
     async def add_code(self, block: CodeBlock) -> None: ...
 
     async def update_code(self, block: CodeBlock) -> None: ...
+
+    async def add_function_graph(
+        self,
+        block: FunctionGraphBlock,
+    ) -> None: ...
+
+    async def update_function_graph(
+        self,
+        block: FunctionGraphBlock,
+    ) -> None: ...
 
     async def add_single_choice(self, block: SingleChoiceBlock) -> None: ...
 

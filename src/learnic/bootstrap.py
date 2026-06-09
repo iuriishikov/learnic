@@ -110,6 +110,12 @@ from learnic.presentation.http.routes.auth_ws import (
 from learnic.presentation.http.routes.notification_ws import (
     router as notification_ws_router,
 )
+from learnic.presentation.http.routes.note_storage_ws import (
+    router as note_storage_ws_router,
+)
+from learnic.presentation.http.routes.storage_ws import (
+    router as storage_ws_router,
+)
 from learnic.presentation.http.routes.product_qa import (
     router as product_qa_router,
 )
@@ -185,6 +191,8 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(push_me_router)
     app.include_router(subscription_router)
     app.include_router(note_storage_router)
+    app.include_router(storage_ws_router)
+    app.include_router(note_storage_ws_router)
     app.include_router(auth_ws_router)
     if configs.app.environment == "development":
         # Dev-only router — physically absent from prod builds.

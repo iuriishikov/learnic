@@ -70,6 +70,27 @@ def fake_event_bus() -> AsyncMock:
 
 
 @pytest.fixture
+def fake_files_reader() -> AsyncMock:
+    reader = AsyncMock()
+    reader.file_ids_for_lesson = AsyncMock(return_value=[])
+    return reader
+
+
+@pytest.fixture
+def fake_file_uploads() -> AsyncMock:
+    uploads = AsyncMock()
+    uploads.soft_delete_previous = AsyncMock()
+    return uploads
+
+
+@pytest.fixture
+def fake_quota_publisher() -> AsyncMock:
+    publisher = AsyncMock()
+    publisher.usage_changed = AsyncMock()
+    return publisher
+
+
+@pytest.fixture
 def author_id() -> UserID:
     return UserID(uuid.uuid4())
 

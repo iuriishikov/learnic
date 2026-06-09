@@ -73,6 +73,7 @@ async def test_add_file_block_uploads_and_appends(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -90,6 +91,7 @@ async def test_add_file_block_uploads_and_appends(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     payload = b"%PDF-1.7 fake pdf bytes"
     upload = FakeUpload(content_type="application/pdf", size=len(payload))
@@ -119,6 +121,11 @@ async def test_add_file_block_uploads_and_appends(
     assert saved.title is not None
     assert saved.title.value == "Slides"
     fake_transaction.commit.assert_awaited_once()
+    # Adding a file grows the owner's pool — publish a fresh snapshot
+    # keyed on the note author, not the acting collaborator.
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )
 
 
 async def test_add_file_block_appends_after_existing_blocks(
@@ -130,6 +137,7 @@ async def test_add_file_block_appends_after_existing_blocks(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     html_block: HtmlBlock,
@@ -149,6 +157,7 @@ async def test_add_file_block_appends_after_existing_blocks(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     await handler.run(
         AddFileBlockCommand(
@@ -171,6 +180,7 @@ async def test_add_file_block_quota_exceeded_skips_upload(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -188,6 +198,7 @@ async def test_add_file_block_quota_exceeded_skips_upload(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(StorageQuotaExceededError):
         await handler.run(
@@ -212,6 +223,7 @@ async def test_add_file_block_missing_lesson_raises(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     author_id: UserID,
 ) -> None:
     fake_lesson_gateway.with_id.return_value = None
@@ -225,6 +237,7 @@ async def test_add_file_block_missing_lesson_raises(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(EntityNotFoundError):
         await handler.run(
@@ -251,6 +264,7 @@ async def test_add_video_file_block_uploads_and_appends(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -268,6 +282,7 @@ async def test_add_video_file_block_uploads_and_appends(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     payload = b"\x00\x00\x00 video bytes"
     oid = await handler.run(
@@ -300,6 +315,7 @@ async def test_add_video_file_block_rejects_non_video(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -318,6 +334,7 @@ async def test_add_video_file_block_rejects_non_video(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(WrongFileContentTypeError):
         await handler.run(
@@ -343,6 +360,7 @@ async def test_add_video_file_block_quota_exceeded_skips_upload(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -360,6 +378,7 @@ async def test_add_video_file_block_quota_exceeded_skips_upload(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(StorageQuotaExceededError):
         await handler.run(
@@ -386,6 +405,7 @@ async def test_add_photo_collage_uploads_all_and_charges_total(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -403,6 +423,7 @@ async def test_add_photo_collage_uploads_all_and_charges_total(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     items = (
         CollageItemUpload(
@@ -444,6 +465,7 @@ async def test_add_photo_collage_rejects_non_image_item(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -462,6 +484,7 @@ async def test_add_photo_collage_rejects_non_image_item(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     items = (
         CollageItemUpload(
@@ -494,6 +517,7 @@ async def test_add_photo_collage_quota_exceeded_skips_upload(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     author_id: UserID,
@@ -511,6 +535,7 @@ async def test_add_photo_collage_quota_exceeded_skips_upload(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     items = (
         CollageItemUpload(
@@ -541,6 +566,7 @@ async def test_add_photo_collage_item_appends_to_block(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     photo_collage_block: PhotoCollageBlock,
     author_id: UserID,
@@ -556,6 +582,7 @@ async def test_add_photo_collage_item_appends_to_block(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     payload = b"image-bytes"
     item_id = await handler.run(
@@ -579,6 +606,9 @@ async def test_add_photo_collage_item_appends_to_block(
     # Started with one item; the append makes two.
     assert len(photo_collage_block.items) == 2
     fake_transaction.commit.assert_awaited_once()
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(
+        note_product.author_id,
+    )
 
 
 async def test_add_photo_collage_item_wrong_block_type_raises(
@@ -589,6 +619,7 @@ async def test_add_photo_collage_item_wrong_block_type_raises(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     html_block: HtmlBlock,
     author_id: UserID,
 ) -> None:
@@ -604,6 +635,7 @@ async def test_add_photo_collage_item_wrong_block_type_raises(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(WrongBlockTypeError):
         await handler.run(
@@ -626,6 +658,7 @@ async def test_add_photo_collage_item_rejects_non_image(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     photo_collage_block: PhotoCollageBlock,
     author_id: UserID,
@@ -641,6 +674,7 @@ async def test_add_photo_collage_item_rejects_non_image(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(WrongFileContentTypeError):
         await handler.run(
@@ -664,6 +698,7 @@ async def test_add_file_block_non_owner_raises(
     fake_file_uploads: MagicMock,
     fake_entitlement: AsyncMock,
     fake_event_bus: AsyncMock,
+    fake_quota_publisher: AsyncMock,
     note_product: Product,
     note_lesson: NoteLesson,
     other_user_id: UserID,
@@ -685,6 +720,7 @@ async def test_add_file_block_non_owner_raises(
         file_uploads=fake_file_uploads,
         entitlement=fake_entitlement,
         event_bus=fake_event_bus,
+        quota_publisher=fake_quota_publisher,
     )
     with pytest.raises(InsufficientPermissionsError):
         await handler.run(
@@ -698,3 +734,4 @@ async def test_add_file_block_non_owner_raises(
     fake_entitlement.ensure_can_upload.assert_not_called()
     fake_file_uploads.upload_stream.assert_not_called()
     fake_transaction.commit.assert_not_called()
+    fake_quota_publisher.usage_changed.assert_not_awaited()

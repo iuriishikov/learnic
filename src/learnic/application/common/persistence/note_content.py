@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from learnic.application.common.persistence.file import FileView
 from learnic.entities.note_block.enums import BlockType
@@ -182,6 +182,22 @@ class PhotoCollageBlockView:
     title: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class FunctionGraphBlockView:
+    """Read-side projection of a function-graph lesson block.
+
+    ``config`` is the opaque graph spec dict carried straight through
+    to the Pydantic schema — the block is non-interactive, so the same
+    view serves both the authoring draft tree and the public reader
+    (nothing to strip).
+    """
+
+    type: Literal[BlockType.FUNCTION_GRAPH]
+    oid: LessonBlockID
+    position: int
+    config: dict[str, Any]
+
+
 LessonBlockView = (
     HtmlBlockView
     | KatexBlockView
@@ -193,6 +209,7 @@ LessonBlockView = (
     | FileBlockView
     | VideoFileBlockView
     | PhotoCollageBlockView
+    | FunctionGraphBlockView
 )
 
 

@@ -7,6 +7,7 @@ from typing import Protocol
 from learnic.entities.billing.ids import PlanCode, SubscriptionID
 from learnic.entities.billing.models import StorageQuotaBreach, Subscription
 from learnic.entities.file.ids import FileID
+from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 
 
@@ -62,6 +63,17 @@ class FileUsageReader(Protocol):
     """
 
     async def bytes_used_by_note_author(self, user_id: UserID) -> int: ...
+
+    async def bytes_used_by_product(self, product_id: ProductID) -> int:
+        """Return deduplicated live bytes referenced from ONE product.
+
+        Same three block paths and dedup/soft-delete rules as
+        :meth:`bytes_used_by_note_author`, scoped to a single
+        product instead of an author. The product cover is NOT
+        counted — covers are outside the quota aggregate, and this
+        number is meant to read as "this note's share of the pool".
+        """
+        ...
 
     async def usage_by_all_authors(self) -> dict[UserID, int]:
         """Return ``{author_id: bytes_used}`` for every author with usage.

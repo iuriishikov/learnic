@@ -14,8 +14,12 @@ from learnic.application.common.errors import (
 from learnic.application.common.persistence.note_block import (
     LessonBlockGateway,
 )
+from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
+)
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_block.errors import CollageItemsMismatchError
 from learnic.entities.note_block.ids import CollageItemID, LessonBlockID
@@ -45,15 +49,19 @@ class RemovePhotoCollageItemCommandHandler:
         self,
         transaction: Transaction,
         authorizer: Authorizer,
+        product_gateway: ProductGateway,
         block_gateway: LessonBlockGateway,
         file_uploads: FileUploadService,
         event_bus: ContentEventBus,
+        quota_publisher: StorageQuotaUsagePublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
+        self._product_gateway: Final = product_gateway
         self._block_gateway: Final = block_gateway
         self._file_uploads: Final = file_uploads
         self._event_bus: Final = event_bus
+        self._quota_publisher: Final = quota_publisher
 
     async def run(self, data: RemovePhotoCollageItemCommand) -> None:
         block = await self._block_gateway.with_id(data.block_id)
@@ -65,6 +73,9 @@ class RemovePhotoCollageItemCommandHandler:
                 expected=BlockType.PHOTO_COLLAGE.value,
                 actual=block.type.value,
             )
+        product = await self._product_gateway.with_id(block.product_id)
+        if product is None:
+            raise EntityNotFoundError(block.product_id)
         await self._authorizer.require(
             data.actor_id,
             AuthzTarget.for_product(block.product_id),
@@ -88,3 +99,5 @@ class RemovePhotoCollageItemCommandHandler:
             product_id=block.product_id,
             actor_id=data.actor_id,
         )
+        if freed_file_id is not None:
+            await self._quota_publisher.usage_changed(product.author_id)

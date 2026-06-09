@@ -263,6 +263,19 @@ note_release_code_blocks_table = sa.Table(
 )
 
 
+note_release_function_graph_blocks_table = sa.Table(
+    "note_release_function_graph_blocks",
+    mapper_registry.metadata,
+    sa.Column(
+        "oid",
+        sa.Uuid,
+        sa.ForeignKey("note_release_blocks.oid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("config", JSONB, nullable=False),
+)
+
+
 # Snapshot mirrors of the draft choice / text-input subtype tables —
 # same shapes, FK rebased to ``note_release_blocks``.
 note_release_single_choice_blocks_table = sa.Table(

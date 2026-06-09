@@ -16,6 +16,9 @@ from learnic.application.common.persistence.note_block import (
 from learnic.application.common.persistence.product import ProductGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.storage.file_uploads import FileUploadService
+from learnic.application.common.storage_quota.publisher import (
+    StorageQuotaUsagePublisher,
+)
 from learnic.entities.note_block.ids import LessonBlockID
 from learnic.entities.note_block.models import (
     FileBlock,
@@ -45,6 +48,7 @@ class DeleteLessonBlockCommandHandler:
         block_gateway: LessonBlockGateway,
         file_uploads: FileUploadService,
         event_bus: ContentEventBus,
+        quota_publisher: StorageQuotaUsagePublisher,
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
@@ -52,6 +56,7 @@ class DeleteLessonBlockCommandHandler:
         self._block_gateway: Final = block_gateway
         self._file_uploads: Final = file_uploads
         self._event_bus: Final = event_bus
+        self._quota_publisher: Final = quota_publisher
 
     async def run(self, data: DeleteLessonBlockCommand) -> None:
         block = await self._block_gateway.with_id(data.block_id)
@@ -81,6 +86,8 @@ class DeleteLessonBlockCommandHandler:
             product_id=product_id,
             actor_id=data.actor_id,
         )
+        if file_ids:
+            await self._quota_publisher.usage_changed(product.author_id)
 
 
 def _file_ids_of(

@@ -31,6 +31,7 @@ from learnic.application.common.persistence.note_content import (
     CodeTabView,
     CollageItemView,
     FileBlockView,
+    FunctionGraphBlockView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
@@ -54,6 +55,7 @@ from learnic.entities.note_block.models import (
     CodeTab,
     CollageItem,
     FileBlock,
+    FunctionGraphBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
@@ -72,6 +74,7 @@ from learnic.entities.note_block.value_objects import (
     CodeSource,
     CodeTabLabel,
     CollageCaption,
+    GraphConfig,
     HtmlContent,
     KatexSource,
     RutubeVideoID,
@@ -83,6 +86,7 @@ from learnic.entities.product.ids import ProductID
 from learnic.infrastructure.persistence.models.note_block import (
     code_blocks_table,
     file_blocks_table,
+    function_graph_blocks_table,
     html_blocks_table,
     katex_blocks_table,
     multi_choice_blocks_table,
@@ -95,6 +99,7 @@ from learnic.infrastructure.persistence.models.note_block import (
 from learnic.infrastructure.persistence.models.note_release import (
     note_release_code_blocks_table,
     note_release_file_blocks_table,
+    note_release_function_graph_blocks_table,
     note_release_html_blocks_table,
     note_release_katex_blocks_table,
     note_release_multi_choice_blocks_table,
@@ -362,6 +367,43 @@ def _code_release_insert_value(
     # is immutable so a deep copy isn't required (psycopg/asyncpg
     # encodes the dict to JSON on insert independently per row).
     return {"oid": new_oid, "tabs": row.code_tabs}
+
+
+# ============================== Function Graph ============================== #
+
+
+def _function_graph_row_to_entity(
+    row: sa.Row[Any],
+    common: _CommonBlockAttrs,
+) -> FunctionGraphBlock:
+    return FunctionGraphBlock(
+        oid=common.oid,
+        lesson_id=common.lesson_id,
+        product_id=common.product_id,
+        position=common.position,
+        created_at=common.created_at,
+        updated_at=common.updated_at,
+        config=GraphConfig(row.function_graph_config),
+    )
+
+
+def _function_graph_row_to_view(
+    row: sa.Row[Any],
+    files: Mapping[FileID, FileView],  # noqa: ARG001 — file-less block type
+) -> FunctionGraphBlockView:
+    return FunctionGraphBlockView(
+        type=BlockType.FUNCTION_GRAPH,
+        oid=LessonBlockID(row.oid),
+        position=row.position,
+        config=row.function_graph_config,
+    )
+
+
+def _function_graph_release_insert_value(
+    row: sa.Row[Any],
+    new_oid: Any,
+) -> dict[str, Any]:
+    return {"oid": new_oid, "config": row.function_graph_config}
 
 
 # ============================== Single Choice ============================== #
@@ -732,6 +774,14 @@ BLOCK_SPECS: Final[dict[BlockType, BlockSpec]] = {
         row_to_entity=_code_row_to_entity,
         row_to_view=_code_row_to_view,
         release_insert_value=_code_release_insert_value,
+    ),
+    BlockType.FUNCTION_GRAPH: BlockSpec(
+        kind=BlockType.FUNCTION_GRAPH,
+        draft_subtype_table=function_graph_blocks_table,
+        release_subtype_table=note_release_function_graph_blocks_table,
+        row_to_entity=_function_graph_row_to_entity,
+        row_to_view=_function_graph_row_to_view,
+        release_insert_value=_function_graph_release_insert_value,
     ),
     BlockType.SINGLE_CHOICE: BlockSpec(
         kind=BlockType.SINGLE_CHOICE,

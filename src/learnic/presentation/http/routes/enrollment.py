@@ -15,12 +15,20 @@ from learnic.application.commands.enrollment.repin import (
     RePinNoteEnrollmentCommand,
     RePinNoteEnrollmentCommandHandler,
 )
+from learnic.application.commands.enrollment.self_repin import (
+    SelfRePinNoteEnrollmentCommand,
+    SelfRePinNoteEnrollmentCommandHandler,
+)
 from learnic.application.common.persistence.enrollment import (
     EnrollmentView,
 )
 from learnic.application.queries.enrollment.list_for_student import (
     GetStudentEnrollmentsQuery,
     GetStudentEnrollmentsQueryHandler,
+)
+from learnic.application.queries.enrollment.list_releases import (
+    ListEnrollmentReleasesQuery,
+    ListEnrollmentReleasesQueryHandler,
 )
 from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.enrollment.enums import (
@@ -43,6 +51,9 @@ from learnic.presentation.http.common.errors.rules import (
     ENROLLMENT_DOES_NOT_SUPPORT_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.routes.note_release import (
+    NoteReleaseSummarySchema,
+)
 
 note_router = ErrorAwareRouter(
     prefix="/notes/{note_id}/enrollments",
@@ -201,6 +212,108 @@ async def get_mine(
         GetStudentEnrollmentsQuery(student_id=ctx.user_id),
     )
     return [EnrollmentSchema.from_view(v) for v in views]
+
+
+@me_router.get(
+    "/{enrollment_id}/releases",
+    summary="List releases the caller can switch their enrollment to",
+    operation_id="listMyEnrollmentReleases",
+    response_model=list[NoteReleaseSummarySchema],
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+)
+async def list_my_enrollment_releases(
+    request: Request,
+    interactor: FromDishka[ListEnrollmentReleasesQueryHandler],
+    auth: FromDishka[Authenticator],
+    enrollment_id: UUID = _ENROLLMENT_ID_PATH,
+) -> list[NoteReleaseSummarySchema]:
+    """List the releases of the note the caller's enrollment belongs to.
+
+    Caller-scoped sibling of ``GET /notes/{note_id}/releases`` (which is
+    author/collaborator-only). The actor must own the enrollment; the
+    response is the full release list (newest first) so the SPA can offer
+    the student a release switcher and self-re-pin to any of them via
+    ``PATCH /users/me/enrollments/{enrollment_id}/release``.
+
+    Args:
+        enrollment_id: The caller's own enrollment UUID.
+
+    Returns:
+        ``200 OK`` with `list[NoteReleaseSummarySchema]`, newest first.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        EntityNotFoundError: HTTP 404 — the enrollment does not exist
+            or does not belong to the caller.
+    """
+    ctx = await auth.authenticate(request)
+    views = await interactor.run(
+        ListEnrollmentReleasesQuery(
+            actor_id=ctx.user_id,
+            enrollment_id=EnrollmentID(enrollment_id),
+        ),
+    )
+    return [NoteReleaseSummarySchema.from_view(v) for v in views]
+
+
+@me_router.patch(
+    "/{enrollment_id}/release",
+    summary="Re-pin the caller's own enrollment to a different release",
+    operation_id="repinMyEnrollment",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP
+    | {
+        EnrollmentDoesNotSupportError: ENROLLMENT_DOES_NOT_SUPPORT_RULE,
+        CannotRepinRevokedEnrollmentError: (
+            CANNOT_REPIN_REVOKED_ENROLLMENT_RULE
+        ),
+    },
+)
+async def repin_my_release(
+    request: Request,
+    payload: RePinEnrollmentSchema,
+    interactor: FromDishka[SelfRePinNoteEnrollmentCommandHandler],
+    auth: FromDishka[Authenticator],
+    enrollment_id: UUID = _ENROLLMENT_ID_PATH,
+) -> None:
+    """Move the caller's OWN enrollment to a different release.
+
+    The student-facing counterpart of the author-only
+    ``PATCH /notes/{note_id}/enrollments/{enrollment_id}/release``. No
+    product permission is needed — the actor must simply own the
+    enrollment (a mismatch reads as ``EntityNotFound``, not 403). The
+    target release must belong to the same note, and only ACTIVE
+    enrollments may be re-pinned. This is how an enrolled student
+    upgrades to the latest release (or steps back to an older one);
+    strict pinning means it never happens automatically.
+
+    Args:
+        payload: Body carrying the target ``release_id``.
+        enrollment_id: The caller's own enrollment UUID.
+
+    Returns:
+        ``204 No Content`` on success.
+
+    Raises:
+        InvalidTokenError: HTTP 401.
+        EntityNotFoundError: HTTP 404 — the enrollment does not exist /
+            is not the caller's, or the target release is missing or
+            belongs to a different note.
+        EnrollmentDoesNotSupportError: HTTP 409 — enrollment kind has
+            no release pin (only ``note`` kind does today).
+        CannotRepinRevokedEnrollmentError: HTTP 409 — enrollment is
+            REVOKED.
+    """
+    ctx = await auth.authenticate(request)
+    await interactor.run(
+        SelfRePinNoteEnrollmentCommand(
+            actor_id=ctx.user_id,
+            enrollment_id=EnrollmentID(enrollment_id),
+            release_id=NoteReleaseID(payload.release_id),
+        ),
+    )
 
 
 # --------------------------- note item ops -------------------------- #

@@ -35,6 +35,7 @@ from learnic.application.common.persistence.billing import (
 from learnic.entities.billing.ids import PlanCode, SubscriptionID
 from learnic.entities.billing.models import StorageQuotaBreach, Subscription
 from learnic.entities.file.ids import FileID
+from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.note_block import (
     file_blocks_table,
@@ -196,6 +197,70 @@ class FileUsageReaderAlchemy(FileUsageReader):
             video_path,
             collage_path,
         ).subquery("referenced_file_ids")
+        stmt = sa.select(
+            sa.func.coalesce(sa.func.sum(files_table.c.size_bytes), 0),
+        ).where(
+            files_table.c.deleted_at.is_(None),
+            files_table.c.oid.in_(
+                sa.select(referenced_file_ids.c.file_id).distinct(),
+            ),
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    @override
+    async def bytes_used_by_product(self, product_id: ProductID) -> int:
+        # Same three-path union as bytes_used_by_note_author, scoped
+        # to one product — lesson_blocks carries product_id directly,
+        # so no products join is needed.
+        file_path = (
+            sa.select(file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid == file_blocks_table.c.oid,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.product_id == product_id,
+                file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        video_path = (
+            sa.select(video_file_blocks_table.c.file_id.label("file_id"))
+            .select_from(
+                video_file_blocks_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == video_file_blocks_table.c.oid,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.product_id == product_id,
+                video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        collage_path = (
+            sa.select(
+                photo_collage_items_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                photo_collage_items_table.join(
+                    lesson_blocks_table,
+                    lesson_blocks_table.c.oid
+                    == photo_collage_items_table.c.block_id,
+                ),
+            )
+            .where(
+                lesson_blocks_table.c.product_id == product_id,
+                photo_collage_items_table.c.file_id.is_not(None),
+            )
+        )
+        referenced_file_ids = sa.union_all(
+            file_path,
+            video_path,
+            collage_path,
+        ).subquery("product_referenced_file_ids")
         stmt = sa.select(
             sa.func.coalesce(sa.func.sum(files_table.c.size_bytes), 0),
         ).where(

@@ -66,6 +66,7 @@ def _build_handler(
     file_uploads: AsyncMock,
     publisher: AsyncMock,
     scheduler_lock: AsyncMock,
+    quota_publisher: AsyncMock | None = None,
 ) -> ReconcileStorageQuotasCommandHandler:
     return ReconcileStorageQuotasCommandHandler(
         transaction=transaction,
@@ -77,6 +78,7 @@ def _build_handler(
         file_uploads=file_uploads,
         publisher=publisher,
         scheduler_lock=scheduler_lock,
+        quota_publisher=quota_publisher or AsyncMock(),
     )
 
 
@@ -187,6 +189,7 @@ async def test_under_cap_existing_breach_silent_resolve(
     )
     fake_file_usage_reader.usage_by_all_authors.return_value = {user_id: 100}
     fake_breach_gateway.all_open.return_value = [breach]
+    fake_quota_publisher = AsyncMock()
     handler = _build_handler(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
@@ -197,6 +200,7 @@ async def test_under_cap_existing_breach_silent_resolve(
         file_uploads=fake_file_uploads,
         publisher=fake_notification_publisher,
         scheduler_lock=fake_global_scheduler_lock,
+        quota_publisher=fake_quota_publisher,
     )
 
     summary = await handler.run(ReconcileStorageQuotasCommand())
@@ -204,6 +208,8 @@ async def test_under_cap_existing_breach_silent_resolve(
     assert summary.breaches_resolved == 1
     fake_breach_gateway.delete.assert_called_once_with(breach)
     fake_notification_publisher.publish.assert_not_called()
+    # Breach-resolved path frees nothing → no quota snapshot.
+    fake_quota_publisher.usage_changed.assert_not_awaited()
 
 
 async def test_over_cap_no_breach_creates_and_warns(
@@ -220,6 +226,7 @@ async def test_over_cap_no_breach_creates_and_warns(
     fake_file_usage_reader.usage_by_all_authors.return_value = {
         user_id: _FREE_PLAN.limits.storage_bytes_max + 500 * 1024 * 1024,
     }
+    fake_quota_publisher = AsyncMock()
     handler = _build_handler(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
@@ -230,6 +237,7 @@ async def test_over_cap_no_breach_creates_and_warns(
         file_uploads=fake_file_uploads,
         publisher=fake_notification_publisher,
         scheduler_lock=fake_global_scheduler_lock,
+        quota_publisher=fake_quota_publisher,
     )
 
     summary = await handler.run(ReconcileStorageQuotasCommand())
@@ -245,6 +253,8 @@ async def test_over_cap_no_breach_creates_and_warns(
     fake_notification_publisher.publish.assert_called_once()
     notification = fake_notification_publisher.publish.call_args.args[0]
     assert notification.kind is NotificationKind.STORAGE_QUOTA_WARNING
+    # Warning-only path deletes nothing → no quota snapshot.
+    fake_quota_publisher.usage_changed.assert_not_awaited()
 
 
 async def test_over_cap_breach_within_cooldown_does_not_renotify(
@@ -365,6 +375,7 @@ async def test_grace_elapsed_enforces_lifo(
     fake_file_usage_reader.usage_by_all_authors.return_value = {user_id: used}
     fake_breach_gateway.all_open.return_value = [breach]
     fake_author_files_reader.newest_first.return_value = [f1, f2, f3]
+    fake_quota_publisher = AsyncMock()
     handler = _build_handler(
         transaction=fake_transaction,
         entity_saver=fake_entity_saver,
@@ -375,6 +386,7 @@ async def test_grace_elapsed_enforces_lifo(
         file_uploads=fake_file_uploads,
         publisher=fake_notification_publisher,
         scheduler_lock=fake_global_scheduler_lock,
+        quota_publisher=fake_quota_publisher,
     )
 
     summary = await handler.run(ReconcileStorageQuotasCommand())
@@ -391,6 +403,9 @@ async def test_grace_elapsed_enforces_lifo(
     fake_breach_gateway.delete.assert_called_once_with(breach)
     notification = fake_notification_publisher.publish.call_args.args[0]
     assert notification.kind is NotificationKind.STORAGE_QUOTA_ENFORCED
+    # Files were swept → fresh quota snapshot published once for the
+    # breached author (who IS user_id in the reconcile flow).
+    fake_quota_publisher.usage_changed.assert_awaited_once_with(user_id)
 
 
 async def test_detected_at_preserved_on_refresh(

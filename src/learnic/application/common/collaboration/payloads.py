@@ -24,6 +24,7 @@ from typing import Any, ClassVar, Literal, assert_never
 from learnic.entities.note_block.models import (
     CodeBlock,
     FileBlock,
+    FunctionGraphBlock,
     HtmlBlock,
     KatexBlock,
     LessonBlock,
@@ -171,6 +172,14 @@ class PhotoCollageBlockSnapshot:
     title: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class FunctionGraphBlockSnapshot:
+    type: Literal["function_graph"]
+    oid: str
+    position: int
+    config: dict[str, Any]
+
+
 BlockSnapshot = (
     HtmlBlockSnapshot
     | KatexBlockSnapshot
@@ -182,6 +191,7 @@ BlockSnapshot = (
     | FileBlockSnapshot
     | VideoFileBlockSnapshot
     | PhotoCollageBlockSnapshot
+    | FunctionGraphBlockSnapshot
 )
 
 
@@ -286,6 +296,13 @@ def _block_snapshot(block: LessonBlock) -> BlockSnapshot:
                 for it in block.items
             ],
             title=block.title.value if block.title is not None else None,
+        )
+    if isinstance(block, FunctionGraphBlock):
+        return FunctionGraphBlockSnapshot(
+            type="function_graph",
+            oid=str(block.oid),
+            position=block.position,
+            config=block.config.value,
         )
     assert_never(block)
 

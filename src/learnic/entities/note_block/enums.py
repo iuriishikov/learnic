@@ -32,6 +32,12 @@ class BlockType(StrEnum):
     FILE = "file"
     VIDEO_FILE = "video_file"
     PHOTO_COLLAGE = "photo_collage"
+    # Interactive function-graph block (GeoGebra-like). Passive — no
+    # checkable answer; the whole graph spec (functions, parametric /
+    # implicit curves, points, parameter sliders, viewport, axes) lives
+    # in one opaque JSONB ``config`` payload, validated by
+    # :class:`GraphConfig` and rendered client-side by JSXGraph.
+    FUNCTION_GRAPH = "function_graph"
 
 
 class CodeBlockLanguage(StrEnum):
