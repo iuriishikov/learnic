@@ -10,6 +10,7 @@ from dishka import (
     from_context,
     make_async_container,
     provide,
+    provide_all,
 )
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import (
@@ -461,6 +462,9 @@ from learnic.application.common.persistence.user_experience import (
 from learnic.application.queries.user_experience.list_for_user import (
     ListUserExperiencesQueryHandler,
 )
+from learnic.application.common.email.anon_rate_limit import (
+    AnonymousEmailRateLimiter,
+)
 from learnic.application.common.email.renderer import EmailRenderer
 from learnic.application.common.email.sender import EmailSender
 from learnic.application.common.persistence.blog_post import (
@@ -521,8 +525,14 @@ from learnic.application.common.persistence.file import (
     FilesGateway,
     FilesReader,
 )
+from learnic.application.commands.billing.grant_subscription import (
+    GrantSubscriptionCommandHandler,
+)
 from learnic.application.commands.billing.reconcile_storage_quotas import (
     ReconcileStorageQuotasCommandHandler,
+)
+from learnic.application.commands.billing.revoke_subscription import (
+    RevokeSubscriptionCommandHandler,
 )
 from learnic.application.commands.file.purge_from_storage import (
     PurgeFileFromStorageCommandHandler,
@@ -678,6 +688,9 @@ from learnic.application.commands.admin.delete_note import (
 from learnic.application.commands.admin.grant_admin import (
     GrantAdminCommandHandler,
 )
+from learnic.application.commands.admin.unban_user import (
+    UnbanUserCommandHandler,
+)
 from learnic.application.queries.admin.get_metric_series import (
     GetAdminMetricSeriesQueryHandler,
 )
@@ -692,6 +705,9 @@ from learnic.application.common.persistence.admin_stats import (
 )
 from learnic.application.common.persistence.teacher_ranking import (
     TeacherRankingReader,
+)
+from learnic.application.queries.user.admins import (
+    GetAdminsQueryHandler,
 )
 from learnic.application.queries.user.get import GetUserQueryHandler
 from learnic.application.queries.user.get_admin_status import (
@@ -750,8 +766,11 @@ from learnic.application.queries.blog_post.list import (
 from learnic.application.queries.blog_post.list_published import (
     ListPublishedBlogPostsQueryHandler,
 )
-from learnic.application.queries.note_content.get import (
-    GetNoteContentQueryHandler,
+from learnic.application.queries.note_content.get_release_lesson import (
+    GetReleaseLessonQueryHandler,
+)
+from learnic.application.queries.note_content.get_scheme import (
+    GetNoteSchemeQueryHandler,
 )
 from learnic.application.queries.note_release.get_content import (
     GetNoteReleaseContentQueryHandler,
@@ -943,6 +962,9 @@ from learnic.infrastructure.statistics.collector_alchemy import (
 )
 from learnic.infrastructure.statistics.collector_deduping import (
     DedupingStatisticsCollector,
+)
+from learnic.infrastructure.email.anon_rate_limit_redis import (
+    AnonymousEmailRateLimiterRedis,
 )
 from learnic.infrastructure.statistics.dedupe_redis import (
     StatisticsDedupeRedis,
@@ -1463,6 +1485,11 @@ class PushProvider(Provider):
 class RedisProvider(Provider):
     scope = Scope.APP
 
+    anon_email_rate_limiter = provide(
+        AnonymousEmailRateLimiterRedis,
+        provides=AnonymousEmailRateLimiter,
+    )
+
     @provide
     async def redis(
         self,
@@ -1639,282 +1666,206 @@ class StorageQuotaEventsProvider(Provider):
 class InteractorsProvider(Provider):
     scope = Scope.REQUEST
 
-    grant_admin = provide(GrantAdminCommandHandler)
-    ban_user = provide(BanUserCommandHandler)
-    admin_delete_note = provide(AdminDeleteNoteCommandHandler)
-    get_admin_stats = provide(GetAdminStatsQueryHandler)
-    get_admin_metric_series = provide(GetAdminMetricSeriesQueryHandler)
-
-    get_user = provide(GetUserQueryHandler)
-    get_my_admin_status = provide(GetMyAdminStatusQueryHandler)
-    search_users = provide(SearchUsersQueryHandler)
-    get_top_teachers = provide(GetTopTeachersQueryHandler)
-
-    get_user_presence = provide(GetUserPresenceQueryHandler)
-    get_users_presence = provide(GetUsersPresenceQueryHandler)
-
-    register = provide(RegisterCommandHandler)
-    login = provide(LoginCommandHandler)
-    refresh = provide(RefreshCommandHandler)
-    logout = provide(LogoutCommandHandler)
-    logout_all = provide(LogoutAllCommandHandler)
-    verify_email = provide(VerifyEmailCommandHandler)
-    verify_wait = provide(VerifyWaitCommandHandler)
-    verify_token = provide(VerifyTokenCommandHandler)
-    resend_verification = provide(ResendVerificationCommandHandler)
-    get_token_status = provide(GetTokenStatusQueryHandler)
-    request_password_reset = provide(RequestPasswordResetCommandHandler)
-    reset_password = provide(ResetPasswordCommandHandler)
-
-    list_my_sessions = provide(ListMySessionsQueryHandler)
-    revoke_session = provide(RevokeSessionCommandHandler)
-
-    set_user_avatar = provide(SetUserAvatarCommandHandler)
-    remove_user_avatar = provide(RemoveUserAvatarCommandHandler)
-    set_user_cover = provide(SetUserCoverCommandHandler)
-    remove_user_cover = provide(RemoveUserCoverCommandHandler)
-
-    change_user_first_name = provide(ChangeUserFirstNameCommandHandler)
-    change_user_last_name = provide(ChangeUserLastNameCommandHandler)
-    change_user_patronymic = provide(ChangeUserPatronymicCommandHandler)
-    change_user_description = provide(ChangeUserDescriptionCommandHandler)
-    change_user_website_url = provide(ChangeUserWebsiteUrlCommandHandler)
-    change_user_portfolio_url = provide(ChangeUserPortfolioUrlCommandHandler)
-    change_user_public_email = provide(ChangeUserPublicEmailCommandHandler)
-
-    set_user_social_links = provide(SetUserSocialLinksCommandHandler)
-    list_user_social_links = provide(ListUserSocialLinksQueryHandler)
-
-    add_user_experience = provide(AddUserExperienceCommandHandler)
-    update_user_experience = provide(UpdateUserExperienceCommandHandler)
-    delete_user_experience = provide(DeleteUserExperienceCommandHandler)
-    set_user_experience_icon = provide(SetUserExperienceIconCommandHandler)
-    remove_user_experience_icon = provide(
+    interactors = provide_all(
+        GrantAdminCommandHandler,
+        BanUserCommandHandler,
+        UnbanUserCommandHandler,
+        AdminDeleteNoteCommandHandler,
+        GetAdminStatsQueryHandler,
+        GetAdminMetricSeriesQueryHandler,
+        GetUserQueryHandler,
+        GetMyAdminStatusQueryHandler,
+        SearchUsersQueryHandler,
+        GetTopTeachersQueryHandler,
+        GetAdminsQueryHandler,
+        GetUserPresenceQueryHandler,
+        GetUsersPresenceQueryHandler,
+        RegisterCommandHandler,
+        LoginCommandHandler,
+        RefreshCommandHandler,
+        LogoutCommandHandler,
+        LogoutAllCommandHandler,
+        VerifyEmailCommandHandler,
+        VerifyWaitCommandHandler,
+        VerifyTokenCommandHandler,
+        ResendVerificationCommandHandler,
+        GetTokenStatusQueryHandler,
+        RequestPasswordResetCommandHandler,
+        ResetPasswordCommandHandler,
+        ListMySessionsQueryHandler,
+        RevokeSessionCommandHandler,
+        SetUserAvatarCommandHandler,
+        RemoveUserAvatarCommandHandler,
+        SetUserCoverCommandHandler,
+        RemoveUserCoverCommandHandler,
+        ChangeUserFirstNameCommandHandler,
+        ChangeUserLastNameCommandHandler,
+        ChangeUserPatronymicCommandHandler,
+        ChangeUserDescriptionCommandHandler,
+        ChangeUserWebsiteUrlCommandHandler,
+        ChangeUserPortfolioUrlCommandHandler,
+        ChangeUserPublicEmailCommandHandler,
+        SetUserSocialLinksCommandHandler,
+        ListUserSocialLinksQueryHandler,
+        AddUserExperienceCommandHandler,
+        UpdateUserExperienceCommandHandler,
+        DeleteUserExperienceCommandHandler,
+        SetUserExperienceIconCommandHandler,
         RemoveUserExperienceIconCommandHandler,
-    )
-    list_user_experiences = provide(ListUserExperiencesQueryHandler)
-
-    add_note_product = provide(AddNoteProductCommandHandler)
-    change_product_name = provide(ChangeProductNameCommandHandler)
-    change_product_description = provide(
+        ListUserExperiencesQueryHandler,
+        AddNoteProductCommandHandler,
+        ChangeProductNameCommandHandler,
         ChangeProductDescriptionCommandHandler,
-    )
-    change_product_duration = provide(ChangeProductDurationCommandHandler)
-    change_product_visibility = provide(
+        ChangeProductDurationCommandHandler,
         ChangeProductVisibilityCommandHandler,
-    )
-    set_product_cover = provide(SetProductCoverCommandHandler)
-    remove_product_cover = provide(RemoveProductCoverCommandHandler)
-    publish_product = provide(PublishProductCommandHandler)
-    archive_product = provide(ArchiveProductCommandHandler)
-    unarchive_product = provide(UnarchiveProductCommandHandler)
-    delete_product = provide(DeleteProductCommandHandler)
-    get_product = provide(GetProductQueryHandler)
-    get_my_products = provide(GetMyProductsQueryHandler)
-    search_my_products = provide(SearchMyProductsQueryHandler)
-    get_published_products = provide(GetPublishedProductsQueryHandler)
-    search_published_products = provide(
+        SetProductCoverCommandHandler,
+        RemoveProductCoverCommandHandler,
+        PublishProductCommandHandler,
+        ArchiveProductCommandHandler,
+        UnarchiveProductCommandHandler,
+        DeleteProductCommandHandler,
+        GetProductQueryHandler,
+        GetMyProductsQueryHandler,
+        SearchMyProductsQueryHandler,
+        GetPublishedProductsQueryHandler,
         SearchPublishedProductsQueryHandler,
-    )
-    get_user_products = provide(GetUserProductsQueryHandler)
-    recommend_for_me = provide(RecommendForMeQueryHandler)
-    check_product_name_availability = provide(
+        GetUserProductsQueryHandler,
+        RecommendForMeQueryHandler,
         CheckProductNameAvailabilityQueryHandler,
-    )
-
-    add_product_qa = provide(AddProductQACommandHandler)
-    change_product_qa_question = provide(
+        AddProductQACommandHandler,
         ChangeProductQAQuestionCommandHandler,
-    )
-    change_product_qa_answer = provide(ChangeProductQAAnswerCommandHandler)
-    reorder_product_qa = provide(ReorderProductQACommandHandler)
-    delete_product_qa = provide(DeleteProductQACommandHandler)
-    get_product_qa_list = provide(GetProductQAListQueryHandler)
-
-    enroll_into_product = provide(EnrollIntoProductCommandHandler)
-    complete_enrollment = provide(CompleteEnrollmentCommandHandler)
-    repin_note_enrollment = provide(RePinNoteEnrollmentCommandHandler)
-    self_repin_note_enrollment = provide(
+        ChangeProductQAAnswerCommandHandler,
+        ReorderProductQACommandHandler,
+        DeleteProductQACommandHandler,
+        GetProductQAListQueryHandler,
+        EnrollIntoProductCommandHandler,
+        CompleteEnrollmentCommandHandler,
+        RePinNoteEnrollmentCommandHandler,
         SelfRePinNoteEnrollmentCommandHandler,
-    )
-    get_product_enrollments = provide(GetProductEnrollmentsQueryHandler)
-    get_student_enrollments = provide(GetStudentEnrollmentsQueryHandler)
-    list_enrollment_releases = provide(ListEnrollmentReleasesQueryHandler)
-
-    add_note_module = provide(AddNoteModuleCommandHandler)
-    rename_note_module = provide(RenameNoteModuleCommandHandler)
-    update_note_module_description = provide(
+        GetProductEnrollmentsQueryHandler,
+        GetStudentEnrollmentsQueryHandler,
+        ListEnrollmentReleasesQueryHandler,
+        AddNoteModuleCommandHandler,
+        RenameNoteModuleCommandHandler,
         UpdateNoteModuleDescriptionCommandHandler,
-    )
-    reorder_note_modules = provide(ReorderNoteModulesCommandHandler)
-    delete_note_module = provide(DeleteNoteModuleCommandHandler)
-    add_note_lesson = provide(AddNoteLessonCommandHandler)
-    rename_note_lesson = provide(RenameNoteLessonCommandHandler)
-    move_note_lesson = provide(MoveNoteLessonCommandHandler)
-    reorder_note_lessons = provide(ReorderNoteLessonsCommandHandler)
-    delete_note_lesson = provide(DeleteNoteLessonCommandHandler)
-    add_html_block = provide(AddHtmlBlockCommandHandler)
-    add_katex_block = provide(AddKatexBlockCommandHandler)
-    add_rutube_video_block = provide(AddRutubeVideoBlockCommandHandler)
-    add_code_block = provide(AddCodeBlockCommandHandler)
-    add_function_graph_block = provide(
+        ReorderNoteModulesCommandHandler,
+        DeleteNoteModuleCommandHandler,
+        AddNoteLessonCommandHandler,
+        RenameNoteLessonCommandHandler,
+        MoveNoteLessonCommandHandler,
+        ReorderNoteLessonsCommandHandler,
+        DeleteNoteLessonCommandHandler,
+        AddHtmlBlockCommandHandler,
+        AddKatexBlockCommandHandler,
+        AddRutubeVideoBlockCommandHandler,
+        AddCodeBlockCommandHandler,
         AddFunctionGraphBlockCommandHandler,
-    )
-    update_function_graph_block = provide(
         UpdateFunctionGraphBlockCommandHandler,
-    )
-    add_single_choice_block = provide(AddSingleChoiceBlockCommandHandler)
-    add_multi_choice_block = provide(AddMultiChoiceBlockCommandHandler)
-    add_text_input_block = provide(AddTextInputBlockCommandHandler)
-    add_file_block = provide(AddFileBlockCommandHandler)
-    add_video_file_block = provide(AddVideoFileBlockCommandHandler)
-    add_photo_collage_block = provide(AddPhotoCollageBlockCommandHandler)
-    update_html_block = provide(UpdateHtmlBlockCommandHandler)
-    update_katex_block = provide(UpdateKatexBlockCommandHandler)
-    update_rutube_video_block = provide(UpdateRutubeVideoBlockCommandHandler)
-    update_code_block = provide(UpdateCodeBlockCommandHandler)
-    update_single_choice_block = provide(UpdateSingleChoiceBlockCommandHandler)
-    update_multi_choice_block = provide(UpdateMultiChoiceBlockCommandHandler)
-    update_text_input_block = provide(UpdateTextInputBlockCommandHandler)
-    update_file_block = provide(UpdateFileBlockCommandHandler)
-    update_video_file_block = provide(UpdateVideoFileBlockCommandHandler)
-    add_photo_collage_item = provide(AddPhotoCollageItemCommandHandler)
-    remove_photo_collage_item = provide(RemovePhotoCollageItemCommandHandler)
-    reorder_photo_collage_items = provide(
+        AddSingleChoiceBlockCommandHandler,
+        AddMultiChoiceBlockCommandHandler,
+        AddTextInputBlockCommandHandler,
+        AddFileBlockCommandHandler,
+        AddVideoFileBlockCommandHandler,
+        AddPhotoCollageBlockCommandHandler,
+        UpdateHtmlBlockCommandHandler,
+        UpdateKatexBlockCommandHandler,
+        UpdateRutubeVideoBlockCommandHandler,
+        UpdateCodeBlockCommandHandler,
+        UpdateSingleChoiceBlockCommandHandler,
+        UpdateMultiChoiceBlockCommandHandler,
+        UpdateTextInputBlockCommandHandler,
+        UpdateFileBlockCommandHandler,
+        UpdateVideoFileBlockCommandHandler,
+        AddPhotoCollageItemCommandHandler,
+        RemovePhotoCollageItemCommandHandler,
         ReorderPhotoCollageItemsCommandHandler,
-    )
-    update_photo_collage_item_caption = provide(
         UpdatePhotoCollageItemCaptionCommandHandler,
-    )
-    update_photo_collage_title = provide(
         UpdatePhotoCollageTitleCommandHandler,
-    )
-    entitlement_service = provide(EntitlementService)
-    storage_quota_publisher = provide(StorageQuotaUsagePublisher)
-    get_my_subscription = provide(GetMySubscriptionQueryHandler)
-    get_note_storage_remaining = provide(
+        EntitlementService,
+        StorageQuotaUsagePublisher,
+        GetMySubscriptionQueryHandler,
         GetNoteStorageRemainingQueryHandler,
-    )
-    get_note_storage = provide(GetNoteStorageQueryHandler)
-    reconcile_storage_quotas = provide(
+        GetNoteStorageQueryHandler,
+        GrantSubscriptionCommandHandler,
+        RevokeSubscriptionCommandHandler,
         ReconcileStorageQuotasCommandHandler,
-    )
-    purge_file_from_storage = provide(
         PurgeFileFromStorageCommandHandler,
-    )
-    check_block_answer = provide(CheckBlockAnswerCommandHandler)
-    reveal_block_answer = provide(RevealBlockAnswerCommandHandler)
-    list_my_block_answers = provide(ListMyBlockAnswersQueryHandler)
-    reorder_lesson_blocks = provide(ReorderLessonBlocksCommandHandler)
-    delete_lesson_block = provide(DeleteLessonBlockCommandHandler)
-    get_note_draft = provide(GetNoteDraftQueryHandler)
-
-    # --- blog ---
-    create_blog_post = provide(CreateBlogPostCommandHandler)
-    rename_blog_post = provide(RenameBlogPostCommandHandler)
-    edit_blog_post_meta = provide(EditBlogPostMetaCommandHandler)
-    change_blog_post_slug = provide(ChangeBlogPostSlugCommandHandler)
-    publish_blog_post = provide(PublishBlogPostCommandHandler)
-    unpublish_blog_post = provide(UnpublishBlogPostCommandHandler)
-    delete_blog_post = provide(DeleteBlogPostCommandHandler)
-    set_blog_post_cover = provide(SetBlogPostCoverCommandHandler)
-    remove_blog_post_cover = provide(RemoveBlogPostCoverCommandHandler)
-    add_blog_html_block = provide(AddBlogHtmlBlockCommandHandler)
-    add_blog_image_block = provide(AddBlogImageBlockCommandHandler)
-    add_blog_video_block = provide(AddBlogVideoBlockCommandHandler)
-    update_blog_html_block = provide(UpdateBlogHtmlBlockCommandHandler)
-    update_blog_image_block = provide(UpdateBlogImageBlockCommandHandler)
-    update_blog_video_block = provide(UpdateBlogVideoBlockCommandHandler)
-    delete_blog_post_block = provide(DeleteBlogPostBlockCommandHandler)
-    reorder_blog_post_blocks = provide(ReorderBlogPostBlocksCommandHandler)
-    get_blog_post = provide(GetBlogPostQueryHandler)
-    get_blog_post_block = provide(GetBlogPostBlockQueryHandler)
-    get_published_blog_post_by_slug = provide(
+        CheckBlockAnswerCommandHandler,
+        RevealBlockAnswerCommandHandler,
+        ListMyBlockAnswersQueryHandler,
+        ReorderLessonBlocksCommandHandler,
+        DeleteLessonBlockCommandHandler,
+        GetNoteDraftQueryHandler,
+        CreateBlogPostCommandHandler,
+        RenameBlogPostCommandHandler,
+        EditBlogPostMetaCommandHandler,
+        ChangeBlogPostSlugCommandHandler,
+        PublishBlogPostCommandHandler,
+        UnpublishBlogPostCommandHandler,
+        DeleteBlogPostCommandHandler,
+        SetBlogPostCoverCommandHandler,
+        RemoveBlogPostCoverCommandHandler,
+        AddBlogHtmlBlockCommandHandler,
+        AddBlogImageBlockCommandHandler,
+        AddBlogVideoBlockCommandHandler,
+        UpdateBlogHtmlBlockCommandHandler,
+        UpdateBlogImageBlockCommandHandler,
+        UpdateBlogVideoBlockCommandHandler,
+        DeleteBlogPostBlockCommandHandler,
+        ReorderBlogPostBlocksCommandHandler,
+        GetBlogPostQueryHandler,
+        GetBlogPostBlockQueryHandler,
         GetPublishedBlogPostBySlugQueryHandler,
-    )
-    list_blog_posts = provide(ListBlogPostsQueryHandler)
-    list_published_blog_posts = provide(ListPublishedBlogPostsQueryHandler)
-    get_lesson_block = provide(GetLessonBlockQueryHandler)
-    get_note_content = provide(GetNoteContentQueryHandler)
-    create_note_release = provide(CreateNoteReleaseCommandHandler)
-    list_note_releases = provide(ListNoteReleasesQueryHandler)
-    get_note_release_content = provide(
+        ListBlogPostsQueryHandler,
+        ListPublishedBlogPostsQueryHandler,
+        GetLessonBlockQueryHandler,
+        GetNoteSchemeQueryHandler,
+        GetReleaseLessonQueryHandler,
+        CreateNoteReleaseCommandHandler,
+        ListNoteReleasesQueryHandler,
         GetNoteReleaseContentQueryHandler,
-    )
-    reset_note_draft = provide(ResetNoteDraftCommandHandler)
-
-    create_custom_role = provide(CreateCustomRoleCommandHandler)
-    update_custom_role = provide(UpdateCustomRoleCommandHandler)
-    delete_custom_role = provide(DeleteCustomRoleCommandHandler)
-    list_product_roles = provide(ListProductRolesQueryHandler)
-    get_role = provide(GetRoleQueryHandler)
-
-    search_tags = provide(SearchTagsQueryHandler)
-    list_product_tags = provide(ListProductTagsQueryHandler)
-    get_popular_tags = provide(GetPopularTagsQueryHandler)
-    update_product_tags = provide(UpdateProductTagsCommandHandler)
-
-    invite_collaborator_by_user = provide(
+        ResetNoteDraftCommandHandler,
+        CreateCustomRoleCommandHandler,
+        UpdateCustomRoleCommandHandler,
+        DeleteCustomRoleCommandHandler,
+        ListProductRolesQueryHandler,
+        GetRoleQueryHandler,
+        SearchTagsQueryHandler,
+        ListProductTagsQueryHandler,
+        GetPopularTagsQueryHandler,
+        UpdateProductTagsCommandHandler,
         InviteCollaboratorByUserCommandHandler,
-    )
-    invite_collaborator_by_email = provide(
         InviteCollaboratorByEmailCommandHandler,
-    )
-    accept_collaboration_invite = provide(
         AcceptCollaborationInviteCommandHandler,
-    )
-    accept_collaboration_in_app = provide(
         AcceptCollaborationInAppCommandHandler,
-    )
-    decline_collaboration_in_app = provide(
         DeclineCollaborationInAppCommandHandler,
-    )
-    update_collaboration_grants = provide(
         UpdateCollaborationGrantsCommandHandler,
-    )
-    revoke_collaboration = provide(RevokeCollaborationCommandHandler)
-    reinvite_collaborator = provide(ReinviteCollaboratorCommandHandler)
-    leave_product = provide(LeaveProductCommandHandler)
-    purge_expired_collaboration_invites = provide(
+        RevokeCollaborationCommandHandler,
+        ReinviteCollaboratorCommandHandler,
+        LeaveProductCommandHandler,
         PurgeExpiredInvitesCommandHandler,
-    )
-
-    invite_gift_by_user = provide(InviteGiftByUserCommandHandler)
-    invite_gift_by_email = provide(InviteGiftByEmailCommandHandler)
-    accept_gift_by_token = provide(AcceptGiftByTokenCommandHandler)
-    accept_gift_in_app = provide(AcceptGiftInAppCommandHandler)
-    decline_gift = provide(DeclineGiftCommandHandler)
-    revoke_gift = provide(RevokeGiftCommandHandler)
-    purge_expired_gifts = provide(PurgeExpiredGiftsCommandHandler)
-    get_gift = provide(GetGiftQueryHandler)
-    list_product_gifts = provide(ListProductGiftsQueryHandler)
-    list_product_collaborators = provide(
+        InviteGiftByUserCommandHandler,
+        InviteGiftByEmailCommandHandler,
+        AcceptGiftByTokenCommandHandler,
+        AcceptGiftInAppCommandHandler,
+        DeclineGiftCommandHandler,
+        RevokeGiftCommandHandler,
+        PurgeExpiredGiftsCommandHandler,
+        GetGiftQueryHandler,
+        ListProductGiftsQueryHandler,
         ListProductCollaboratorsQueryHandler,
-    )
-    list_my_collaborations = provide(ListMyCollaborationsQueryHandler)
-    get_my_effective_permissions = provide(
+        ListMyCollaborationsQueryHandler,
         GetMyEffectivePermissionsQueryHandler,
-    )
-
-    list_my_notifications = provide(ListMyNotificationsQueryHandler)
-    get_my_notification_counters = provide(
+        ListMyNotificationsQueryHandler,
         GetMyNotificationCountersQueryHandler,
-    )
-    mark_notification_read = provide(MarkNotificationAsReadCommandHandler)
-    mark_all_notifications_read = provide(
+        MarkNotificationAsReadCommandHandler,
         MarkAllNotificationsAsReadCommandHandler,
-    )
-
-    subscribe_push = provide(SubscribePushCommandHandler)
-    unsubscribe_push = provide(UnsubscribePushCommandHandler)
-    list_my_push_subscriptions = provide(ListMyPushSubscriptionsQueryHandler)
-    get_my_notification_preferences = provide(
+        SubscribePushCommandHandler,
+        UnsubscribePushCommandHandler,
+        ListMyPushSubscriptionsQueryHandler,
         GetMyNotificationPreferencesQueryHandler,
-    )
-    update_notification_preferences = provide(
         UpdateNotificationPreferencesCommandHandler,
     )
-
 
 
 class EmailProvider(Provider):

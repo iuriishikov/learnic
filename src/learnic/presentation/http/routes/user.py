@@ -51,7 +51,10 @@ from learnic.application.commands.user.cover.set import (
     SetUserCoverCommand,
     SetUserCoverCommandHandler,
 )
-from learnic.application.common.errors import EntityNotFoundError
+from learnic.application.common.errors import (
+    EntityNotFoundError,
+    WrongFileContentTypeError,
+)
 from learnic.application.common.pagination import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
@@ -64,6 +67,10 @@ from learnic.entities.statistic.models import Statistic
 from learnic.application.queries.product.get_by_user import (
     GetUserProductsQuery,
     GetUserProductsQueryHandler,
+)
+from learnic.application.queries.user.admins import (
+    GetAdminsQuery,
+    GetAdminsQueryHandler,
 )
 from learnic.application.queries.user.get import (
     GetUserQuery,
@@ -100,6 +107,7 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
     ENTITY_NOT_FOUND_RULE,
+    WRONG_FILE_CONTENT_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
@@ -486,6 +494,55 @@ async def top_teachers(
 
 
 @router.get(
+    "/admins",
+    summary="List platform administrators",
+    operation_id="getAdmins",
+    response_model=list[UserSummarySchema],
+)
+async def admins(
+    interactor: FromDishka[GetAdminsQueryHandler],
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=(f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`)."),
+        examples=[20],
+    ),
+) -> list[UserSummarySchema]:
+    """Return the platform's administrator accounts.
+
+    Powers public "our team" surfaces — e.g. the landing-page support
+    block that shows who answers user questions. Only non-banned
+    accounts carrying the admin flag are returned, ordered by
+    ``last_name`` / ``first_name`` / ``oid`` for a stable page. The
+    payload is the shared identity projection (masked email, presigned
+    avatar thumbnail) — the same shape as ``GET /users/search``.
+
+    Authentication is **not** required — this is open discovery
+    content, the same stance as ``GET /users/top-teachers``.
+
+    Args:
+        interactor: Injected admins query handler.
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        List of :class:`UserSummarySchema`, ordered by name. Empty
+        when the platform has no (non-banned) administrators.
+    """
+    views = await interactor.run(
+        GetAdminsQuery(pagination=Pagination(limit=limit, offset=offset)),
+    )
+    return [UserSummarySchema.from_view(view) for view in views]
+
+
+@router.get(
     "/{user_id}",
     summary="Get a user's public profile",
     operation_id="getUserById",
@@ -763,7 +820,8 @@ async def change_description(
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=UploadedFileSchema,
-    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP
+    | {WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE},
 )
 async def upload_avatar(
     request: Request,
@@ -841,7 +899,8 @@ async def delete_avatar(
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=UploadedFileSchema,
-    error_map=AUTHENTICATED_WITH_FIELD_MAP,
+    error_map=AUTHENTICATED_WITH_FIELD_MAP
+    | {WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE},
 )
 async def upload_cover(
     request: Request,

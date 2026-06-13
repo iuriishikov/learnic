@@ -12,17 +12,17 @@ from learnic.application.common.storage.file_storage import FileStorage
 from learnic.entities.user.models import UserID
 
 MIN_QUERY_LEN: Final = 2
-MAX_TOKENS: Final = 5
 
 
 @dataclass(slots=True, frozen=True)
 class SearchUsersQuery:
-    """Free-text search over registered users by name fields.
+    """Full-text + fuzzy search over registered users by name fields.
 
-    The query string is whitespace-tokenized; each token must match
-    (case-insensitive substring) at least one of ``first_name`` /
-    ``last_name`` / ``patronymic``. Empty / whitespace-only inputs
-    return an empty list without touching the database.
+    Backed by a Postgres ``tsvector`` (Russian morphology, weighted
+    ``last_name`` > ``first_name`` > ``patronymic``) with a ``pg_trgm``
+    word-similarity fallback for typos — the same engine as the product
+    catalog search. Inputs shorter than ``MIN_QUERY_LEN`` (after trim)
+    return an empty list without touching the index.
     """
 
     query: str
@@ -31,7 +31,7 @@ class SearchUsersQuery:
 
 @dataclass(slots=True, frozen=True)
 class UserSummaryOutput:
-    """Single search hit.
+    """Single search hit; also reused by the admins-list query.
 
     ``full_name`` collapses the user's name fields into the
     canonical Russian-style display name (``Last First Patronymic``)
@@ -46,6 +46,7 @@ class UserSummaryOutput:
     full_name: str
     email: str
     is_verified: bool
+    is_banned: bool
     avatar: FileView | None
 
 
@@ -60,12 +61,15 @@ class SearchUsersQueryHandler:
         self._file_storage: Final = file_storage
 
     async def run(self, data: SearchUsersQuery) -> list[UserSummaryOutput]:
-        tokens = self._tokenize(data.query)
-        if not tokens:
+        # Postgres does the tokenization (``websearch_to_tsquery``) and
+        # fuzzy matching; the handler only enforces the minimum length so
+        # a 1-char query doesn't hammer the trigram index with noise.
+        stripped = data.query.strip()
+        if len(stripped) < MIN_QUERY_LEN:
             return []
 
         views = await self._reader.search_by_name(
-            tokens=tokens,
+            query=stripped,
             pagination=data.pagination,
         )
         return [
@@ -76,26 +80,10 @@ class SearchUsersQueryHandler:
                 ),
                 email=mask_email(view.email),
                 is_verified=view.is_verified,
+                is_banned=view.is_banned,
                 avatar=await FileView.of_optional(
                     view.avatar, self._file_storage,
                 ),
             )
             for view in views
         ]
-
-    @staticmethod
-    def _tokenize(query: str) -> tuple[str, ...]:
-        seen: set[str] = set()
-        tokens: list[str] = []
-        for raw in query.split():
-            token = raw.strip()
-            if len(token) < MIN_QUERY_LEN:
-                continue
-            lowered = token.lower()
-            if lowered in seen:
-                continue
-            seen.add(lowered)
-            tokens.append(token)
-            if len(tokens) >= MAX_TOKENS:
-                break
-        return tuple(tokens)

@@ -31,6 +31,7 @@ user_social_links_table = sa.Table(
             SocialLinkKind,
             name="social_link_kind",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),

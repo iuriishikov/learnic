@@ -19,24 +19,30 @@ class TaskScheduler(Protocol):
     async def schedule_purge_file_from_storage(
         self,
         file_id: FileID,
+        attempt: int = 0,
     ) -> None:
         """Enqueue physical removal of a soft-deleted file's S3 object.
 
         Called right after :meth:`File.mark_deleted` flips
-        ``deleted_at``. The task itself re-reads the file inside
-        the worker and aborts if the row is not actually
-        soft-deleted (e.g. the producer's transaction rolled back
-        between ``mark_deleted`` and the task running) — so the
-        sequence "schedule then rollback" is safe.
+        ``deleted_at``. The task re-reads the file inside the worker;
+        if it sees the row still live (the producer hasn't committed
+        the soft-delete yet, or rolled back) it re-enqueues itself a
+        bounded number of times until the commit lands, so the
+        sequence "schedule then commit" never orphans the blob and
+        "schedule then rollback" never deletes a live file.
 
-        The DB row is preserved with ``deleted_at != NULL`` as an
-        audit trail; only the S3 blob is removed by the worker.
-        Blocks referencing the file have ``ON DELETE SET NULL``
-        FKs, so even an eventual row purge would not break them
-        — that's a separate concern from this task.
+        The blob is hard-deleted along with the ``files`` row by the
+        worker. Note the FK shapes the worker relies on: single-file
+        and video-file blocks (draft and blog) reference the file
+        with ``ON DELETE CASCADE`` — they are dropped with the file;
+        photo-collage items and note-release mirror rows use
+        ``ON DELETE SET NULL`` / a no-FK JSONB mirror, so the worker
+        excises the offending item explicitly.
 
         Args:
             file_id: Target file's ``FileID``.
+            attempt: Re-enqueue counter; callers leave it at ``0``.
+                The worker increments it on each "still live" retry.
         """
         ...
 

@@ -26,7 +26,7 @@ class UserView:
 
 @dataclass(slots=True, frozen=True)
 class UserSummaryView:
-    """Lightweight user projection used by name search.
+    """Lightweight user projection used by name search and admin list.
 
     Carries the user's raw login ``email`` so the query handler can
     mask it before it leaves the application layer; ``description``
@@ -41,6 +41,7 @@ class UserSummaryView:
     last_name: str
     patronymic: str | None
     is_verified: bool
+    is_banned: bool
     avatar: FileMeta | None
 
 
@@ -66,20 +67,31 @@ class UserReader(Protocol):
         """
         ...
 
-    async def search_by_name(
+    async def admins(
         self,
-        tokens: tuple[str, ...],
         pagination: Pagination,
     ) -> list[UserSummaryView]:
-        """Return users whose name fields match every ``tokens`` entry.
+        """Return the platform's administrator accounts.
 
-        Each token must match (case-insensitively, as a substring)
-        at least one of ``first_name`` / ``last_name`` / ``patronymic``;
-        a user is returned only when every token finds a hit. Tokens
-        are pre-trimmed and pre-deduplicated by the application layer.
+        Only non-banned users carrying the ``is_admin`` flag are
+        included, ordered by ``last_name`` / ``first_name`` / ``oid``
+        ascending for a stable, deterministic page across requests.
+        """
+        ...
 
-        Implementations are free to add ordering rules — e.g. surface
-        prefix matches before substring matches — but must not silently
-        widen the result beyond the stated semantics.
+    async def search_by_name(
+        self,
+        query: str,
+        pagination: Pagination,
+    ) -> list[UserSummaryView]:
+        """Return users matching ``query`` across their name fields.
+
+        Full-text + fuzzy search (mirrors the product catalog search):
+        ``search_vector @@ websearch_to_tsquery('russian', q)`` OR a
+        trigram ``word_similarity`` fallback over the concatenated
+        name text, ranked by a weighted blend of the two and tie-broken
+        by ``last_name`` / ``first_name`` / ``oid`` for stable
+        pagination. ``query`` arrives pre-trimmed; an empty string must
+        return an empty list without touching the index.
         """
         ...

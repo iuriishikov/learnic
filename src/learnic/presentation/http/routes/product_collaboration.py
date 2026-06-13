@@ -81,6 +81,9 @@ from learnic.application.queries.product_collaboration.list_my import (
     ListMyCollaborationsQueryHandler,
 )
 from learnic.entities.product.ids import ProductID
+from learnic.entities.product_collaboration.constants import (
+    INVITE_TOKEN_MAX_LEN,
+)
 from learnic.entities.product_collaboration.enums import (
     CollaborationStatus,
 )
@@ -275,9 +278,11 @@ class AcceptInviteSchema(BaseModel):
     token: str = Field(
         description=(
             "Plaintext token from the invite email link. The server "
-            "compares its sha256 against the stored hash."
+            "compares its sha256 against the stored hash. Max length is "
+            f"{INVITE_TOKEN_MAX_LEN} characters (`INVITE_TOKEN_MAX_LEN`)."
         ),
         min_length=1,
+        max_length=INVITE_TOKEN_MAX_LEN,
         examples=["01HJ7K8...some-opaque-token"],
     )
 
@@ -730,9 +735,14 @@ async def accept_invite(
         InviteEmailMismatchError: Caller's email does not match the
             by-email invite; HTTP 403.
         EntityNotFoundError: Collaboration missing; HTTP 404.
-        FieldError: ``InviteToken`` invariants violated, or token
-            mismatch / expiration surfaced as a domain error; HTTP
-            422.
+        InviteTokenMismatchError: Token does not match the stored
+            hash; HTTP 409.
+        InviteTokenExpiredError: The invite token's TTL has elapsed;
+            HTTP 409.
+        OperationNotAllowedInStatusError: Collaboration is not in a
+            pending status; HTTP 409.
+        FieldError: ``InviteToken`` or grant invariants violated;
+            HTTP 422.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
@@ -785,8 +795,11 @@ async def accept_invite_in_app(
         InviteEmailMismatchError: Caller's email does not match the
             by-email invite; HTTP 403.
         EntityNotFoundError: Collaboration missing; HTTP 404.
-        FieldError: Domain invariants violated (e.g. expired or
-            non-pending status); HTTP 422.
+        InviteTokenExpiredError: The invite has expired; HTTP 409.
+        OperationNotAllowedInStatusError: Collaboration is not in a
+            pending status; HTTP 409.
+        FieldError: Grant invariants violated (e.g. no grants);
+            HTTP 422.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(
@@ -839,8 +852,8 @@ async def decline_invite_in_app(
         InviteEmailMismatchError: Caller's email does not match the
             by-email invite; HTTP 403.
         EntityNotFoundError: Collaboration missing; HTTP 404.
-        FieldError: Domain invariants violated (e.g. non-pending
-            status); HTTP 422.
+        OperationNotAllowedInStatusError: Collaboration is not in a
+            pending status; HTTP 409.
     """
     ctx = await auth.authenticate(request)
     await interactor.run(

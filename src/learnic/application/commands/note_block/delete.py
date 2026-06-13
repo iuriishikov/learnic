@@ -74,9 +74,11 @@ class DeleteLessonBlockCommandHandler:
         file_ids = _file_ids_of(block)
         await self._block_gateway.delete(block.oid)
         # File-backed blocks (file / video-file / collage) lose their
-        # last reference when the row goes; soft-delete + S3 purge
-        # those file rows so the deletion actually frees storage
-        # instead of orphaning blobs.
+        # draft reference when the row goes; soft-delete + S3-purge
+        # those files to actually free storage instead of orphaning
+        # blobs. soft_delete_previous spares any file a published
+        # release still pins (releases share the exact blob), so an
+        # already-published lesson never loses its media.
         for file_id in file_ids:
             await self._file_uploads.soft_delete_previous(file_id)
         await self._transaction.commit()

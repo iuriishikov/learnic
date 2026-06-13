@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Final
 from uuid import UUID
 
+from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
 from learnic.application.common.auth.resource_lineage import (
     ResourceLineageReader,
 )
@@ -20,8 +21,60 @@ from learnic.application.common.persistence.role import RoleGateway
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.errors import InvalidScopeError
 from learnic.entities.product_collaboration.grant import CollaborationGrant
+from learnic.entities.role.errors import (
+    CannotGrantPermissionsBeyondOwnSetError,
+)
 from learnic.entities.role.ids import RoleID
-from learnic.entities.role.permissions import ScopeType
+from learnic.entities.role.permissions import (
+    Permission,
+    ScopeType,
+    expand_implied,
+)
+from learnic.entities.user.models import UserID
+
+
+async def require_grants_within_actor_permissions(
+    *,
+    authorizer: Authorizer,
+    role_gateway: RoleGateway,
+    actor_id: UserID,
+    product_id: ProductID,
+    role_ids: list[RoleID],
+) -> None:
+    """Reject a grant that hands out permissions the actor lacks.
+
+    Privilege-escalation guard for every collaboration grant-assignment
+    path (invite-by-user / -email, update-grants, reinvite). Mirrors the
+    role create/update guard: the union of the permissions carried by
+    every role being granted, expanded through ``PERMISSION_IMPLIES``,
+    must be a subset of the actor's own effective permissions on the
+    product. The product owner — whose effective set is everything by
+    short-circuit — always passes.
+
+    The rank check (``RoleHierarchy.require_can_assign_roles``) is a
+    separate, complementary gate: a role may sit below the actor's rank
+    yet still carry a permission the actor does not hold, so both checks
+    are required.
+
+    Raises:
+        CannotGrantPermissionsBeyondOwnSetError: A requested permission
+            is outside the actor's effective set; HTTP 403.
+    """
+    actor_perms = await authorizer.effective_permissions(
+        actor_id,
+        AuthzTarget.for_product(product_id),
+    )
+    granted: set[Permission] = set()
+    for role_id in role_ids:
+        role = await role_gateway.with_id(role_id)
+        if role is None or role.permissions is None:
+            # Missing roles surface as EntityNotFound elsewhere; skip
+            # them here so this guard never silently widens the set.
+            continue
+        granted |= set(role.permissions.permissions)
+    requested = expand_implied(frozenset(granted))
+    if actor_perms is None or not requested.issubset(actor_perms.permissions):
+        raise CannotGrantPermissionsBeyondOwnSetError
 
 
 @dataclass(slots=True, frozen=True)

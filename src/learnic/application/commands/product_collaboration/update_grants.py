@@ -28,6 +28,7 @@ from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
+    require_grants_within_actor_permissions,
 )
 from learnic.entities.notification.enums import (
     NotificationCategory,
@@ -76,6 +77,7 @@ class UpdateCollaborationGrantsCommandHandler:
         self._hierarchy: Final = hierarchy
         self._collab_gateway: Final = collab_gateway
         self._collab_saver: Final = collab_saver
+        self._role_gateway: Final = role_gateway
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
         self._notifier: Final = notifier
         self._event_bus: Final = event_bus
@@ -103,6 +105,13 @@ class UpdateCollaborationGrantsCommandHandler:
             collab.product_id,
             data.actor_id,
             [spec.role_id for spec in data.grants],
+        )
+        await require_grants_within_actor_permissions(
+            authorizer=self._authorizer,
+            role_gateway=self._role_gateway,
+            actor_id=data.actor_id,
+            product_id=collab.product_id,
+            role_ids=[spec.role_id for spec in data.grants],
         )
         grants = await self._resolver.resolve(
             collab.product_id,

@@ -12,6 +12,11 @@ ids. Cascading deletes on the draft side fan out from
 ``note_modules`` (CASCADE → lessons → blocks → child rows), so
 a single ``DELETE FROM note_modules WHERE product_id = ?`` is
 all we need to wipe the draft.
+
+Block subtype routing goes through the shared :data:`BLOCK_SPECS`
+registry — the same source of truth the forward snapshotter uses —
+so every :class:`BlockType` is handled and adding a new variant is
+a single registry edit, not another branch here.
 """
 
 import uuid
@@ -26,12 +31,13 @@ from learnic.application.common.persistence.note_draft import (
 )
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_release.models import NoteRelease
+from learnic.infrastructure.persistence.blocks.registry import (
+    BLOCK_SPECS,
+    spec_for_row,
+)
 from learnic.infrastructure.persistence.models.note_block import (
-    code_blocks_table,
-    html_blocks_table,
-    katex_blocks_table,
     lesson_blocks_table,
-    rutube_video_blocks_table,
+    photo_collage_items_table,
 )
 from learnic.infrastructure.persistence.models.note_lesson import (
     note_lessons_table,
@@ -42,11 +48,18 @@ from learnic.infrastructure.persistence.models.note_module import (
 from learnic.infrastructure.persistence.models.note_release import (
     note_release_blocks_table,
     note_release_code_blocks_table,
+    note_release_file_blocks_table,
+    note_release_function_graph_blocks_table,
     note_release_html_blocks_table,
     note_release_katex_blocks_table,
     note_release_lessons_table,
     note_release_modules_table,
+    note_release_multi_choice_blocks_table,
+    note_release_photo_collage_blocks_table,
     note_release_rutube_video_blocks_table,
+    note_release_single_choice_blocks_table,
+    note_release_text_input_blocks_table,
+    note_release_video_file_blocks_table,
 )
 
 
@@ -57,7 +70,7 @@ class NoteDraftResetterAlchemy(NoteDraftResetter):
     @override
     async def reset(self, release: NoteRelease) -> None:
         # 1. Wipe current draft. CASCADE on FK chains takes care of
-        #    note_lessons → lesson_blocks → html/katex/video child rows.
+        #    note_lessons → lesson_blocks → all child rows.
         await self._session.execute(
             sa.delete(note_modules_table).where(
                 note_modules_table.c.product_id == release.product_id,
@@ -156,115 +169,163 @@ class NoteDraftResetterAlchemy(NoteDraftResetter):
         lesson_map: dict[uuid.UUID, uuid.UUID],
     ) -> None:
         rows = (
-            await self._session.execute(
-                sa.select(
-                    note_release_blocks_table.c.oid,
-                    note_release_blocks_table.c.release_lesson_id,
-                    note_release_blocks_table.c.type,
-                    note_release_blocks_table.c.position,
-                    note_release_html_blocks_table.c.html,
-                    note_release_katex_blocks_table.c.source,
-                    note_release_rutube_video_blocks_table.c.external_id.label(
-                        "rutube_external_id",
-                    ),
-                    note_release_rutube_video_blocks_table.c.title.label(
-                        "rutube_title",
-                    ),
-                    note_release_code_blocks_table.c.tabs.label(
-                        "code_tabs",
-                    ),
-                )
-                .select_from(
-                    note_release_blocks_table.outerjoin(
-                        note_release_html_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_html_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_katex_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_katex_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_rutube_video_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_rutube_video_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_code_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_code_blocks_table.c.oid,
-                    ),
-                )
-                .where(note_release_blocks_table.c.release_id == release.oid),
-            )
+            await self._session.execute(self._select_blocks(release))
         ).all()
         if not rows:
             return
 
-        block_map: dict[uuid.UUID, uuid.UUID] = {row.oid: uuid.uuid4() for row in rows}
+        block_map: dict[uuid.UUID, uuid.UUID] = {
+            row.oid: uuid.uuid4() for row in rows
+        }
 
-        parent_values: list[dict[str, Any]] = [
-            {
-                "oid": block_map[row.oid],
-                "lesson_id": lesson_map[row.release_lesson_id],
-                "product_id": release.product_id,
-                "type": row.type.value if hasattr(row.type, "value") else row.type,
-                "position": row.position,
-            }
-            for row in rows
-        ]
         await self._session.execute(
             sa.insert(lesson_blocks_table),
-            parent_values,
+            [
+                {
+                    "oid": block_map[row.oid],
+                    "lesson_id": lesson_map[row.release_lesson_id],
+                    "product_id": release.product_id,
+                    "type": (
+                        row.type.value
+                        if hasattr(row.type, "value")
+                        else row.type
+                    ),
+                    "position": row.position,
+                }
+                for row in rows
+            ],
         )
 
-        html_values: list[dict[str, Any]] = []
-        katex_values: list[dict[str, Any]] = []
-        rutube_values: list[dict[str, Any]] = []
-        code_values: list[dict[str, Any]] = []
+        # Route every block's subtype payload through the registry so a
+        # new BlockType is a single BLOCK_SPECS entry, never another
+        # branch here. The 10 column-backed subtypes share their column
+        # shape between the draft and release tables, so the registry's
+        # ``release_insert_value`` builder produces a draft-ready payload
+        # unchanged. Photo-collage is the sole exception: its items live
+        # in the ``photo_collage_items`` child table on the draft side
+        # (a denormalised JSONB column on the release side), so it is
+        # unpacked into child rows explicitly.
+        subtype_values: dict[sa.Table, list[dict[str, Any]]] = {
+            spec.draft_subtype_table: [] for spec in BLOCK_SPECS.values()
+        }
+        collage_item_values: list[dict[str, Any]] = []
         for row in rows:
             new_oid = block_map[row.oid]
-            block_type = (
-                row.type if isinstance(row.type, BlockType) else BlockType(row.type)
-            )
-            if block_type is BlockType.HTML:
-                html_values.append({"oid": new_oid, "html": row.html})
-            elif block_type is BlockType.KATEX:
-                katex_values.append({"oid": new_oid, "source": row.source})
-            elif block_type is BlockType.CODE:
-                code_values.append(
-                    {
-                        "oid": new_oid,
-                        "tabs": row.code_tabs,
-                    },
+            spec = spec_for_row(row)
+            if spec.kind is BlockType.PHOTO_COLLAGE:
+                subtype_values[spec.draft_subtype_table].append(
+                    {"oid": new_oid, "title": row.photo_collage_title},
                 )
-            else:  # RUTUBE_VIDEO
-                rutube_values.append(
-                    {
-                        "oid": new_oid,
-                        "external_id": row.rutube_external_id,
-                        "title": row.rutube_title,
-                    },
+                collage_item_values.extend(
+                    self._collage_item_values(
+                        new_oid,
+                        row.photo_collage_items,
+                    ),
+                )
+            else:
+                subtype_values[spec.draft_subtype_table].append(
+                    spec.release_insert_value(row, new_oid),
                 )
 
-        if html_values:
+        for table, values in subtype_values.items():
+            if values:
+                await self._session.execute(sa.insert(table), values)
+        if collage_item_values:
             await self._session.execute(
-                sa.insert(html_blocks_table),
-                html_values,
+                sa.insert(photo_collage_items_table),
+                collage_item_values,
             )
-        if katex_values:
-            await self._session.execute(
-                sa.insert(katex_blocks_table),
-                katex_values,
+
+    @staticmethod
+    def _collage_item_values(
+        block_oid: uuid.UUID,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        # Release items are the canonical ``{"oid", "file_id", "caption"}``
+        # JSONB triple with no stored position — array order IS the order.
+        # Item ids are regenerated so the restored draft stays disjoint
+        # from the snapshot, mirroring the fresh module/lesson/block ids.
+        values: list[dict[str, Any]] = []
+        for position, item in enumerate(items):
+            raw_file_id = item.get("file_id")
+            values.append(
+                {
+                    "oid": uuid.uuid4(),
+                    "block_id": block_oid,
+                    "position": position,
+                    "file_id": (
+                        uuid.UUID(raw_file_id)
+                        if raw_file_id is not None
+                        else None
+                    ),
+                    "caption": item.get("caption"),
+                },
             )
-        if rutube_values:
-            await self._session.execute(
-                sa.insert(rutube_video_blocks_table),
-                rutube_values,
+        return values
+
+    @staticmethod
+    def _select_blocks(release: NoteRelease) -> sa.Select[Any]:
+        # Reverse of NoteReleaseSnapshotterAlchemy's forward block SELECT:
+        # read every release subtype table under the labels the registry's
+        # row dispatchers expect, so spec_for_row / release_insert_value
+        # work unchanged on these rows. Local aliases keep the join under
+        # the 79-col limit given the long ``note_release_*`` table names.
+        b = note_release_blocks_table
+        html_t = note_release_html_blocks_table
+        katex_t = note_release_katex_blocks_table
+        rutube_t = note_release_rutube_video_blocks_table
+        code_t = note_release_code_blocks_table
+        fgraph_t = note_release_function_graph_blocks_table
+        single_t = note_release_single_choice_blocks_table
+        multi_t = note_release_multi_choice_blocks_table
+        text_t = note_release_text_input_blocks_table
+        file_t = note_release_file_blocks_table
+        video_t = note_release_video_file_blocks_table
+        collage_t = note_release_photo_collage_blocks_table
+        return (
+            sa.select(
+                b.c.oid,
+                b.c.release_lesson_id,
+                b.c.type,
+                b.c.position,
+                html_t.c.html,
+                katex_t.c.source,
+                rutube_t.c.external_id.label("rutube_external_id"),
+                rutube_t.c.title.label("rutube_title"),
+                code_t.c.tabs.label("code_tabs"),
+                single_t.c.options.label("single_choice_options"),
+                single_t.c.correct_option_id.label(
+                    "single_choice_correct_option_id",
+                ),
+                multi_t.c.options.label("multi_choice_options"),
+                multi_t.c.correct_option_ids.label(
+                    "multi_choice_correct_option_ids",
+                ),
+                text_t.c.accepted_answers.label(
+                    "text_input_accepted_answers",
+                ),
+                text_t.c.case_sensitive.label("text_input_case_sensitive"),
+                text_t.c.trim_whitespace.label("text_input_trim_whitespace"),
+                file_t.c.file_id.label("file_block_file_id"),
+                file_t.c.title.label("file_block_title"),
+                video_t.c.file_id.label("video_file_block_file_id"),
+                video_t.c.title.label("video_file_block_title"),
+                collage_t.c["items"].label("photo_collage_items"),
+                collage_t.c.title.label("photo_collage_title"),
+                fgraph_t.c.config.label("function_graph_config"),
             )
-        if code_values:
-            await self._session.execute(
-                sa.insert(code_blocks_table),
-                code_values,
+            .select_from(
+                b.outerjoin(html_t, b.c.oid == html_t.c.oid)
+                .outerjoin(katex_t, b.c.oid == katex_t.c.oid)
+                .outerjoin(rutube_t, b.c.oid == rutube_t.c.oid)
+                .outerjoin(code_t, b.c.oid == code_t.c.oid)
+                .outerjoin(single_t, b.c.oid == single_t.c.oid)
+                .outerjoin(multi_t, b.c.oid == multi_t.c.oid)
+                .outerjoin(text_t, b.c.oid == text_t.c.oid)
+                .outerjoin(file_t, b.c.oid == file_t.c.oid)
+                .outerjoin(video_t, b.c.oid == video_t.c.oid)
+                .outerjoin(collage_t, b.c.oid == collage_t.c.oid)
+                .outerjoin(fgraph_t, b.c.oid == fgraph_t.c.oid),
             )
+            .where(b.c.release_id == release.oid)
+        )

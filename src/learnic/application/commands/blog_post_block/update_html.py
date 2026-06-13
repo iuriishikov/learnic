@@ -47,7 +47,7 @@ class UpdateBlogHtmlBlockCommandHandler:
                 actual=block.type.value,
             )
 
-        sanitized = self._html_sanitizer.sanitize(data.html)
+        sanitized = await self._html_sanitizer.sanitize(data.html)
         block.update_html(BlogHtmlContent(sanitized))
         await self._block_gateway.update_html(block)
         await self._transaction.commit()

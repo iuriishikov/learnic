@@ -53,13 +53,16 @@ def _make_file(size: int, *, deleted: bool) -> File:
     )
 
 
-def _make_upload_service(files_gateway: AsyncMock) -> FileUploadService:
+def _make_upload_service(
+    files_gateway: AsyncMock,
+    task_scheduler: AsyncMock | None = None,
+) -> FileUploadService:
     return FileUploadService(
         transaction=AsyncMock(),
         entity_saver=MagicMock(),
         file_storage=AsyncMock(),
         files_gateway=files_gateway,
-        task_scheduler=AsyncMock(),
+        task_scheduler=task_scheduler or AsyncMock(),
         default_bucket=DefaultStorageBucket("test-bucket"),
     )
 
@@ -101,6 +104,48 @@ async def test_previous_file_size_returns_size_for_live_file() -> None:
     service = _make_upload_service(files_gateway)
 
     assert await service.previous_file_size(live.oid) == 4096
+
+
+# ---- FileUploadService.soft_delete_previous release guard ---- #
+
+
+async def test_soft_delete_previous_purges_unpinned_file() -> None:
+    # No release pins it: mark the row deleted, queue the S3 purge,
+    # and report the eviction so the caller can credit freed bytes.
+    live = _make_file(4096, deleted=False)
+    files_gateway = AsyncMock()
+    files_gateway.with_id.return_value = live
+    files_gateway.is_referenced_by_release.return_value = False
+    task_scheduler = AsyncMock()
+    service = _make_upload_service(files_gateway, task_scheduler)
+
+    evicted = await service.soft_delete_previous(live.oid)
+
+    assert evicted is True
+    assert live.is_deleted
+    schedule = task_scheduler.schedule_purge_file_from_storage
+    schedule.assert_awaited_once_with(live.oid)
+
+
+async def test_soft_delete_previous_keeps_release_pinned_file() -> None:
+    # A published release still pins this exact blob — releases share
+    # the file, they do not copy it. The file must stay fully intact,
+    # not even soft-deleted, so it remains visible to release reads and
+    # the quota aggregate; the caller is told nothing was evicted.
+    live = _make_file(4096, deleted=False)
+    files_gateway = AsyncMock()
+    files_gateway.with_id.return_value = live
+    files_gateway.is_referenced_by_release.return_value = True
+    task_scheduler = AsyncMock()
+    service = _make_upload_service(files_gateway, task_scheduler)
+
+    evicted = await service.soft_delete_previous(live.oid)
+
+    assert evicted is False
+    assert not live.is_deleted
+    files_gateway.is_referenced_by_release.assert_awaited_once_with(live.oid)
+    schedule = task_scheduler.schedule_purge_file_from_storage
+    schedule.assert_not_called()
 
 
 # ---- handler wiring (fixtures: fake_file_uploads, fake_entitlement,

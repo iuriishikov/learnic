@@ -69,6 +69,11 @@ def fake_file_uploads() -> AsyncMock:
 
     svc = MagicMock()
     svc.upload_stream = AsyncMock(side_effect=_build_file)
+    # Avatar / cover / icon flows go through the image-only variant; it
+    # enforces the ``image/*`` content type before delegating to
+    # ``upload_stream`` (that enforcement is unit-tested on the service
+    # itself, so here it is a thin stub returning a real ``File``).
+    svc.upload_image_stream = AsyncMock(side_effect=_build_file)
     svc.soft_delete_previous = AsyncMock()
     return svc
 

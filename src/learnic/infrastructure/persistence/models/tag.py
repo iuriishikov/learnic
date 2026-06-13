@@ -1,4 +1,5 @@
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import composite
 
 from learnic.entities.tag.constants import (
@@ -28,10 +29,16 @@ tags_table = sa.Table(
         nullable=False,
         server_default=sa.func.now(),
     ),
+    # Full-text + fuzzy search over the tag ``name``. DB-managed by the
+    # ``refresh_tag_search`` trigger (migration ``tagsearch0001``) and
+    # excluded from the entity mapping.
+    sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
+    sa.Column("search_text", sa.Text(), nullable=True),
     sa.UniqueConstraint("slug", name="uq_tags_slug"),
-    # Powers the autocomplete ``LIKE :q || '%'`` lookup; the
-    # case-insensitive collation is irrelevant because the slug
-    # is already lower-cased at insert time.
+    # Slug lookups for dedup on tag creation (``with_slug``); the
+    # case-insensitive collation is irrelevant because the slug is
+    # already lower-cased at insert time. (Autocomplete now goes
+    # through the GIN trigram / tsvector indexes, not this one.)
     sa.Index("ix_tags_slug", "slug"),
 )
 
@@ -83,6 +90,8 @@ def map_tag_table() -> None:
             "created_by": tags_table.c.created_by,
             "created_at": tags_table.c.created_at,
         },
+        # DB-managed search columns are not part of the domain entity.
+        exclude_properties=["search_vector", "search_text"],
         column_prefix="_col_",
     )
     _tag_mapped = True

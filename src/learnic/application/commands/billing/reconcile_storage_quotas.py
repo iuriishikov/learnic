@@ -274,9 +274,14 @@ class ReconcileStorageQuotasCommandHandler:
         for ref in candidates:
             if freed >= to_free:
                 break
-            await self._file_uploads.soft_delete_previous(ref.file_id)
-            freed += ref.size_bytes
-            deleted_count += 1
+            # soft_delete_previous spares files a published release
+            # still pins (it shares the exact blob) — releases stay
+            # immutable even under enforcement. Only credit the bytes
+            # it actually evicted, and keep walking so a spared file
+            # does not stall reclamation of the next candidate.
+            if await self._file_uploads.soft_delete_previous(ref.file_id):
+                freed += ref.size_bytes
+                deleted_count += 1
 
         # Drop the breach: this enforcement pass should bring the
         # author back under cap. If somehow it didn't (race with

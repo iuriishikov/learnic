@@ -35,7 +35,9 @@ class ResetNoteDraftCommandHandler:
     """Discard the current draft and rehydrate it from a release snapshot.
 
     Behavior:
-        1. Verify the actor owns the note product.
+        1. Authorize the actor: requires ``MANAGE_RELEASES`` on the
+           product (the owner has it implicitly; a collaborator with a
+           role granting it is allowed too — this is NOT author-only).
         2. Verify ``release_id`` exists and belongs to the same product
            — guards against pointing at another product's release.
         3. Wipe current draft (modules cascade lessons / blocks /

@@ -109,3 +109,20 @@ class Authorizer(Protocol):
         through :data:`PERMISSION_IMPLIES`.
         """
         ...
+
+    async def manage_collaborators_for_products(
+        self,
+        actor: UserID,
+        product_ids: set[ProductID],
+    ) -> dict[ProductID, bool]:
+        """Batch: does ``actor`` hold ``MANAGE_COLLABORATORS`` per product?
+
+        Equivalent to calling :meth:`effective_permissions` once per
+        product and testing for ``MANAGE_COLLABORATORS``, but resolved
+        in a constant number of queries instead of O(N) — used by the
+        notifications reader to hydrate the "can re-invite" flag on a
+        cursor page without an N+1 against the authorizer. Every input
+        id appears in the result; absent / unknown products map to
+        ``False``.
+        """
+        ...

@@ -18,7 +18,8 @@ from learnic.entities.product_collaboration.models import (
 )
 from learnic.entities.product_collaboration.value_objects import InviteToken
 from learnic.entities.role.ids import RoleID
-from learnic.entities.role.permissions import ScopeType
+from learnic.entities.role.permissions import Permission, ScopeType
+from learnic.entities.role.value_objects import PermissionSet
 from learnic.entities.user.models import User, UserID
 from learnic.entities.user.value_objects import (
     Email,
@@ -41,7 +42,11 @@ def fake_transaction() -> AsyncMock:
 def fake_authorizer() -> AsyncMock:
     az = AsyncMock()
     az.require = AsyncMock()
-    az.effective_permissions = AsyncMock(return_value=None)
+    # Treat the actor as the product owner (every permission) so the
+    # grant-subset escalation guard passes on the happy paths.
+    az.effective_permissions = AsyncMock(
+        return_value=PermissionSet(frozenset(Permission)),
+    )
     return az
 
 

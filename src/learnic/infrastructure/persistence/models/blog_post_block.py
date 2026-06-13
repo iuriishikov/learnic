@@ -46,6 +46,7 @@ blog_post_blocks_table = sa.Table(
             BlogPostBlockType,
             name="blog_post_block_type",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),

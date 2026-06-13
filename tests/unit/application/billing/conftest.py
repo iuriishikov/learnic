@@ -12,10 +12,19 @@ names so wiring up a handler in a test reads naturally::
     )
 """
 
+import uuid
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from learnic.application.billing.entitlement import EntitlementService
+from learnic.entities.user.models import User, UserID
+from learnic.entities.user.value_objects import (
+    Email,
+    FirstName,
+    LastName,
+    PasswordHash,
+)
 
 
 @pytest.fixture
@@ -41,7 +50,29 @@ def fake_entity_saver() -> MagicMock:
 def fake_subscription_gateway() -> AsyncMock:
     gw = AsyncMock()
     gw.current_for_user = AsyncMock(return_value=None)
+    gw.active_for_user = AsyncMock(return_value=[])
     return gw
+
+
+@pytest.fixture
+def fake_user_gateway() -> AsyncMock:
+    gateway = AsyncMock()
+    gateway.with_id = AsyncMock()
+    return gateway
+
+
+@pytest.fixture
+def target_user() -> User:
+    """A plain user standing in for a subscription grant recipient."""
+    return User(
+        oid=UserID(uuid.uuid4()),
+        email=Email("student@example.com"),
+        first_name=FirstName("Anna"),
+        last_name=LastName("Petrova"),
+        patronymic=None,
+        password_hash=PasswordHash("hashed"),
+        email_verified=True,
+    )
 
 
 @pytest.fixture
@@ -101,6 +132,10 @@ def fake_notification_publisher() -> AsyncMock:
 def fake_files_gateway() -> AsyncMock:
     gw = AsyncMock()
     gw.with_id = AsyncMock(return_value=None)
+    # Default to "no release pins this file" so the purge worker's
+    # release guard lets the happy-path tests proceed; tests that
+    # exercise the guard override this to ``True``.
+    gw.is_referenced_by_release = AsyncMock(return_value=False)
     gw.delete = AsyncMock()
     return gw
 

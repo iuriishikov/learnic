@@ -281,9 +281,21 @@ class ProductCollaborationReaderAlchemy(ProductCollaborationReader):
         product_id: ProductID,
         pagination: Pagination,
     ) -> list[ProductCollaborationView]:
+        # Only live rows (pending invites + active collaborators) —
+        # terminal DECLINED/REVOKED rows are audit trail, not team
+        # members, and including them would both surprise the SPA and
+        # let dead rows push live ones past the offset window.
         stmt = (
             self._select_with_user()
-            .where(product_collaborations_table.c.product_id == product_id)
+            .where(
+                product_collaborations_table.c.product_id == product_id,
+                product_collaborations_table.c.status.in_(
+                    [
+                        CollaborationStatus.PENDING_INVITE.value,
+                        CollaborationStatus.ACTIVE.value,
+                    ],
+                ),
+            )
             .order_by(product_collaborations_table.c.created_at.desc())
             .limit(pagination.limit)
             .offset(pagination.offset)

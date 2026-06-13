@@ -26,6 +26,14 @@ class SubscribePushCommandHandler:
     on file always match what the browser would expect on the next
     delivery. New ``endpoint`` strings (different device, or a
     rotated subscription) create a fresh row owned by the same user.
+
+    The per-user device cap (``PUSH_SUBSCRIPTION_LIMIT``) is enforced
+    **best-effort**: the count-then-insert is not serialised, so two
+    concurrent subscribes from the same user can each pass the check
+    and leave them marginally over the cap. This is intentional — the
+    cap is a self-targeted guard with no security or data-integrity
+    impact, so the cost of a per-user advisory lock on this hot path
+    is not justified.
     """
 
     def __init__(

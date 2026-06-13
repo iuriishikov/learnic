@@ -30,6 +30,7 @@ enrollments_table = sa.Table(
             EnrollmentKind,
             name="enrollment_kind",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),
@@ -51,6 +52,7 @@ enrollments_table = sa.Table(
             EnrollmentStatus,
             name="enrollment_status",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
         server_default=EnrollmentStatus.ACTIVE.value,
@@ -89,7 +91,12 @@ enrollment_note_details_table = sa.Table(
         sa.Uuid,
         sa.ForeignKey(
             "note_releases.oid",
-            ondelete="RESTRICT",
+            # CASCADE (not RESTRICT): a release is only ever deleted as
+            # part of a full-note hard-delete, where this pinning row's
+            # enrollment is deleted too. RESTRICT here aborted the
+            # admin note-delete cascade with an IntegrityError. See
+            # migration ``notedel0001``.
+            ondelete="CASCADE",
             name="fk_enrollment_note_details_release_id",
         ),
         nullable=True,

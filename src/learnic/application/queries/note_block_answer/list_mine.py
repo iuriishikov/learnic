@@ -2,10 +2,10 @@
 
 Backs the SPA's "restore my progress" call: returns the learner's
 persisted submissions for the release they are pinned to, so the
-reader can pre-fill selections + verdicts. Mirrors the release
-resolution in :class:`GetNoteContentQueryHandler` (active enrollment →
-pinned release) so the answers always line up with the content the
-student is actually viewing.
+reader can pre-fill selections + verdicts. Mirrors the pinned-release
+resolution of the student read flow (scheme + per-lesson blocks:
+active enrollment → pinned release) so the answers always line up
+with the content the student is actually viewing.
 
 Not an error path: a caller who is signed in but not actively enrolled
 (or whose product is not a note) simply has no saved answers, so the

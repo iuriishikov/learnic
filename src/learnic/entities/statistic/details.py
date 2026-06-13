@@ -1,7 +1,23 @@
 from dataclasses import dataclass
 
 from learnic.entities.product.ids import ProductID
+from learnic.entities.statistic.constants import REFERRER_MAX_LEN
 from learnic.entities.user.models import UserID
+
+
+def _truncate_referrer(referrer: str | None) -> str | None:
+    """Clamp a raw ``Referer`` header to ``REFERRER_MAX_LEN``.
+
+    Real URLs with query strings routinely exceed the column width;
+    without this clamp the oversized value reaches the
+    ``sa.String(REFERRER_MAX_LEN)`` insert and raises
+    ``StringDataRightTruncation``, which the stats collector swallows —
+    silently dropping the whole statistic row. Truncating here makes the
+    documented truncation contract real and keeps the row writable.
+    """
+    if referrer is None:
+        return None
+    return referrer[:REFERRER_MAX_LEN]
 
 
 @dataclass(slots=True)
@@ -33,6 +49,9 @@ class ProfileViewDetails(StatisticDetails):
     target_user_id: UserID
     referrer: str | None
 
+    def __post_init__(self) -> None:
+        self.referrer = _truncate_referrer(self.referrer)
+
 
 @dataclass(slots=True)
 class ProductViewDetails(StatisticDetails):
@@ -45,6 +64,9 @@ class ProductViewDetails(StatisticDetails):
 
     product_id: ProductID
     referrer: str | None
+
+    def __post_init__(self) -> None:
+        self.referrer = _truncate_referrer(self.referrer)
 
 
 @dataclass(slots=True)

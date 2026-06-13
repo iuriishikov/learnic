@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.anon_rate_limit import (
+    AnonymousEmailRateLimiter,
+)
 from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
@@ -52,6 +55,7 @@ class ResendVerificationCommandHandler:
         email_tokens: EmailTokenStore,
         notifier: Notifier,
         config: SecurityPolicies,
+        anon_rate_limiter: AnonymousEmailRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
@@ -59,6 +63,7 @@ class ResendVerificationCommandHandler:
         self._email_tokens: Final = email_tokens
         self._notifier: Final = notifier
         self._config: Final = config
+        self._anon_rate_limiter: Final = anon_rate_limiter
 
     async def run(self, data: ResendVerificationCommand) -> None:
         user_id = await self._signup_sessions.resolve(
@@ -73,6 +78,7 @@ class ResendVerificationCommandHandler:
         if user.email_verified:
             return
 
+        await self._anon_rate_limiter.check(user.email.value)
         raw_token = await self._email_tokens.issue(
             user.oid,
             EmailTokenPurpose.VERIFY,

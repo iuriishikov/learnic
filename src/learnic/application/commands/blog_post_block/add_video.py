@@ -65,11 +65,10 @@ class AddBlogVideoBlockCommandHandler:
                 actual=data.upload.content_type,
             )
 
-        file = await self._file_uploads.upload_stream(
-            data.upload,
-            data.actor_id,
-        )
-
+        # Gate the block-count limit BEFORE streaming bytes to storage so
+        # an over-limit post rejects cheaply instead of orphaning a
+        # discarded upload. Lock held across the upload keeps the count
+        # authoritative through insert.
         title = (
             BlogBlockCaption(data.title)
             if data.title is not None
@@ -79,6 +78,11 @@ class AddBlogVideoBlockCommandHandler:
         existing = await self._block_gateway.list_for_post(data.post_id)
         BLOG_POST_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
+
+        file = await self._file_uploads.upload_stream(
+            data.upload,
+            data.actor_id,
+        )
 
         block = BlogVideoBlock.create(
             post_id=data.post_id,

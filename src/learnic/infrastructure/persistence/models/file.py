@@ -39,7 +39,14 @@ files_table = sa.Table(
     sa.Column(
         "uploaded_by",
         sa.Uuid,
-        sa.ForeignKey("users.oid", ondelete="CASCADE"),
+        # RESTRICT (not CASCADE): a future hard-delete of a user must NOT
+        # silently drop their ``files`` rows (and, via file_blocks /
+        # video_file_blocks CASCADE, the blocks) — that would bypass
+        # soft_delete_previous, the release-pin guard, and the S3 purge,
+        # orphaning blobs and stripping media from other authors' notes
+        # the user only collaborated on. Any future user-deletion saga
+        # must route file removal through soft_delete_previous first.
+        sa.ForeignKey("users.oid", ondelete="RESTRICT"),
         nullable=False,
     ),
     sa.Column(

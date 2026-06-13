@@ -11,10 +11,7 @@ from learnic.application.common.persistence.tag import (
     ProductTagsSaver,
     TagGateway,
 )
-from learnic.application.common.persistence.transaction import (
-    EntitySaver,
-    Transaction,
-)
+from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.product_events import (
     ProductEventBus,
     TagsChangedPayload,
@@ -26,7 +23,7 @@ from learnic.entities.tag.constants import PRODUCT_TAGS_MAX
 from learnic.entities.tag.errors import TooManyTagsError
 from learnic.entities.tag.ids import TagID
 from learnic.entities.tag.models import Tag
-from learnic.entities.tag.value_objects import TagColor, TagName, TagSlug
+from learnic.entities.tag.value_objects import TagColor, TagName
 from learnic.entities.user.models import UserID
 
 
@@ -78,7 +75,6 @@ class UpdateProductTagsCommandHandler:
         self,
         transaction: Transaction,
         authorizer: Authorizer,
-        entity_saver: EntitySaver,
         product_gateway: ProductGateway,
         tag_gateway: TagGateway,
         product_tags_saver: ProductTagsSaver,
@@ -86,7 +82,6 @@ class UpdateProductTagsCommandHandler:
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
-        self._entity_saver: Final = entity_saver
         self._product_gateway: Final = product_gateway
         self._tag_gateway: Final = tag_gateway
         self._product_tags_saver: Final = product_tags_saver
@@ -146,10 +141,8 @@ class UpdateProductTagsCommandHandler:
 
         name = TagName(spec.name)
         color = TagColor(spec.color)
-        slug = TagSlug.from_name(name)
-        existing = await self._tag_gateway.with_slug(slug)
-        if existing is not None:
-            return existing
+        # Atomic get-or-create so two students tagging with the same new
+        # name concurrently both resolve to one tag row instead of one
+        # of them hitting uq_tags_slug → 500.
         new_tag = Tag.create(name=name, color=color, created_by=actor_id)
-        self._entity_saver.add_one(new_tag)
-        return new_tag
+        return await self._tag_gateway.get_or_create_by_slug(new_tag)

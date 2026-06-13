@@ -10,16 +10,30 @@ class PasswordHasher(Protocol):
     application handlers only depend on this interface.
     """
 
-    def hash(self, raw: RawPassword) -> PasswordHash:
-        """Return the encoded hash of ``raw``."""
+    async def hash(self, raw: RawPassword) -> PasswordHash:
+        """Return the encoded hash of ``raw``.
+
+        Awaitable so the memory-hard KDF runs off the event loop (the
+        adapter offloads it to a worker thread).
+        """
         ...
 
-    def verify(self, raw: RawPassword, stored: PasswordHash) -> bool:
+    async def verify(self, raw: RawPassword, stored: PasswordHash) -> bool:
         """Return ``True`` if ``raw`` matches ``stored``.
 
         Returns ``False`` on mismatch rather than raising; implementations
         should not leak timing differences between unknown-user and
-        wrong-password paths.
+        wrong-password paths. Awaitable so the KDF runs off the event loop.
+        """
+        ...
+
+    async def verify_dummy(self, raw: RawPassword) -> None:
+        """Verify ``raw`` against a fixed decoy hash and discard the result.
+
+        Callers use this on the unknown-user branch of login so that the
+        response latency matches the existing-user (real ``verify``) path,
+        preventing timing-based account enumeration. Awaitable so the decoy
+        KDF runs off the event loop, exactly like ``verify``.
         """
         ...
 

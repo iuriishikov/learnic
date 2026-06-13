@@ -25,6 +25,7 @@ def _build_handler(
     signup_sessions: AsyncMock,
     notifier: AsyncMock,
     config: SecurityConfig,
+    anon_rate_limiter: AsyncMock,
 ) -> RegisterCommandHandler:
     return RegisterCommandHandler(
         transaction=transaction,
@@ -35,6 +36,7 @@ def _build_handler(
         signup_sessions=signup_sessions,
         notifier=notifier,
         config=config,
+        anon_rate_limiter=anon_rate_limiter,
     )
 
 
@@ -47,6 +49,7 @@ async def test_register_success_mints_tokens_and_notifies(
     fake_signup_sessions: AsyncMock,
     fake_notifier: AsyncMock,
     security_config: SecurityConfig,
+    fake_anon_rate_limiter: AsyncMock,
 ) -> None:
     fake_user_gateway.with_email.return_value = None
 
@@ -59,6 +62,7 @@ async def test_register_success_mints_tokens_and_notifies(
         signup_sessions=fake_signup_sessions,
         notifier=fake_notifier,
         config=security_config,
+        anon_rate_limiter=fake_anon_rate_limiter,
     )
     result = await handler.run(
         RegisterCommand(
@@ -94,6 +98,7 @@ async def test_register_rejects_existing_email(
     fake_signup_sessions: AsyncMock,
     fake_notifier: AsyncMock,
     security_config: SecurityConfig,
+    fake_anon_rate_limiter: AsyncMock,
     verified_user,
 ) -> None:
     fake_user_gateway.with_email.return_value = verified_user
@@ -107,6 +112,7 @@ async def test_register_rejects_existing_email(
         signup_sessions=fake_signup_sessions,
         notifier=fake_notifier,
         config=security_config,
+        anon_rate_limiter=fake_anon_rate_limiter,
     )
 
     with pytest.raises(EmailAlreadyRegisteredError):

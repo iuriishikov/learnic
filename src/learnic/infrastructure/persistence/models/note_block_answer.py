@@ -18,10 +18,11 @@ Schema lifecycle in this codebase is migration-driven, not metadata
 ``nbansw0001`` (columns inlined there), and reaches the running Python
 process via the import chain ``adapters/note_block_answer`` ->
 ``ioc`` so the Core statements can reference the ``sa.Table`` object.
-It is **not** part of Alembic's autogenerate ``target_metadata``
-(``alembic/env.py`` imports only a handful of model modules), so drift
-on this table is not autodetected — same as the other unmapped subtype
-tables. Any schema change here is a new hand-written migration.
+This ``sa.Table`` IS registered on ``mapper_registry.metadata`` like
+every other table, and ``alembic/env.py`` now imports every ``models/*``
+submodule, so it is part of ``target_metadata`` and autogenerate would
+see it. Migrations remain hand-written by convention, but autogenerate
+is no longer dangerously blind to this (or any) table.
 """
 
 import sqlalchemy as sa

@@ -408,6 +408,73 @@ async def test_grace_elapsed_enforces_lifo(
     fake_quota_publisher.usage_changed.assert_awaited_once_with(user_id)
 
 
+async def test_enforce_spares_release_pinned_files(
+    fake_transaction: AsyncMock,
+    fake_entity_saver: MagicMock,
+    fake_file_usage_reader: AsyncMock,
+    fake_breach_gateway: AsyncMock,
+    fake_author_files_reader: AsyncMock,
+    fake_file_uploads: AsyncMock,
+    fake_notification_publisher: AsyncMock,
+    fake_global_scheduler_lock: AsyncMock,
+) -> None:
+    # Enforcement must not strip media out of a published release.
+    # f1 is pinned by a release, so soft_delete_previous spares it
+    # (returns False); the job keeps walking and credits only the
+    # bytes of files it actually evicted (f2 + f3).
+    user_id = UserID(uuid.uuid4())
+    cap = _FREE_PLAN.limits.storage_bytes_max
+    used = cap + 700 * 1024 * 1024
+    over = used - cap  # 700 MB
+    breach = _make_breach(
+        user_id=user_id,
+        detected_at=datetime.now(timezone.utc) - timedelta(days=20),
+        over_bytes=over,
+    )
+    f1 = AuthorFileRef(
+        file_id=FileID(uuid.uuid4()),
+        size_bytes=500 * 1024 * 1024,
+    )
+    f2 = AuthorFileRef(
+        file_id=FileID(uuid.uuid4()),
+        size_bytes=400 * 1024 * 1024,
+    )
+    f3 = AuthorFileRef(
+        file_id=FileID(uuid.uuid4()),
+        size_bytes=300 * 1024 * 1024,
+    )
+
+    def _spare_f1(file_id: FileID) -> bool:
+        return file_id != f1.file_id
+
+    fake_file_uploads.soft_delete_previous.side_effect = _spare_f1
+    fake_file_usage_reader.usage_by_all_authors.return_value = {user_id: used}
+    fake_breach_gateway.all_open.return_value = [breach]
+    fake_author_files_reader.newest_first.return_value = [f1, f2, f3]
+    fake_quota_publisher = AsyncMock()
+    handler = _build_handler(
+        transaction=fake_transaction,
+        entity_saver=fake_entity_saver,
+        entitlement=_entitlement_returning(_FREE_PLAN),
+        file_usage=fake_file_usage_reader,
+        breaches=fake_breach_gateway,
+        author_files=fake_author_files_reader,
+        file_uploads=fake_file_uploads,
+        publisher=fake_notification_publisher,
+        scheduler_lock=fake_global_scheduler_lock,
+        quota_publisher=fake_quota_publisher,
+    )
+
+    summary = await handler.run(ReconcileStorageQuotasCommand())
+
+    assert summary.enforcements == 1
+    # All three were attempted; f1 spared, f2 + f3 evicted (700 MB).
+    assert fake_file_uploads.soft_delete_previous.await_count == 3
+    notification = fake_notification_publisher.publish.call_args.args[0]
+    assert notification.details.deleted_files_count == 2
+    assert notification.details.freed_bytes == 700 * 1024 * 1024
+
+
 async def test_detected_at_preserved_on_refresh(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,

@@ -1,6 +1,7 @@
 from typing import Any, Final
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
@@ -52,6 +53,29 @@ class TagMapperAlchemy(TagGateway):
         stmt = sa.select(Tag).where(tags_table.c.slug == slug.value)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
+    @override
+    async def get_or_create_by_slug(self, tag: Tag) -> Tag:
+        # Atomic get-or-create: ``INSERT ... ON CONFLICT (slug) DO
+        # NOTHING`` serialises on the (possibly uncommitted) conflicting
+        # row, so two concurrent first-uses of the same slug no longer
+        # race into a ``uq_tags_slug`` IntegrityError → 500. The
+        # follow-up SELECT returns whichever row won (the existing tag or
+        # the one we just inserted), so the result is never ``None``.
+        stmt = pg_insert(tags_table).values(
+            oid=tag.oid,
+            name=tag.name.value,
+            slug=tag.slug.value,
+            color=tag.color.value,
+            created_by=tag.created_by,
+            created_at=tag.created_at,
+        )
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=[tags_table.c.slug],
+        )
+        await self._session.execute(stmt)
+        persisted = await self.with_slug(tag.slug)
+        return persisted if persisted is not None else tag
+
 
 class TagReaderAlchemy(TagReader):
     def __init__(self, session: AsyncSession) -> None:
@@ -64,16 +88,60 @@ class TagReaderAlchemy(TagReader):
         pagination: Pagination,
     ) -> list[TagView]:
         normalized = " ".join(query.split()).lower()
-        stmt = sa.select(tags_table)
-        if normalized:
-            # Substring match on slug — the slug is already lower-cased
-            # and whitespace-collapsed at insert, so a plain LIKE
-            # works without ILIKE/COLLATE gymnastics.
-            stmt = stmt.where(
-                tags_table.c.slug.like(f"%{normalized}%"),
+        # Empty query → the full tag pool, name-ordered (the SPA's
+        # "browse all" state; the popularity row comes from ``popular``).
+        if not normalized:
+            stmt = (
+                sa.select(
+                    tags_table.c.oid,
+                    tags_table.c.name,
+                    tags_table.c.color,
+                )
+                .order_by(tags_table.c.name.asc())
+                .limit(pagination.limit)
+                .offset(pagination.offset)
             )
+            rows = (await self._session.execute(stmt)).all()
+            return [_row_to_view(row) for row in rows]
+
+        # Full-text + trigram fuzzy over the tag ``name`` — the same
+        # engine as user/product search. ``search_text`` is stored
+        # lower-cased, so the query is lowered too (trigram ops are
+        # case-sensitive; tsvector matching is dictionary-driven).
+        await self._session.execute(
+            sa.text("SET LOCAL pg_trgm.word_similarity_threshold = 0.4"),
+        )
+        russian_regconfig: sa.ColumnElement[str] = sa.literal_column(
+            "'russian'::regconfig",
+        )
+        tsq = sa.func.websearch_to_tsquery(russian_regconfig, normalized)
+        rank_ts = sa.func.ts_rank_cd(
+            tags_table.c.search_vector, tsq,
+        ).label("rank_ts")
+        rank_trgm = sa.func.word_similarity(
+            normalized, tags_table.c.search_text,
+        ).label("rank_trgm")
         stmt = (
-            stmt.order_by(tags_table.c.name.asc())
+            sa.select(
+                tags_table.c.oid,
+                tags_table.c.name,
+                tags_table.c.color,
+                rank_ts,
+                rank_trgm,
+            )
+            .where(
+                sa.or_(
+                    tags_table.c.search_vector.op("@@")(tsq),
+                    tags_table.c.search_text.op("%>")(normalized),
+                )
+            )
+            # tsvector (morphology) twice the weight of trigram (typos);
+            # tie-break by name then ``oid`` for stable pagination.
+            .order_by(
+                (rank_ts * sa.literal(2.0) + rank_trgm).desc(),
+                tags_table.c.name.asc(),
+                tags_table.c.oid.asc(),
+            )
             .limit(pagination.limit)
             .offset(pagination.offset)
         )

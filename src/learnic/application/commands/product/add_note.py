@@ -76,7 +76,9 @@ class AddNoteProductCommandHandler:
         ):
             raise ProductNameAlreadyTakenError(name.value)
 
-        description = self._maybe_sanitize_description(data.description_html)
+        description = await self._maybe_sanitize_description(
+            data.description_html,
+        )
 
         cover_file_id = await self._maybe_upload_cover(
             data.cover,
@@ -98,13 +100,13 @@ class AddNoteProductCommandHandler:
         await self._transaction.commit()
         return product.oid
 
-    def _maybe_sanitize_description(
+    async def _maybe_sanitize_description(
         self,
         description_html: str | None,
     ) -> ProductDescription | None:
         if description_html is None:
             return None
-        sanitized = self._html_sanitizer.sanitize(description_html)
+        sanitized = await self._html_sanitizer.sanitize(description_html)
         return ProductDescription(sanitized)
 
     async def _maybe_upload_cover(

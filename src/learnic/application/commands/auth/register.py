@@ -1,9 +1,13 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Final, final
 
 from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
+)
+from learnic.application.common.email.anon_rate_limit import (
+    AnonymousEmailRateLimiter,
 )
 from learnic.application.common.errors import EmailAlreadyRegisteredError
 from learnic.application.common.notifications.channels import EmailPayload
@@ -43,6 +47,7 @@ class RegisterCommand:
     first_name: str
     last_name: str
     patronymic: str | None = None
+    distribution_consent: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -63,6 +68,7 @@ class RegisterCommandHandler:
         signup_sessions: SignupSessionStore,
         notifier: Notifier,
         config: SecurityPolicies,
+        anon_rate_limiter: AnonymousEmailRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._entity_saver: Final = entity_saver
@@ -72,8 +78,10 @@ class RegisterCommandHandler:
         self._signup_sessions: Final = signup_sessions
         self._notifier: Final = notifier
         self._config: Final = config
+        self._anon_rate_limiter: Final = anon_rate_limiter
 
     async def run(self, data: RegisterCommand) -> RegisterResult:
+        await self._anon_rate_limiter.check(data.email)
         if await self._user_gateway.with_email(data.email) is not None:
             raise EmailAlreadyRegisteredError
 
@@ -84,7 +92,10 @@ class RegisterCommandHandler:
             patronymic=(
                 Patronymic(data.patronymic) if data.patronymic is not None else None
             ),
-            password_hash=self._hasher.hash(RawPassword(data.password)),
+            password_hash=await self._hasher.hash(RawPassword(data.password)),
+            distribution_consent_at=(
+                datetime.now(timezone.utc) if data.distribution_consent else None
+            ),
         )
         self._entity_saver.add_one(user)
         # Flush so the users row exists for the FK-referencing INSERTs below.

@@ -9,9 +9,11 @@ from learnic.application.common.persistence.tag import TagReader, TagView
 class SearchTagsQuery:
     """Input to ``GET /tags``.
 
-    ``query`` is the substring typed in the SPA combobox (empty
-    means "popular first"). Pagination defaults are applied at the
-    HTTP boundary; the handler trusts the values it receives.
+    ``query`` is the text typed in the SPA combobox. A non-empty value
+    runs a full-text + ``pg_trgm`` fuzzy match over the tag ``name``
+    (same engine as user/product search — morphology + typo tolerance);
+    an empty value returns the full pool name-ordered. Pagination
+    defaults are applied at the HTTP boundary.
     """
 
     query: str
@@ -20,7 +22,7 @@ class SearchTagsQuery:
 
 @final
 class SearchTagsQueryHandler:
-    """Autocomplete tags by case-insensitive substring match.
+    """Autocomplete tags by full-text + trigram-fuzzy name match.
 
     No authorization gate beyond an active session — every
     authenticated user may inspect the global tag pool, since the

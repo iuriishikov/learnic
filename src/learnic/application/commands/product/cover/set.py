@@ -53,7 +53,7 @@ class SetProductCoverCommandHandler:
             Permission.EDIT_COVER,
         )
 
-        file = await self._file_uploads.upload_stream(
+        file = await self._file_uploads.upload_image_stream(
             data.upload,
             data.actor_id,
         )

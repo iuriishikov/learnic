@@ -95,9 +95,14 @@ class RecommendForMeQueryHandler:
         self,
         data: RecommendForMeQuery,
     ) -> list[ProductOutput]:
+        # Overfetch must cover the requested page's offset, not just its
+        # limit — otherwise a deep page (offset + limit beyond the window)
+        # slices off the tail or comes back empty even though more ranked
+        # candidates exist.
         overfetch = max(
             _MIN_OVERFETCH_LIMIT,
-            data.pagination.limit * _OVERFETCH_MULTIPLIER,
+            data.pagination.offset
+            + data.pagination.limit * _OVERFETCH_MULTIPLIER,
         )
         candidates = await self._reader.recommendation_candidates(
             user_id=data.user_id,

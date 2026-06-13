@@ -21,8 +21,13 @@ class PushSubscriptionGatewayAlchemy(PushSubscriptionGateway):
 
     Uses ``ON CONFLICT (endpoint) DO UPDATE`` so re-subscribing the
     same browser doesn't create duplicate rows; the keys (``p256dh``
-    / ``auth``) and ``last_seen_at`` are refreshed with whatever
-    the latest subscribe call carried.
+    / ``auth``) and ``last_seen_at`` are refreshed with whatever the
+    latest subscribe call carried. The update is guarded with
+    ``WHERE user_id = excluded.user_id`` so a caller who presents
+    another user's (leaked) endpoint cannot hijack that row — the
+    conflict already blocks the insert and the guard blocks the
+    ownership-reassigning update, so the attacker's subscribe is a
+    no-op rather than a takeover.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -43,20 +48,27 @@ class PushSubscriptionGatewayAlchemy(PushSubscriptionGateway):
         stmt = stmt.on_conflict_do_update(
             index_elements=[push_subscriptions_table.c.endpoint],
             set_={
-                "user_id": stmt.excluded.user_id,
                 "p256dh": stmt.excluded.p256dh,
                 "auth": stmt.excluded.auth,
                 "user_agent": stmt.excluded.user_agent,
                 "last_seen_at": stmt.excluded.last_seen_at,
             },
+            # Refuse to reassign a row owned by a different user — blocks
+            # cross-user subscription hijack via a leaked endpoint.
+            where=push_subscriptions_table.c.user_id == stmt.excluded.user_id,
         )
         await self._session.execute(stmt)
 
     @override
-    async def delete_by_endpoint(self, endpoint: str) -> bool:
+    async def delete_by_endpoint(
+        self,
+        endpoint: str,
+        user_id: UserID,
+    ) -> bool:
         result = await self._session.execute(
             sa.delete(push_subscriptions_table).where(
                 push_subscriptions_table.c.endpoint == endpoint,
+                push_subscriptions_table.c.user_id == user_id,
             ),
         )
         rowcount = getattr(result, "rowcount", 0)

@@ -34,9 +34,12 @@ from learnic.application.common.errors import (
     RoleInUseError,
     RoleNameAlreadyTakenError,
 )
+from learnic.entities.billing.errors import UnknownPlanCodeError
 from learnic.entities.common.errors import FieldError
 from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.entities.product_collaboration.errors import (
+    InviteTokenExpiredError as CollaborationInviteTokenExpiredError,
+    InviteTokenMismatchError as CollaborationInviteTokenMismatchError,
     OperationNotAllowedInStatusError,
 )
 from learnic.entities.product_gift.errors import (
@@ -150,10 +153,17 @@ WRONG_FILE_CONTENT_TYPE_RULE: Final[Rule] = rule(
     status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
     translator=_field,
 )
-"""Body shape: ``{"error": "WrongFileContentType", "file_id": ...,
-"expected_prefix": "video/"|"image/", "actual": "<mime>"}`` — the SPA
-can render a precise "this file isn't a video/image" message and offer
-a re-upload with the right type."""
+"""Body shape: ``{"error": "WrongFileContentTypeError", "file_id":
+"<upload>", "expected_prefix": "video/"|"image/", "actual": "<mime>"}``
+— the SPA can render a precise "this file isn't a video/image" message
+and offer a re-upload with the right type.
+
+Two field caveats the SPA must not be surprised by: the ``error`` value
+is the **raw** class name ``"WrongFileContentTypeError"`` (the
+``FieldError`` translator does not strip the ``Error`` suffix), and
+``file_id`` is always the literal ``"<upload>"`` — the content-type
+check runs *before* the ``files`` row is created, so there is no real
+id to report yet. Treat ``file_id`` here as a placeholder, not a UUID."""
 
 STORAGE_QUOTA_EXCEEDED_RULE: Final[Rule] = rule(
     status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
@@ -252,6 +262,25 @@ ADMIN_MAP: Final[dict[type[Exception], int | Rule]] = {
     InvalidTokenError: INVALID_TOKEN_RULE,
     NotAdminError: NOT_ADMIN_RULE,
     EntityNotFoundError: ENTITY_NOT_FOUND_RULE,
+}
+
+UNKNOWN_PLAN_CODE_RULE: Final[Rule] = rule(
+    status=HTTPStatus.UNPROCESSABLE_ENTITY,
+    translator=_named,
+)
+"""422 ``{"error": "UnknownPlanCode"}`` — an admin grant referenced a
+``plan_code`` that has no entry in the in-code plan registry (a typo
+on the grant endpoint). Plans live in code
+(`learnic/entities/billing/plan.py`); the SPA should source the list
+of grantable codes from there, not invent its own."""
+
+# Admin subscription-grant write: admin auth (401/403), target user
+# existence (404), an out-of-future expiry (422 via FieldError ->
+# SubscriptionExpiryInPastError), and an unknown plan code (422).
+SUBSCRIPTION_GRANT_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **ADMIN_MAP,
+    FieldError: FIELD_ERROR_RULE,
+    UnknownPlanCodeError: UNKNOWN_PLAN_CODE_RULE,
 }
 
 # --------------------------------- blog -------------------------------- #
@@ -365,11 +394,21 @@ outbound-email cap enforced by ``EmailSendRateLimiter``. Distinct from
 ``EMAIL_INVITE_RATE_LIMIT_RULE`` (invite/gift-only cap), but shares the
 same response shape."""
 
+ANON_EMAIL_RATE_LIMIT_RULE: Final[Rule] = rule(
+    status=HTTPStatus.TOO_MANY_REQUESTS,
+    translator=_rate_limited,
+)
+"""429 with body ``{"error": "AnonymousEmailRateLimitExceeded", "limit":
+int, "retry_after_seconds": int}`` — the recipient-keyed cap on the
+unauthenticated email endpoints (password-reset request, verification
+resend, registration). Shares the rate-limit response shape."""
+
 COLLABORATION_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     CannotInviteOwnerError: CANNOT_INVITE_OWNER_RULE,
     CollaborationAlreadyExistsError: COLLABORATION_ALREADY_EXISTS_RULE,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
+    CannotGrantPermissionsBeyondOwnSetError: PERM_BEYOND_OWN_SET_RULE,
     EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
     EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
     ResourceLimitReachedError: RESOURCE_LIMIT_RULE,
@@ -387,6 +426,7 @@ in the wrong status)."""
 COLLABORATION_MUTATION_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     RoleHierarchyViolationError: ROLE_HIERARCHY_VIOLATION_RULE,
+    CannotGrantPermissionsBeyondOwnSetError: PERM_BEYOND_OWN_SET_RULE,
     OperationNotAllowedInStatusError: OPERATION_NOT_ALLOWED_IN_STATUS_RULE,
     EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
 }
@@ -402,11 +442,22 @@ ROLE_DELETE_MAP: Final[dict[type[Exception], int | Rule]] = {
     RoleInUseError: ROLE_IN_USE_RULE,
 }
 
+COLLABORATION_TOKEN_ERROR_RULE: Final[Rule] = rule(
+    status=HTTPStatus.CONFLICT,
+    translator=_named,
+)
+"""409 ``{"error": "InviteTokenMismatch"|"InviteTokenExpired"}`` — the
+collaboration accept token did not match the stored hash or its TTL
+elapsed. Mirror of ``GIFT_TOKEN_ERROR_RULE`` for the parallel gift flow;
+kept distinct because the two flows raise their own error classes."""
+
 COLLABORATION_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {
     **AUTHENTICATED_WITH_FIELD_MAP,
     NotResourceOwnerError: NOT_RESOURCE_OWNER_RULE,
     InviteEmailMismatchError: INVITE_EMAIL_MISMATCH_RULE,
     OperationNotAllowedInStatusError: OPERATION_NOT_ALLOWED_IN_STATUS_RULE,
+    CollaborationInviteTokenMismatchError: COLLABORATION_TOKEN_ERROR_RULE,
+    CollaborationInviteTokenExpiredError: COLLABORATION_TOKEN_ERROR_RULE,
 }
 
 # ------------------------------- gifts --------------------------------- #
@@ -453,6 +504,19 @@ GIFT_INVITE_MAP: Final[dict[type[Exception], int | Rule]] = {
     ),
     EmailInviteRateLimitExceededError: EMAIL_INVITE_RATE_LIMIT_RULE,
     EmailSendRateLimitExceededError: EMAIL_SEND_RATE_LIMIT_RULE,
+}
+
+# The by-user gift path delivers via the in-app Notifier (no per-actor
+# email cap), so it can never raise the two rate-limit errors — omit
+# them here rather than advertising unreachable 429s in the contract.
+GIFT_INVITE_BY_USER_MAP: Final[dict[type[Exception], int | Rule]] = {
+    **AUTHENTICATED_AUTHORIZED_FIELD_MAP,
+    CannotGiftToOwnerError: CANNOT_GIFT_TO_OWNER_RULE,
+    GiftAlreadyExistsError: GIFT_ALREADY_EXISTS_RULE,
+    ProductNotGiftableError: PRODUCT_NOT_GIFTABLE_RULE,
+    CannotEnrollInUnpublishedProductError: (
+        CANNOT_ENROLL_IN_UNPUBLISHED_PRODUCT_RULE
+    ),
 }
 
 GIFT_ACCEPT_MAP: Final[dict[type[Exception], int | Rule]] = {

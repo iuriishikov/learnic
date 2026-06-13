@@ -51,7 +51,7 @@ class ChangeProductDescriptionCommandHandler:
             AuthzTarget.for_product(data.product_id),
             Permission.EDIT_DESCRIPTION,
         )
-        sanitized = self._html_sanitizer.sanitize(data.html)
+        sanitized = await self._html_sanitizer.sanitize(data.html)
         new_description = ProductDescription(sanitized)
         product.change_description(new_description)
         await self._transaction.commit()

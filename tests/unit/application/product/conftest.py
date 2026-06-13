@@ -63,7 +63,7 @@ def fake_product_reader() -> AsyncMock:
 @pytest.fixture
 def fake_html_sanitizer() -> MagicMock:
     sanitizer = MagicMock()
-    sanitizer.sanitize = MagicMock(side_effect=lambda raw: raw)
+    sanitizer.sanitize = AsyncMock(side_effect=lambda raw: raw)
     return sanitizer
 
 

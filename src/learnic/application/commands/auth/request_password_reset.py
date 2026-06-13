@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import Final, final
 
+from learnic.application.common.email.anon_rate_limit import (
+    AnonymousEmailRateLimiter,
+)
 from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
@@ -40,14 +43,20 @@ class RequestPasswordResetCommandHandler:
         email_tokens: EmailTokenStore,
         notifier: Notifier,
         config: SecurityPolicies,
+        anon_rate_limiter: AnonymousEmailRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
         self._email_tokens: Final = email_tokens
         self._notifier: Final = notifier
         self._config: Final = config
+        self._anon_rate_limiter: Final = anon_rate_limiter
 
     async def run(self, data: RequestPasswordResetCommand) -> None:
+        # Throttle by recipient regardless of whether the address is
+        # registered — both blunts inbox-bombing and keeps the unknown
+        # vs known timing identical (no enumeration via the limiter).
+        await self._anon_rate_limiter.check(data.email)
         user = await self._user_gateway.with_email(data.email)
         if user is None:
             return

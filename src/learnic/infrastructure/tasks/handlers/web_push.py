@@ -113,7 +113,9 @@ async def send_web_push_task(
     ]
     if gone_endpoints:
         for endpoint in gone_endpoints:
-            await gateway.delete_by_endpoint(endpoint)
+            # All ``subscriptions`` belong to ``typed_user_id`` (loaded
+            # via ``list_for_user``), so scope the cleanup to them.
+            await gateway.delete_by_endpoint(endpoint, typed_user_id)
         await transaction.commit()
         _logger.info(
             "Web Push: cleaned %d expired subscriptions for user %s",

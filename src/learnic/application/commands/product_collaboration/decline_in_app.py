@@ -66,7 +66,13 @@ class DeclineCollaborationInAppCommandHandler:
         self,
         data: DeclineCollaborationInAppCommand,
     ) -> None:
-        collab = await self._collab_gateway.with_id(data.collaboration_id)
+        # Lock the row (mirrors accept_in_app) so a concurrent accept and
+        # decline serialise: the second transaction re-reads the committed
+        # status and is correctly rejected by ``decline_in_app`` instead of
+        # silently clobbering an ACTIVE row back to DECLINED (lost update).
+        collab = await self._collab_gateway.with_id_for_update(
+            data.collaboration_id,
+        )
         if collab is None:
             raise EntityNotFoundError(data.collaboration_id)
         actor = await self._user_gateway.with_id(data.actor_id)

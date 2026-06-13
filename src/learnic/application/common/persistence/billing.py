@@ -40,6 +40,21 @@ class SubscriptionGateway(Protocol):
         """
         ...
 
+    async def active_for_user(
+        self,
+        user_id: UserID,
+    ) -> list[Subscription]:
+        """Return every currently-active grant for the user.
+
+        Active means unrevoked and either indefinite or not yet
+        expired. The list is usually a single row, but the model
+        permits overlapping grants — revoking access has to drop all
+        of them, so this returns the full set rather than just the
+        latest like :meth:`current_for_user`. Empty means the user is
+        already on the default (FREE) plan.
+        """
+        ...
+
 
 class SubscriptionReader(Protocol):
     """Read-side lookups returning view projections."""

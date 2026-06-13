@@ -5,15 +5,13 @@ from learnic.application.commands.note_block._inputs import (
     ChoiceOptionDraftInput,
     options_with_multi_correct,
 )
-from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
-from learnic.application.common.collaboration import (
-    BlockUpdatedPayload,
-    ContentEventBus,
-    publish_content_event,
+from learnic.application.commands.note_block._typed_update import (
+    commit_and_publish_updated,
+    load_typed_block_for_edit,
 )
-from learnic.application.common.errors import (
-    EntityNotFoundError,
-    WrongBlockTypeError,
+from learnic.application.common.auth.authorizer import Authorizer
+from learnic.application.common.collaboration import (
+    ContentEventBus,
 )
 from learnic.application.common.persistence.note_block import (
     LessonBlockGateway,
@@ -23,7 +21,6 @@ from learnic.application.common.persistence.transaction import Transaction
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_block.ids import LessonBlockID
 from learnic.entities.note_block.models import MultiChoiceBlock
-from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 
 
@@ -53,31 +50,22 @@ class UpdateMultiChoiceBlockCommandHandler:
         self._event_bus: Final = event_bus
 
     async def run(self, data: UpdateMultiChoiceBlockCommand) -> None:
-        block = await self._block_gateway.with_id(data.block_id)
-        if block is None:
-            raise EntityNotFoundError(data.block_id)
-        if not isinstance(block, MultiChoiceBlock):
-            raise WrongBlockTypeError(
-                data.block_id,
-                expected=BlockType.MULTI_CHOICE.value,
-                actual=block.type.value,
-            )
-        product = await self._product_gateway.with_id(block.product_id)
-        if product is None:
-            raise EntityNotFoundError(block.product_id)
-        await self._authorizer.require(
-            data.actor_id,
-            AuthzTarget.for_product(block.product_id),
-            Permission.EDIT_LESSONS,
+        block = await load_typed_block_for_edit(
+            block_id=data.block_id,
+            actor_id=data.actor_id,
+            expected_type=BlockType.MULTI_CHOICE,
+            expected_cls=MultiChoiceBlock,
+            block_gateway=self._block_gateway,
+            product_gateway=self._product_gateway,
+            authorizer=self._authorizer,
         )
 
         options, correct_ids = options_with_multi_correct(data.options)
         block.replace_options(options, correct_ids)
         await self._block_gateway.update_multi_choice(block)
-        await self._transaction.commit()
-        await publish_content_event(
-            self._event_bus,
-            payload=BlockUpdatedPayload.from_entity(block),
-            product_id=block.product_id,
+        await commit_and_publish_updated(
+            transaction=self._transaction,
+            event_bus=self._event_bus,
+            block=block,
             actor_id=data.actor_id,
         )

@@ -4,11 +4,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Final, final
 
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
-from learnic.infrastructure.configs import SecurityConfig
+from learnic.entities.user.models import UserID
 
 
 @dataclass(slots=True, frozen=True)
@@ -20,8 +21,11 @@ class LogoutCommand:
     claim from the access cookie — used as a fallback when the
     refresh cookie is missing (legacy clients, manual cookie
     deletion) so the access JWT still gets denied immediately.
+    ``user_id`` is the authenticated caller; the refresh family is
+    only revoked when it actually belongs to them.
     """
 
+    user_id: UserID
     refresh_token: str | None
     access_family_id: uuid.UUID | None
 
@@ -35,7 +39,7 @@ class LogoutCommandHandler:
         transaction: Transaction,
         refresh_store: RefreshTokenStore,
         denylist: TokenDenylist,
-        security_config: SecurityConfig,
+        security_config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._refresh_store: Final = refresh_store
@@ -48,7 +52,11 @@ class LogoutCommandHandler:
         family_id: uuid.UUID | None = None
         if data.refresh_token is not None:
             record = await self._refresh_store.resolve(data.refresh_token)
-            if record is not None:
+            # Only honour the presented refresh token if it actually
+            # belongs to the authenticated caller — never let one user
+            # revoke another user's session family by presenting their
+            # token value.
+            if record is not None and record.user_id == data.user_id:
                 await self._refresh_store.revoke_family(record.family_id)
                 family_id = record.family_id
         if family_id is None:

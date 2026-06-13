@@ -36,6 +36,6 @@ class ChangeUserDescriptionCommandHandler:
         if data.html is None:
             user.change_description(None)
         else:
-            sanitized = self._html_sanitizer.sanitize(data.html)
+            sanitized = await self._html_sanitizer.sanitize(data.html)
             user.change_description(UserDescription(sanitized))
         await self._transaction.commit()

@@ -93,6 +93,22 @@ class SubscriptionMapperAlchemy(SubscriptionGateway):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    @override
+    async def active_for_user(
+        self,
+        user_id: UserID,
+    ) -> list[Subscription]:
+        stmt = sa.select(Subscription).where(
+            subscriptions_table.c.user_id == user_id,
+            subscriptions_table.c.revoked_at.is_(None),
+            sa.or_(
+                subscriptions_table.c.expires_at.is_(None),
+                subscriptions_table.c.expires_at > sa.func.now(),
+            ),
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
 
 class SubscriptionReaderAlchemy(SubscriptionReader):
     def __init__(self, session: AsyncSession) -> None:

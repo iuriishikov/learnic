@@ -1,6 +1,7 @@
 from learnic.application.common.errors.errors import (
     AccountBannedError,
     AlreadyEnrolledError,
+    AnonymousEmailRateLimitExceededError,
     ApplicationError,
     BlogPostSlugAlreadyTakenError,
     CannotEnrollInPrivateProductError,
@@ -40,6 +41,7 @@ from learnic.application.common.errors.errors import (
 __all__ = [
     "AccountBannedError",
     "AlreadyEnrolledError",
+    "AnonymousEmailRateLimitExceededError",
     "ApplicationError",
     "BlogPostSlugAlreadyTakenError",
     "CannotEnrollInPrivateProductError",

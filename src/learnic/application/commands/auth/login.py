@@ -55,8 +55,14 @@ class LoginCommandHandler:
     async def run(self, data: LoginCommand) -> TokenPair:
         user = await self._user_gateway.with_email(data.email)
         if user is None:
+            # Run a decoy verify so the unknown-email path takes the same
+            # time as the existing-email path — otherwise the latency gap
+            # leaks which addresses have accounts (timing enumeration).
+            await self._hasher.verify_dummy(RawPassword(data.password))
             raise InvalidCredentialsError
-        if not self._hasher.verify(RawPassword(data.password), user.password_hash):
+        if not await self._hasher.verify(
+            RawPassword(data.password), user.password_hash
+        ):
             raise InvalidCredentialsError
         if user.is_banned:
             raise AccountBannedError(user.oid)

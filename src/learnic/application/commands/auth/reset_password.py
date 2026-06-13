@@ -10,12 +10,12 @@ from learnic.application.common.security.email_tokens import (
     EmailTokenStore,
 )
 from learnic.application.common.security.passwords import PasswordHasher
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.entities.user.value_objects import RawPassword
-from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,7 +41,7 @@ class ResetPasswordCommandHandler:
         hasher: PasswordHasher,
         refresh_store: RefreshTokenStore,
         denylist: TokenDenylist,
-        security_config: SecurityConfig,
+        security_config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
@@ -59,7 +59,8 @@ class ResetPasswordCommandHandler:
         if user is None:
             raise InvalidTokenError
 
-        user.change_password(self._hasher.hash(RawPassword(data.new_password)))
+        new_hash = await self._hasher.hash(RawPassword(data.new_password))
+        user.change_password(new_hash)
         revoked_families = await self._refresh_store.revoke_all_for_user(user_id)
         if revoked_families:
             denied_until = datetime.now(timezone.utc) + self._access_ttl

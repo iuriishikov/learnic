@@ -58,13 +58,17 @@ class AddFileBlockCommandHandler:
     Order of operations is deliberate:
 
     1. Authorise on the parent note (cheapest reject).
-    2. Quota check on ``upload.size`` BEFORE uploading to S3 — failing
-       past this point would waste a storage round-trip.
-    3. Hand the upload to :class:`FileUploadService`, which streams it
-       into the ``File`` row + object storage; the storage write
-       happens inside the request transaction (rolled-back blobs are
-       swept by the file-lifecycle worker — same as cover/avatar).
-    4. Build and persist the block.
+    2. Quota check on ``upload.size`` BEFORE uploading to S3.
+    3. Take the lesson lock and enforce the block-count limit BEFORE
+       uploading, so an over-limit lesson rejects without streaming
+       bytes we'd immediately discard (and orphan, since there is no
+       bucket reaper).
+    4. Hand the upload to :class:`FileUploadService`, which streams it
+       into the ``File`` row + object storage inside the request
+       transaction. With every cheap precondition already passed, the
+       only residual rollback-after-put orphan window is an unexpected
+       failure between the put and commit.
+    5. Build and persist the block.
     """
 
     def __init__(
@@ -107,16 +111,21 @@ class AddFileBlockCommandHandler:
             data.upload.size,
         )
 
-        file = await self._file_uploads.upload_stream(
-            data.upload,
-            data.actor_id,
-        )
-
+        # Gate the block-count limit BEFORE streaming bytes to storage:
+        # a lesson already at LESSON_BLOCK_LIMIT must reject cheaply
+        # instead of uploading a payload we'd immediately discard (and
+        # orphan in object storage). The lock is held across the upload
+        # so the count stays authoritative through insert.
         title = BlockTitle(data.title) if data.title is not None else None
         await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
         LESSON_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
+
+        file = await self._file_uploads.upload_stream(
+            data.upload,
+            data.actor_id,
+        )
 
         block = FileBlock.create(
             lesson_id=data.lesson_id,

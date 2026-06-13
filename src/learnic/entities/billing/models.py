@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Self
 
+from learnic.entities.billing.errors import SubscriptionExpiryInPastError
 from learnic.entities.billing.ids import (
     PlanCode,
     StorageQuotaBreachID,
@@ -60,12 +61,28 @@ class Subscription(BaseEntity[SubscriptionID]):
         manually via direct SQL inserts; this factory exists so any
         future programmatic path (admin endpoint, CLI) uses the same
         construction.
+
+        Args:
+            user_id: The user receiving the grant.
+            plan_code: Which in-code plan to grant.
+            expires_at: When the grant lapses; ``None`` grants it
+                indefinitely. Must be timezone-aware and strictly in
+                the future when provided.
+            granted_by: The admin who issued the grant, for audit.
+
+        Raises:
+            SubscriptionExpiryInPastError: ``expires_at`` is at or
+                before the current instant, which would mint an
+                already-inactive grant.
         """
+        now = datetime.now(timezone.utc)
+        if expires_at is not None and expires_at <= now:
+            raise SubscriptionExpiryInPastError()
         return cls(
             oid=SubscriptionID(uuid.uuid4()),
             user_id=user_id,
             plan_code=plan_code,
-            granted_at=datetime.now(timezone.utc),
+            granted_at=now,
             expires_at=expires_at,
             granted_by=granted_by,
         )

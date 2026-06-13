@@ -48,7 +48,7 @@ class SetUserExperienceIconCommandHandler:
             raise EntityNotFoundError(data.experience_id)
         if experience.user_id != data.actor_id:
             raise NotResourceOwnerError(data.experience_id, data.actor_id)
-        file = await self._file_uploads.upload_stream(
+        file = await self._file_uploads.upload_image_stream(
             data.upload,
             data.actor_id,
         )

@@ -47,7 +47,7 @@ class AddBlogHtmlBlockCommandHandler:
         BLOG_POST_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
 
-        sanitized = self._html_sanitizer.sanitize(data.html)
+        sanitized = await self._html_sanitizer.sanitize(data.html)
         block = BlogHtmlBlock.create(
             post_id=data.post_id,
             html=BlogHtmlContent(sanitized),

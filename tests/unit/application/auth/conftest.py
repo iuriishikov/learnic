@@ -58,10 +58,18 @@ def fake_user_gateway() -> AsyncMock:
 @pytest.fixture
 def fake_hasher() -> MagicMock:
     hasher = MagicMock()
-    hasher.hash = MagicMock(return_value=PasswordHash("hashed"))
-    hasher.verify = MagicMock(return_value=True)
+    hasher.hash = AsyncMock(return_value=PasswordHash("hashed"))
+    hasher.verify = AsyncMock(return_value=True)
+    hasher.verify_dummy = AsyncMock(return_value=None)
     hasher.needs_rehash = MagicMock(return_value=False)
     return hasher
+
+
+@pytest.fixture
+def fake_anon_rate_limiter() -> AsyncMock:
+    limiter = AsyncMock()
+    limiter.check = AsyncMock()
+    return limiter
 
 
 @pytest.fixture

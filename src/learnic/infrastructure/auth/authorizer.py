@@ -31,6 +31,10 @@ from learnic.entities.role.permissions import (
 from learnic.entities.role.value_objects import PermissionSet
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.persistence.models.product import products_table
+from learnic.infrastructure.persistence.models.product_collaboration import (
+    collaboration_grants_table,
+    product_collaborations_table,
+)
 from learnic.infrastructure.persistence.models.role import (
     role_permissions_table,
 )
@@ -116,6 +120,69 @@ class AuthorizerService(Authorizer):
         if not permissions:
             return None
         return PermissionSet(expand_implied(permissions))
+
+    @override
+    async def manage_collaborators_for_products(
+        self,
+        actor: UserID,
+        product_ids: set[ProductID],
+    ) -> dict[ProductID, bool]:
+        if not product_ids:
+            return {}
+        ids = list(product_ids)
+        # 1. Owner short-circuit, batched into one query.
+        owned_rows = (
+            await self._session.execute(
+                sa.select(products_table.c.oid).where(
+                    products_table.c.oid.in_(ids),
+                    products_table.c.author_id == actor,
+                ),
+            )
+        ).scalars().all()
+        owned = {ProductID(oid) for oid in owned_rows}
+
+        # 2. Collaborator path: an ACTIVE collaboration with a
+        #    PRODUCT-scope grant whose role carries MANAGE_COLLABORATORS.
+        #    That permission is a leaf (nothing in PERMISSION_IMPLIES
+        #    yields it) and product-scoped, so this direct join is a
+        #    complete equivalent of effective_permissions(...) for it —
+        #    no implication expansion can add it.
+        remaining = [pid for pid in ids if pid not in owned]
+        managed: set[ProductID] = set()
+        if remaining:
+            rows = (
+                await self._session.execute(
+                    sa.select(product_collaborations_table.c.product_id)
+                    .select_from(
+                        product_collaborations_table.join(
+                            collaboration_grants_table,
+                            collaboration_grants_table.c.collaboration_id
+                            == product_collaborations_table.c.oid,
+                        ).join(
+                            role_permissions_table,
+                            role_permissions_table.c.role_id
+                            == collaboration_grants_table.c.role_id,
+                        ),
+                    )
+                    .where(
+                        product_collaborations_table.c.product_id.in_(
+                            remaining,
+                        ),
+                        product_collaborations_table.c.collaborator_id
+                        == actor,
+                        product_collaborations_table.c.status
+                        == CollaborationStatus.ACTIVE.value,
+                        collaboration_grants_table.c.scope_type
+                        == ScopeType.PRODUCT.value,
+                        role_permissions_table.c.permission
+                        == Permission.MANAGE_COLLABORATORS.value,
+                    )
+                    .distinct(),
+                )
+            ).scalars().all()
+            managed = {ProductID(pid) for pid in rows}
+
+        return {pid: pid in owned or pid in managed for pid in product_ids}
 
     async def _is_product_owner(
         self,

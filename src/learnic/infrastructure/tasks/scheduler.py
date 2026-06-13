@@ -42,10 +42,12 @@ class TaskSchedulerTaskIQ(TaskScheduler):
     async def schedule_purge_file_from_storage(
         self,
         file_id: FileID,
+        attempt: int = 0,
     ) -> None:
         # @inject strips `handler` at runtime; .kiq stubs still see it.
         await purge_file_from_storage_task.kiq(  # type: ignore[call-overload]
             file_id,
+            attempt,
         )
 
     @override

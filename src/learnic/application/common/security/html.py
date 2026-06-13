@@ -10,6 +10,10 @@ class HtmlSanitizer(Protocol):
     only enforces length, not HTML safety.
     """
 
-    def sanitize(self, raw: str) -> str:
-        """Return ``raw`` with unsafe markup removed."""
+    async def sanitize(self, raw: str) -> str:
+        """Return ``raw`` with unsafe markup removed.
+
+        Awaitable so the synchronous HTML parser runs off the event loop
+        (the adapter offloads it to a worker thread).
+        """
         ...

@@ -1,7 +1,10 @@
 from typing import Final
 
-# Storage budget in bytes for the free tier — 2 GiB.
-FREE_PLAN_STORAGE_BYTES: Final = 0.5 * 1024 * 1024 * 1024
+# Storage budget in bytes for the free tier — 2 GiB. Keep this an
+# ``int`` expression: the value flows verbatim onto int-typed view /
+# schema / WS-event fields (``storage_bytes_max``), and a float would
+# leak ``2147483648.0`` over the storage WebSocket channels.
+FREE_PLAN_STORAGE_BYTES: Final = 2 * 1024 * 1024 * 1024
 # Storage budget in bytes for the BETA tier — 50 GiB. Assigned
 # manually until the payment integration lands.
 BETA_PLAN_STORAGE_BYTES: Final = 50 * 1024 * 1024 * 1024

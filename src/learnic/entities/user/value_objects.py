@@ -27,12 +27,26 @@ from learnic.entities.user.errors import (
 )
 
 
+def normalize_email(value: str) -> str:
+    """Return the canonical form of ``value`` for storage and lookup.
+
+    Email addresses are case-insensitive at every real provider, so we
+    trim surrounding whitespace and lowercase the whole address. This is
+    the single source of truth for the normalization rule — both the
+    ``Email`` VO and the ``with_email`` gateway lookup go through it so
+    register, login, and password-reset all agree on identity.
+    """
+    return value.strip().lower()
+
+
 class Email(ValueObject):
     value: str
 
     def __post_init__(self) -> None:
-        if "@" not in self.value or len(self.value) > EMAIL_MAX_LEN:
+        normalized = normalize_email(self.value)
+        if "@" not in normalized or len(normalized) > EMAIL_MAX_LEN:
             raise InvalidEmailError
+        object.__setattr__(self, "value", normalized)
 
 
 class FirstName(ValueObject):

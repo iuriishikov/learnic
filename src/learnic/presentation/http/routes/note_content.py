@@ -224,6 +224,9 @@ from learnic.entities.note_block.constants import (
     VIDEO_TITLE_MAX_LEN,
 )
 from learnic.entities.note_block.enums import BlockType, CodeBlockLanguage
+from learnic.entities.note_block.errors import (
+    InvalidCollageCaptionsLengthError,
+)
 from learnic.entities.note_block.ids import LessonBlockID
 from learnic.entities.note_lesson.constants import LESSON_TITLE_MAX_LEN
 from learnic.entities.note_lesson.ids import NoteLessonID
@@ -3359,8 +3362,9 @@ def _zip_collage_uploads(
     if captions is None:
         return [(f, None) for f in files]
     if len(captions) != len(files):
-        raise ValueError(
-            "collage `captions` length must equal `files` length",
+        raise InvalidCollageCaptionsLengthError(
+            files_count=len(files),
+            captions_count=len(captions),
         )
     # Empty string means "no caption" (clients can't omit individual
     # entries in a multipart list — they always send all positions).
@@ -3895,10 +3899,12 @@ async def reset_draft(
 ) -> None:
     """Discard the current draft and rehydrate it from a release snapshot.
 
-    Author-only. The current draft (modules / lessons / blocks +
-    child rows) is wiped via FK cascade and replaced with a fresh
-    copy of ``release_id``'s snapshot. New UUIDs are generated for
-    every restored row, so any local references in connected
+    Requires ``MANAGE_RELEASES`` on the note — the owner has it
+    implicitly, and a collaborator whose role grants it is allowed too
+    (this is NOT author-only). The current draft (modules / lessons /
+    blocks + child rows) is wiped via FK cascade and replaced with a
+    fresh copy of ``release_id``'s snapshot. New UUIDs are generated
+    for every restored row, so any local references in connected
     clients become stale — a ``DRAFT_RESET`` WS event is published
     after commit, instructing all open authors' tabs to refetch
     the tree.
@@ -3918,7 +3924,9 @@ async def reset_draft(
 
     Raises:
         InvalidTokenError: HTTP 401.
-        NotResourceOwnerError: HTTP 403 — caller isn't the note author.
+        InsufficientPermissionsError: HTTP 403 — caller lacks
+            ``MANAGE_RELEASES`` on the note (via
+            ``INSUFFICIENT_PERMISSIONS_RULE``).
         EntityNotFoundError: HTTP 404 — note not found, release
             not found, or the release belongs to a different note.
         ProductDoesNotSupportError: HTTP 409 — product is not a note.

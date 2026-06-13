@@ -134,8 +134,8 @@ the channel before opening the socket: `GET /products/{id}`,
 `GET /products/{id}/qa` (if Q&A is shown),
 `GET /products/{id}/collaborations` (if the team tab is shown),
 and — for notes only —
-`GET /products/{id}/content/draft` and
-`GET /products/{id}/content/releases`.
+`GET /notes/{note_id}/content/draft` and
+`GET /notes/{note_id}/releases`.
 
 **Server → client envelope.** Both event families share one shape;
 `kind` is the discriminator declared on each member of either
@@ -260,7 +260,7 @@ broadcast — the SPA discovers purged invites on its next refetch.
 in place via `setQueryData` without a follow-up REST round-trip.
 Container events (`module_added`, `lesson_added`, `block_added`,
 `block_updated`) carry a full snapshot of the affected entity in
-the same shape as the corresponding `GET /products/{id}/content/draft`
+the same shape as the corresponding `GET /notes/{note_id}/content/draft`
 sub-tree — the SPA reuses its existing draft types to splice it in.
 Concretely:
 
@@ -295,7 +295,7 @@ Concretely:
   id-level fields needed to patch the cache (titles, ordered
   id arrays, the deleted entity's id).
 - `release_created`, `draft_reset` carry `{"release_id", "ordinal",
-  "version", "kind"}` — refetch `GET /products/{id}/content/releases`
+  "version", "kind"}` — refetch `GET /notes/{note_id}/releases`
   for the full release record (notes, released_by, released_at).
 
 Server-side, the two `kind` families originate from independent
@@ -692,51 +692,59 @@ interval.
 Subscriptions are scoped to a single connection. Reconnects must
 replay the desired `subscribe` list.
 
-## Money / minor units
+## Pagination
 
-Every money amount the API emits or accepts is in **minor units of
-the wallet's currency**:
+List endpoints use **offset-based** pagination via two query
+parameters:
 
-- For `RUB` (currently the only supported currency), 1 RUB = 100
-  kopecks. A wallet showing `150_00` holds 150 RUB.
-- Floats are never used over the wire. The server represents every
-  amount as a JSON integer; the SPA does the same on the way back.
-- Negative amounts appear only on signed-`delta` ledger entries
-  (debits). Balances (`available`, `pending`) and request bodies
-  (`amount`) are always non-negative integers.
+- `offset` — items to skip; integer `>= 0`, default `0`.
+- `limit` — page size; integer `1..100`, default `20`
+  (`DEFAULT_LIMIT` / `MAX_LIMIT` in
+  `application/common/pagination.py`).
 
-The minor-unit convention is documented end-to-end so a generated
-SDK can apply the same rule wherever a money field appears.
+Index endpoints that expose a total (the marketplace product list
+and the blog-post admin list) return the unpaginated count in the
+**`X-Total-Count`** response header, so the SPA can render page
+controls without a second request.
 
-## Wallets and orders
+Free-text search, where offered, takes a `q` query parameter bounded
+to `2..100` characters (`SEARCH_QUERY_MIN_LEN` /
+`SEARCH_QUERY_MAX_LEN`); shorter strings are rejected at the boundary
+to keep single-character lookups off full-table scans.
 
-A wallet is a money holder pinned to one (user, currency) pair.
-Every registered user has a `RUB` wallet from sign-up (older users
-were backfilled at migration time).
+**Cursor exception — notifications.** `GET /users/me/notifications`
+is **cursor-paginated** instead: pass the opaque `cursor` from the
+previous page's `next_cursor` (omit it for the first page) plus a
+`limit` (`1..100`). The response carries `next_cursor`, which is
+`null` once the tail is reached. Offset/limit does not apply here.
 
-**Purchase flow.** `POST /products/{id}/purchase` debits the
-caller's `available` balance by the product's price and creates an
-`Order` referencing two freeze rows: one carrying the author's
-share, one carrying the platform's commission. Both stay in
-`frozen` state until their `unfreeze_at` passes (typically 14 days,
-configurable via `WALLET_SALE_HOLD_TTL_SECONDS` for dev). A
-periodic worker tick releases ripe freezes into the corresponding
-`available` balance.
+## File uploads
 
-**Refund flow.** While both freezes are still `frozen`, the buyer
-can `POST /users/me/orders/{id}/refund`: the freezes flip to
-`cancelled`, the price returns to the buyer's `available`, and the
-ledger gets a `refund` row plus two `cancel_freeze` informational
-rows. Once either freeze has been released, the window is closed
-and the SPA should redirect the user to support.
+Routes that accept binary content take a `multipart/form-data` body
+with a single file field (FastAPI `UploadFile`).
 
-**Ledger.** `GET /users/me/wallet/ledger` returns every money
-event that touched the wallet (`purchase`, `refund`, `freeze`,
-`release`, `cancel_freeze`, `topup`, `adjustment`) with a signed
-`delta`. Informational events (`freeze`, `cancel_freeze`) carry
-`delta = 0` because the money is on the freeze row, not on
-`available`. Summing `delta` over all entries of a wallet equals
-`available` — an invariant that supports self-checking and audit.
+- **Size caps are per-call-site, never global.** Every upload route
+  enforces its own ceiling via `open_upload(file, max_bytes=...)`;
+  the named constants live in
+  `presentation/http/common/upload_limits.py` — avatar `5 MB`, user
+  cover `10 MB`, CV-timeline icon `2 MB`, product cover `10 MB`,
+  lesson file block `50 MB`, lesson video block `1 GiB`,
+  photo-collage item `80 MB`, blog image `10 MB`, blog video
+  `1 GiB`, blog-post cover `10 MB`.
+- **Over-cap** uploads return **`422`** with body
+  `{"error": "FileTooLarge", "limit": <max_bytes>}` so the SPA can
+  show the exact ceiling.
+- **Wrong content type** returns **`415 Unsupported Media Type`**
+  with body `{"error": "WrongFileContentType", "expected_prefix":
+  "image/"|"video/", "actual": "<mime>"}`. Image routes require an
+  `image/...` type; video routes require `video/...`.
+- **Exceeding the author's storage budget** returns **`413`** with
+  body `{"error": "StorageQuotaExceeded", "plan_code": ...,
+  "used_bytes": ..., "attempted_bytes": ..., "limit_bytes": ...}`.
+
+The body is streamed to object storage in chunks straight off the
+spooled request — it never enters application memory — and the cap
+is enforced before any S3 write.
 """.strip()
 
 OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
@@ -818,7 +826,14 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "the response body carries `plan_code`, `used_bytes`, "
             "`attempted_bytes`, and `limit_bytes` so the SPA can render "
             "an actionable message. A live quota meter is pushed over "
-            "`WS /users/me/storage` — see `## WebSocket channels`."
+            "`WS /users/me/storage` — see `## WebSocket channels`. "
+            "Administrators grant a tariff free of charge (e.g. add a "
+            "user to BETA) via `POST /admin/users/{user_id}/"
+            "subscription` and revoke it with the matching `DELETE` — "
+            "both admin-only. Grantable plan codes are the registry "
+            "entries (currently `FREE` (default) and `BETA`); an "
+            "unknown code is rejected with 422 `UnknownPlanCode` — the "
+            "SPA must source codes from the backend, not invent them."
         ),
     },
     {
@@ -951,14 +966,24 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         "name": "NoteContent",
         "description": (
             "Author-side editing of note content — modules and "
-            "lessons inside a note product. All endpoints under "
-            "`/products/{product_id}/...` and "
-            "`/products/{product_id}/lessons/...` require the "
-            "`accessCookie` scheme and are author-only (HTTP 403 "
-            "`NotResourceOwner` otherwise). Operations refuse on "
-            "webinar products with HTTP 409 `NotANote`. Content "
-            "lives in the product's draft workspace; releases are "
-            "introduced in a later phase and snapshot the draft. "
+            "lessons inside a note product. Authoring endpoints "
+            "under `/notes/{note_id}/modules/...` and "
+            "`/notes/{note_id}/lessons/...` require the "
+            "`accessCookie` scheme and collaborator permissions "
+            "(HTTP 403 otherwise). Operations refuse on non-note "
+            "products with HTTP 409 `NotANote`. Content lives in "
+            "the product's draft workspace; releases (see the "
+            "NoteReleases tag) snapshot the draft. "
+            "Student/visitor reads live under `/notes/{note_id}`: "
+            "`GET /notes/{note_id}/scheme` (structure only, public "
+            "for any published note — including `private` ones) "
+            "hands out the lesson ids, then "
+            "`GET /notes/{note_id}/release-lessons/{lesson_id}` "
+            "loads one lesson's blocks on demand (allowed for "
+            "collaborators with `READ_PRODUCT`, actively-enrolled "
+            "students on their pinned release, and anyone — "
+            "including anonymous — when the note is published with "
+            "`public` visibility; uniform 404 otherwise). "
             "Real-time deltas of note-content edits flow over "
             "the unified product channel "
             "`WS /products/{product_id}/events` — see the "
@@ -1090,37 +1115,15 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
-        "name": "Wallet",
-        "description": (
-            "Per-user money holder. `GET /users/me/wallet` returns "
-            "available + pending totals; `GET /users/me/wallet/ledger` "
-            "returns the immutable journal of every credit and debit. "
-            "All amounts are in **minor units** (kopecks for RUB) — "
-            "see the *Money / minor units* section in the API "
-            "description for the convention and rationale."
-        ),
-    },
-    {
-        "name": "Orders",
-        "description": (
-            "Purchases of paid products. `POST /products/{id}/purchase` "
-            "charges the caller's wallet and freezes the author's and "
-            "platform's shares until the refund window closes. "
-            "`POST /users/me/orders/{id}/refund` reverses the order "
-            "while both freezes are still in `frozen` state — once "
-            "either is released by the worker, the refund window has "
-            "closed and the buyer is redirected to support."
-        ),
-    },
-    {
         "name": "Dev",
         "description": (
             "Development-only endpoints, registered only when "
-            "`APP_ENVIRONMENT=development`. Bypass the missing "
-            "payment integration: `POST /dev/wallet/topup` credits "
-            "the caller's own wallet; `POST /dev/freezes/release-now` "
-            "runs the release worker synchronously instead of waiting "
-            "for the next scheduler tick. Absent from prod builds."
+            "`APP_ENVIRONMENT=development` and absent from prod "
+            "builds. `POST /dev/jobs/reconcile-storage-quotas` "
+            "enqueues the over-quota reconciliation pass on demand "
+            "(the same task the cron scheduler fires daily at 03:00 "
+            "UTC), so a developer can trigger it without waiting for "
+            "the next tick."
         ),
     },
 ]

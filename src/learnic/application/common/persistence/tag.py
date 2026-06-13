@@ -38,6 +38,16 @@ class TagGateway(Protocol):
 
     async def with_slug(self, slug: TagSlug) -> Tag | None: ...
 
+    async def get_or_create_by_slug(self, tag: Tag) -> Tag:
+        """Return the tag with ``tag.slug``, inserting ``tag`` if absent.
+
+        Atomic against the unique-slug race: two concurrent first-uses
+        of the same slug both resolve to one row instead of one of them
+        500-ing on ``uq_tags_slug``. Returns the persisted tag (the
+        pre-existing one, or ``tag`` itself when it won the insert).
+        """
+        ...
+
 
 class TagReader(Protocol):
     """Read-side queries returning :class:`TagView` projections."""

@@ -14,12 +14,17 @@ from learnic.infrastructure.tasks.broker import broker
 @inject
 async def purge_file_from_storage_task(
     file_id: FileID,
+    attempt: int,
     handler: FromDishka[PurgeFileFromStorageCommandHandler],
 ) -> None:
     """Delete the S3 / MinIO blob for one soft-deleted file.
 
-    Producer enqueues this right after :meth:`File.mark_deleted`;
-    the handler verifies the row is actually soft-deleted before
-    touching storage, so "schedule then rollback" is safe.
+    Producer enqueues this right after :meth:`File.mark_deleted`; the
+    handler verifies the row is actually soft-deleted before touching
+    storage and re-enqueues itself (incrementing ``attempt``) while the
+    row is still live, so neither "schedule then commit" nor "schedule
+    then rollback" can orphan a blob or delete a live file.
     """
-    await handler.run(PurgeFileFromStorageCommand(file_id=file_id))
+    await handler.run(
+        PurgeFileFromStorageCommand(file_id=file_id, attempt=attempt),
+    )

@@ -43,6 +43,7 @@ product_gifts_table = sa.Table(
             GiftStatus,
             name="product_gift_status",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),

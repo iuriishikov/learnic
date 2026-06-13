@@ -34,7 +34,10 @@ class ProductQAMapperAlchemy(ProductQAGateway):
         stmt = (
             sa.select(ProductQA)
             .where(product_qa_table.c.product_id == product_id)
-            .order_by(product_qa_table.c.position.asc())
+            .order_by(
+                product_qa_table.c.position.asc(),
+                product_qa_table.c.oid.asc(),
+            )
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -71,7 +74,10 @@ class ProductQAReaderAlchemy(ProductQAReader):
                 product_qa_table.c.position,
             )
             .where(product_qa_table.c.product_id == product_id)
-            .order_by(product_qa_table.c.position.asc())
+            .order_by(
+                product_qa_table.c.position.asc(),
+                product_qa_table.c.oid.asc(),
+            )
         )
         rows = (await self._session.execute(stmt)).all()
         return [

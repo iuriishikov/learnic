@@ -3,12 +3,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Final, final
 
 from learnic.application.common.persistence.transaction import Transaction
+from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.refresh_tokens import (
     RefreshTokenStore,
 )
 from learnic.application.common.security.token_denylist import TokenDenylist
 from learnic.entities.user.models import UserID
-from learnic.infrastructure.configs import SecurityConfig
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,7 +30,7 @@ class LogoutAllCommandHandler:
         transaction: Transaction,
         refresh_store: RefreshTokenStore,
         denylist: TokenDenylist,
-        security_config: SecurityConfig,
+        security_config: SecurityPolicies,
     ) -> None:
         self._transaction: Final = transaction
         self._refresh_store: Final = refresh_store

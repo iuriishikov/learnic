@@ -12,6 +12,10 @@ from learnic.application.commands.admin.ban_user import (
     BanUserCommand,
     BanUserCommandHandler,
 )
+from learnic.application.commands.admin.unban_user import (
+    UnbanUserCommand,
+    UnbanUserCommandHandler,
+)
 from learnic.application.commands.admin.delete_note import (
     AdminDeleteNoteCommand,
     AdminDeleteNoteCommandHandler,
@@ -30,12 +34,22 @@ from learnic.application.queries.admin.get_stats import (
     GetAdminStatsQuery,
     GetAdminStatsQueryHandler,
 )
+from learnic.application.common.pagination import (
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    Pagination,
+)
+from learnic.application.queries.user.search import (
+    SearchUsersQuery,
+    SearchUsersQueryHandler,
+)
 from learnic.entities.product.ids import ProductID
 from learnic.entities.user.models import UserID
 from learnic.presentation.http.common.admin_deps import AdminAuthenticator
 from learnic.presentation.http.common.auth_deps import access_cookie_scheme
 from learnic.presentation.http.common.errors.rules import ADMIN_MAP
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
+from learnic.presentation.http.common.schemas import AdminUserSummarySchema
 
 router = ErrorAwareRouter(
     prefix="/admin",
@@ -330,6 +344,78 @@ async def get_metric_series(
     return MetricSeriesSchema.from_result(result)
 
 
+@router.get(
+    "/users/search",
+    summary="Search users (admin view, with ban status)",
+    operation_id="searchUsersAdmin",
+    response_model=list[AdminUserSummarySchema],
+    dependencies=_AUTH_SECURITY,
+    error_map=ADMIN_MAP,
+)
+async def search_users_admin(
+    request: Request,
+    interactor: FromDishka[SearchUsersQueryHandler],
+    admin_auth: FromDishka[AdminAuthenticator],
+    q: str = Query(
+        description=(
+            "Free-text query, whitespace-tokenized; each token must "
+            "match (case-insensitive substring) at least one of "
+            "`first_name` / `last_name` / `patronymic`. Empty input "
+            "returns an empty list."
+        ),
+        min_length=0,
+        max_length=200,
+        examples=["Ada", "Иван Иванов"],
+    ),
+    offset: int = Query(
+        0,
+        ge=0,
+        description="Pagination offset (rows to skip), `>= 0`.",
+        examples=[0],
+    ),
+    limit: int = Query(
+        DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description=f"Page size, `[1, {MAX_LIMIT}]` (`MAX_LIMIT`).",
+        examples=[20],
+    ),
+) -> list[AdminUserSummarySchema]:
+    """Search users by name, returning ban status for moderation.
+
+    Admin-only. Identical matching/sorting to ``GET /users/search`` but
+    the projection adds ``is_banned`` so the admin UI can offer a ban or
+    an unban per result. The ban flag is deliberately kept off the
+    public search/admins endpoints (see :class:`AdminUserSummarySchema`).
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected user-search query handler (shared with the
+            public search route — only the response projection differs).
+        admin_auth: Injected authenticator that validates the access
+            cookie and asserts the platform-admin flag.
+        q: Free-text query against name fields.
+        offset: Pagination offset.
+        limit: Page size.
+
+    Returns:
+        ``200 OK`` with a list of :class:`AdminUserSummarySchema`,
+        possibly empty.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotAdminError: Caller is not a platform admin; HTTP 403.
+    """
+    await admin_auth.authenticate_admin(request)
+    views = await interactor.run(
+        SearchUsersQuery(
+            query=q,
+            pagination=Pagination(limit=limit, offset=offset),
+        ),
+    )
+    return [AdminUserSummarySchema.from_view(view) for view in views]
+
+
 @router.post(
     "/users/{user_id}/ban",
     summary="Ban a user",
@@ -369,6 +455,46 @@ async def ban_user(
     """
     await admin_auth.authenticate_admin(request)
     await interactor.run(BanUserCommand(user_id=UserID(user_id)))
+
+
+@router.post(
+    "/users/{user_id}/unban",
+    summary="Lift a user's ban",
+    operation_id="unbanUser",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=_AUTH_SECURITY,
+    error_map=ADMIN_MAP,
+)
+async def unban_user(
+    request: Request,
+    interactor: FromDishka[UnbanUserCommandHandler],
+    admin_auth: FromDishka[AdminAuthenticator],
+    user_id: UUID = _USER_ID_PATH,
+) -> None:
+    """Lift a user's ban so they can log in again.
+
+    Admin-only and the inverse of ``POST /admin/users/{id}/ban``.
+    Clears the ``is_banned`` flag; the user logs in afresh (the ban
+    already revoked their sessions, so there is nothing to restore).
+    Idempotent — unbanning a non-banned user is a no-op ``204``.
+
+    Args:
+        request: Source of the access-token cookie.
+        interactor: Injected unban-user command handler.
+        admin_auth: Injected authenticator that validates the access
+            cookie and asserts the platform-admin flag.
+        user_id: Target user's UUID, parsed from the URL path.
+
+    Returns:
+        ``204 No Content``.
+
+    Raises:
+        InvalidTokenError: Missing or denied access cookie; HTTP 401.
+        NotAdminError: Caller is not a platform admin; HTTP 403.
+        EntityNotFoundError: No user with the given id; HTTP 404.
+    """
+    await admin_auth.authenticate_admin(request)
+    await interactor.run(UnbanUserCommand(user_id=UserID(user_id)))
 
 
 @router.delete(

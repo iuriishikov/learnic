@@ -126,7 +126,7 @@ class CheckBlockAnswerCommandHandler:
         if product is None or not product.supports(
             ProductCapability.HAS_NOTE_CONTENT,
         ):
-            # Same hiding policy as ``GetNoteContentQueryHandler``:
+            # Same hiding policy as ``GetReleaseLessonQueryHandler``:
             # non-note products are surfaced as 404, not 409.
             raise EntityNotFoundError(data.block_id)
 
@@ -138,22 +138,37 @@ class CheckBlockAnswerCommandHandler:
             # Treat absence-of-enrollment as "block not visible" —
             # consistent with the read endpoint, no separate 403.
             raise EntityNotFoundError(data.block_id)
-
-        is_correct, submission = self._grade(block, data)
-
-        # Persist the student's latest submission (correct or not) so
-        # the SPA can restore the selection + verdict on reload. The
-        # note-flow gating above guarantees a hydrated note enrollment,
-        # so ``details`` carries the pinned release.
+        # The note-flow gating above guarantees a hydrated note
+        # enrollment, so ``details`` carries the pinned release.
         assert isinstance(  # noqa: S101
             enrollment.details,
             NoteEnrollmentDetails,
         )
+
+        # Scope grading to the student's pinned release: a block from any
+        # OTHER release of the same product must look invisible. Without
+        # this a student pinned to v1 could grade/reveal v2's interactive
+        # blocks (answer-key leak on multi-release public notes), mirroring
+        # the strict pin check in ``GetReleaseLessonQueryHandler``.
+        block_release_id = (
+            await self._release_block_gateway.release_id_for_block(
+                data.block_id,
+            )
+        )
+        if block_release_id != enrollment.details.release_id:
+            raise EntityNotFoundError(data.block_id)
+
+        is_correct, submission = self._grade(block, data)
+
+        # Persist the student's latest submission (correct or not) so the
+        # SPA can restore the selection + verdict on reload. Stamp the
+        # block's own release (now guaranteed equal to the pin) so the
+        # denormalised ``release_id`` column stays truthful.
         await self._answer_gateway.upsert(
             NoteBlockAnswer.record(
                 user_id=data.actor_id,
                 block_id=data.block_id,
-                release_id=enrollment.details.release_id,
+                release_id=block_release_id,
                 submission=submission,
                 is_correct=is_correct,
             ),

@@ -113,6 +113,32 @@ class FilesGateway(Protocol):
 
     async def with_id(self, oid: FileID) -> File | None: ...
 
+    async def is_referenced_by_release(self, oid: FileID) -> bool:
+        """Report whether a *published release* still pins the file.
+
+        Probes the three release-snapshot mirror tables (file /
+        video-file blocks by FK, photo-collage blocks by JSONB
+        containment, since the collage mirror keeps its items in a
+        JSONB array rather than an FK column). Draft blocks are
+        deliberately NOT consulted.
+
+        A published release shares the **exact** ``files`` row of the
+        draft it was cut from — the snapshot copies ``file_id``
+        verbatim, it does not duplicate the blob. So a file removed
+        from the draft (or evicted for quota) may still be the only
+        copy a live release serves. Every soft-delete / purge path
+        consults this guard first, enforcing one invariant: **a file
+        a published release depends on is never soft-deleted or
+        physically purged** — not by draft edits, not by quota
+        enforcement. Releases stay immutable.
+
+        Returns ``True`` when at least one release block references
+        ``oid``; ``False`` otherwise. Cover / avatar / blog-post
+        files are never snapshotted into a release, so they always
+        report ``False`` and free exactly as before.
+        """
+        ...
+
     async def delete(self, oid: FileID) -> None:
         """Hard-delete the file row.
 

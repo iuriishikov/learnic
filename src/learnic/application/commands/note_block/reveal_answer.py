@@ -31,6 +31,7 @@ from learnic.entities.note_block.models import (
     SingleChoiceBlock,
     TextInputBlock,
 )
+from learnic.entities.enrollment.details import NoteEnrollmentDetails
 from learnic.entities.enrollment.enums import EnrollmentStatus
 from learnic.entities.product.capabilities import ProductCapability
 from learnic.entities.user.models import UserID
@@ -90,6 +91,21 @@ class RevealBlockAnswerCommandHandler:
             data.actor_id,
         )
         if enrollment is None or enrollment.status is not EnrollmentStatus.ACTIVE:
+            raise EntityNotFoundError(data.block_id)
+        assert isinstance(  # noqa: S101
+            enrollment.details,
+            NoteEnrollmentDetails,
+        )
+
+        # Scope reveal to the student's pinned release — a block from any
+        # other release of the same product must look invisible, else the
+        # correct answer leaks across releases (see check_answer).
+        block_release_id = (
+            await self._release_block_gateway.release_id_for_block(
+                data.block_id,
+            )
+        )
+        if block_release_id != enrollment.details.release_id:
             raise EntityNotFoundError(data.block_id)
 
         if isinstance(block, SingleChoiceBlock):

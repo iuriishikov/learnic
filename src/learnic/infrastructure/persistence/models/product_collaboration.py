@@ -51,6 +51,7 @@ product_collaborations_table = sa.Table(
             CollaborationStatus,
             name="product_collaboration_status",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),
@@ -140,7 +141,14 @@ collaboration_grants_table = sa.Table(
     sa.Column(
         "role_id",
         sa.Uuid,
-        sa.ForeignKey("roles.oid", ondelete="RESTRICT"),
+        # CASCADE (not RESTRICT): in-use roles are blocked from deletion
+        # application-side by ``RoleInUseError`` before any DELETE runs,
+        # so this FK only fires on a full-note hard-delete or when a role
+        # holds nothing but dead (declined/revoked) grants — both of
+        # which should sweep the grant rows. RESTRICT aborted the admin
+        # note-delete cascade with an IntegrityError. See migration
+        # ``notedel0001``.
+        sa.ForeignKey("roles.oid", ondelete="CASCADE"),
         nullable=False,
     ),
     sa.Column(
@@ -149,6 +157,7 @@ collaboration_grants_table = sa.Table(
             ScopeType,
             name="collaboration_scope_type",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),

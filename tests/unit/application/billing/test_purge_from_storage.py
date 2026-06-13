@@ -46,12 +46,14 @@ def _build_handler(
     files_gateway: AsyncMock,
     block_gateway: AsyncMock,
     file_storage: AsyncMock,
+    task_scheduler: AsyncMock | None = None,
 ) -> PurgeFileFromStorageCommandHandler:
     return PurgeFileFromStorageCommandHandler(
         transaction=transaction,
         files_gateway=files_gateway,
         block_gateway=block_gateway,
         file_storage=file_storage,
+        task_scheduler=task_scheduler or AsyncMock(),
     )
 
 
@@ -133,6 +135,37 @@ async def test_soft_deleted_row_purges_everywhere(
     )
     fake_files_gateway.delete.assert_called_once_with(file.oid)
     fake_transaction.commit.assert_called_once()
+
+
+async def test_release_pinned_file_is_not_purged(
+    fake_transaction: AsyncMock,
+    fake_files_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_file_storage: AsyncMock,
+) -> None:
+    # Row is soft-deleted, but a published-release snapshot still
+    # points at this exact blob (releases share the file, they do not
+    # copy it). The worker must abort rather than strip media out of
+    # already-published content.
+    file = _make_file(deleted=True)
+    fake_files_gateway.with_id.return_value = file
+    fake_files_gateway.is_referenced_by_release.return_value = True
+    handler = _build_handler(
+        transaction=fake_transaction,
+        files_gateway=fake_files_gateway,
+        block_gateway=fake_block_gateway,
+        file_storage=fake_file_storage,
+    )
+
+    await handler.run(PurgeFileFromStorageCommand(file_id=file.oid))
+
+    fake_files_gateway.is_referenced_by_release.assert_awaited_once_with(
+        file.oid,
+    )
+    fake_file_storage.delete.assert_not_called()
+    fake_block_gateway.remove_file_from_collages.assert_not_called()
+    fake_files_gateway.delete.assert_not_called()
+    fake_transaction.commit.assert_not_called()
 
 
 async def test_purge_order_s3_then_collages_then_row(

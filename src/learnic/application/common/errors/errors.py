@@ -475,6 +475,30 @@ class EmailSendRateLimitExceededError(ApplicationError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class AnonymousEmailRateLimitExceededError(ApplicationError):
+    """Raised when an *unauthenticated* email endpoint is over its cap.
+
+    The password-reset request, verification resend, and registration
+    endpoints accept no authenticated actor, so their abuse cap is
+    keyed on the recipient address rather than ``actor_id``. Carries
+    the configured ``limit`` and ``retry_after_seconds`` so the HTTP
+    layer can populate the standard ``Retry-After`` header. Surfaces
+    as HTTP 429 (same response shape as the other rate-limit errors).
+    """
+
+    def __init__(
+        self,
+        *,
+        limit: int,
+        retry_after_seconds: int,
+    ) -> None:
+        super().__init__(
+            f"Anonymous email-send limit of {limit} per window exceeded",
+        )
+        self.limit = limit
+        self.retry_after_seconds = retry_after_seconds
+
+
 class CannotGiftToOwnerError(ApplicationError):
     """Raised when a product is gifted to its own author.
 

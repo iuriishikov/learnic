@@ -15,10 +15,7 @@ from learnic.entities.enrollment.details import (
     NoteEnrollmentDetails,
     EnrollmentDetails,
 )
-from learnic.entities.enrollment.enums import (
-    EnrollmentKind,
-    EnrollmentStatus,
-)
+from learnic.entities.enrollment.enums import EnrollmentKind
 from learnic.entities.enrollment.ids import EnrollmentID
 from learnic.entities.enrollment.models import Enrollment
 from learnic.entities.enrollment.value_objects import ProgressPercent
@@ -122,20 +119,6 @@ class EnrollmentMapperAlchemy(EnrollmentGateway):
             return None
         await self._hydrate_details(enrollment)
         return enrollment
-
-    @override
-    async def is_enrolled(
-        self,
-        student_id: UserID,
-        product_id: ProductID,
-    ) -> bool:
-        stmt = sa.select(sa.literal(True)).where(
-            enrollments_table.c.product_id == product_id,
-            enrollments_table.c.student_id == student_id,
-            enrollments_table.c.status == EnrollmentStatus.ACTIVE.value,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar() is not None
 
     @override
     async def update_note_details(self, enrollment: Enrollment) -> None:

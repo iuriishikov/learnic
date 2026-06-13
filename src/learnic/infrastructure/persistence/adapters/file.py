@@ -23,6 +23,11 @@ from learnic.infrastructure.persistence.models.note_block import (
     photo_collage_items_table,
     video_file_blocks_table,
 )
+from learnic.infrastructure.persistence.models.note_release import (
+    note_release_file_blocks_table,
+    note_release_photo_collage_blocks_table,
+    note_release_video_file_blocks_table,
+)
 from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product import products_table
 
@@ -36,6 +41,35 @@ class FilesMapperAlchemy(FilesGateway):
         stmt = sa.select(File).where(files_table.c.oid == oid)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @override
+    async def is_referenced_by_release(self, oid: FileID) -> bool:
+        # Only published-release snapshots pin a file against deletion
+        # (they share the draft's exact blob). Two mirrors carry an FK
+        # ``file_id``; the collage mirror keeps items in a JSONB array
+        # of ``{"oid", "file_id", "caption"}`` dicts, matched with a
+        # ``@>`` containment probe rather than an FK compare.
+        collage_probe = [{"file_id": str(oid)}]
+        pinned = sa.or_(
+            sa.select(sa.literal(1))
+            .where(note_release_file_blocks_table.c.file_id == oid)
+            .exists(),
+            sa.select(sa.literal(1))
+            .where(note_release_video_file_blocks_table.c.file_id == oid)
+            .exists(),
+            sa.select(sa.literal(1))
+            .where(
+                # Subscript access: a column literally named ``items``
+                # collides with ``ColumnCollection.items()`` under
+                # attribute access (typing + runtime), so index it.
+                note_release_photo_collage_blocks_table.c["items"].contains(
+                    collage_probe,
+                ),
+            )
+            .exists(),
+        )
+        result = await self._session.execute(sa.select(pinned))
+        return bool(result.scalar_one())
 
     @override
     async def delete(self, oid: FileID) -> None:

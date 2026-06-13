@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import NewType, Self
 
 from learnic.entities.common.base_entity import BaseEntity
@@ -36,6 +37,10 @@ class User(BaseEntity[UserID]):
     website_url: WebsiteUrl | None = None
     portfolio_url: PortfolioUrl | None = None
     public_email: PublicEmail | None = None
+    # Timestamp at which the user gave consent to the distribution of
+    # their personal data (ст. 10.1 152-ФЗ). ``None`` means no such
+    # consent on record; withdrawal clears it back to ``None``.
+    distribution_consent_at: datetime | None = None
 
     def change_email(self, new_email: Email) -> None:
         self.email = new_email
@@ -79,6 +84,16 @@ class User(BaseEntity[UserID]):
         """
         self.is_banned = True
 
+    def unban(self) -> None:
+        """Lift a ban, letting the user log in again.
+
+        Idempotent — unbanning a user who is not banned is a no-op.
+        Clearing the flag is sufficient: the ban revoked the user's
+        sessions, so they simply log in afresh; there is nothing to
+        restore. The reverse of :meth:`ban`.
+        """
+        self.is_banned = False
+
     def set_avatar(self, file_id: FileID) -> FileID | None:
         """Attach ``file_id`` as avatar, returning the previous one (if any)."""
         previous = self.avatar_file_id
@@ -117,6 +132,7 @@ class User(BaseEntity[UserID]):
         last_name: LastName,
         password_hash: PasswordHash,
         patronymic: Patronymic | None = None,
+        distribution_consent_at: datetime | None = None,
     ) -> Self:
         return cls(
             oid=UserID(uuid.uuid4()),
@@ -130,4 +146,5 @@ class User(BaseEntity[UserID]):
             description=None,
             avatar_file_id=None,
             cover_file_id=None,
+            distribution_consent_at=distribution_consent_at,
         )

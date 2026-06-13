@@ -32,7 +32,7 @@ def fake_user_gateway() -> AsyncMock:
 def fake_html_sanitizer() -> MagicMock:
     sanitizer = MagicMock()
     # echo input by default so tests see what the handler forwarded
-    sanitizer.sanitize = MagicMock(side_effect=lambda raw: raw)
+    sanitizer.sanitize = AsyncMock(side_effect=lambda raw: raw)
     return sanitizer
 
 

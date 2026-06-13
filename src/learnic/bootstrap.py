@@ -97,6 +97,7 @@ from learnic.presentation.http.routes.notification_preferences import (
     router as notification_preferences_router,
 )
 from learnic.presentation.http.routes.subscription import (
+    admin_router as admin_subscription_router,
     note_router as note_storage_router,
     router as subscription_router,
 )
@@ -190,6 +191,7 @@ def setup_routes(app: FastAPI, configs: Configs) -> None:
     app.include_router(push_public_router)
     app.include_router(push_me_router)
     app.include_router(subscription_router)
+    app.include_router(admin_subscription_router)
     app.include_router(note_storage_router)
     app.include_router(storage_ws_router)
     app.include_router(note_storage_ws_router)

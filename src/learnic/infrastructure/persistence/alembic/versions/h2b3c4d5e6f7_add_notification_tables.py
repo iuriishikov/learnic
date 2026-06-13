@@ -14,6 +14,7 @@ Create Date: 2026-05-08 19:00:00.000000
 from typing import Sequence, Union
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from alembic import op
 
 
@@ -99,7 +100,7 @@ def upgrade() -> None:
         sa.Column("notification_id", sa.Uuid(), nullable=False),
         sa.Column(
             "kind",
-            sa.Enum(
+            postgresql.ENUM(
                 "invite_sent",
                 "invite_accepted",
                 name="notification_kind",
@@ -137,7 +138,7 @@ def upgrade() -> None:
         sa.Column("notification_id", sa.Uuid(), nullable=False),
         sa.Column(
             "kind",
-            sa.Enum(
+            postgresql.ENUM(
                 "invite_sent",
                 "invite_accepted",
                 name="notification_kind",

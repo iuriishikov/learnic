@@ -67,6 +67,19 @@ class NoteReleaseBlockGateway(Protocol):
         oid: LessonBlockID,
     ) -> LessonBlock | None: ...
 
+    async def release_id_for_block(
+        self,
+        oid: LessonBlockID,
+    ) -> NoteReleaseID | None:
+        """Return the id of the release ``oid`` belongs to, or ``None``.
+
+        Used by check / reveal to confirm the block is part of the
+        student's pinned release before grading — without it a student
+        pinned to one release could grade/reveal blocks from another
+        release of the same product (answer-key leak).
+        """
+        ...
+
 
 class NoteReleaseSnapshotter(Protocol):
     """Atomic copy of draft content into release-snapshot tables.
@@ -142,6 +155,67 @@ class NoteReleaseContentView:
     modules: list[ReleaseModuleView]
 
 
+@dataclass(slots=True, frozen=True)
+class ReleaseLessonContentView:
+    """One release lesson with its block payloads.
+
+    The per-lesson companion of :class:`NoteReleaseContentView` —
+    served by ``GET /notes/{note_id}/release-lessons/{lesson_id}``.
+    Carries ``release_id`` (the handler compares it against the
+    caller's pinned enrollment) and ``product_id`` (for the
+    product-level access decision); neither is exposed on the wire.
+    """
+
+    oid: NoteLessonID
+    release_id: NoteReleaseID
+    product_id: ProductID
+    title: str
+    position: int
+    blocks: list[LessonBlockView]
+
+
+@dataclass(slots=True, frozen=True)
+class SchemeLessonView:
+    """Lesson projection inside a release scheme tree.
+
+    Structure-only sibling of :class:`ReleaseLessonView` — carries
+    no block payloads, only how many blocks the lesson has (the
+    catalog page renders a "N materials" label from it).
+    """
+
+    oid: NoteLessonID
+    title: str
+    position: int
+    block_count: int
+
+
+@dataclass(slots=True, frozen=True)
+class SchemeModuleView:
+    """Module projection inside a release scheme tree."""
+
+    oid: NoteModuleID
+    title: str
+    description: str | None
+    position: int
+    lessons: list[SchemeLessonView]
+
+
+@dataclass(slots=True, frozen=True)
+class NoteReleaseSchemeView:
+    """Structure-only tree of a specific release.
+
+    Deliberately carries no release header beyond the ids — no
+    version triplet, kind, or author-written release ``notes``
+    (the changelog can reference gated content). Lessons carry no
+    block payloads. This keeps the projection safe to expose
+    publicly for invite-only products whose full content is gated.
+    """
+
+    release_id: NoteReleaseID
+    product_id: ProductID
+    modules: list[SchemeModuleView]
+
+
 class NoteReleaseReader(Protocol):
     """Read-side queries returning release projections."""
 
@@ -156,3 +230,17 @@ class NoteReleaseReader(Protocol):
         self,
         release_id: NoteReleaseID,
     ) -> NoteReleaseContentView | None: ...
+
+    async def get_scheme(
+        self,
+        release_id: NoteReleaseID,
+    ) -> NoteReleaseSchemeView | None:
+        """Return the structure-only tree (no block payloads)."""
+        ...
+
+    async def get_lesson(
+        self,
+        lesson_id: NoteLessonID,
+    ) -> ReleaseLessonContentView | None:
+        """Return one release lesson with its blocks, or ``None``."""
+        ...

@@ -1,4 +1,5 @@
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import composite
 
 from learnic.entities.user.constants import (
@@ -121,6 +122,19 @@ users_table = sa.Table(
         sa.String(PUBLIC_EMAIL_MAX_LEN),
         nullable=True,
     ),
+    # Timestamp of the user's consent to distribution of their personal
+    # data (ст. 10.1 152-ФЗ). NULL = no consent on record. Set at
+    # registration when the optional checkbox is ticked.
+    sa.Column(
+        "distribution_consent_at",
+        sa.DateTime(timezone=True),
+        nullable=True,
+    ),
+    # Full-text + fuzzy search over the user's name fields. Both columns
+    # are DB-managed (rebuilt by the ``refresh_user_search`` trigger, see
+    # migration ``usrsearch0001``) and excluded from the entity mapping.
+    sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
+    sa.Column("search_text", sa.Text(), nullable=True),
 )
 
 
@@ -175,7 +189,10 @@ def map_user_table() -> None:
                 PublicEmail.of_optional,
                 users_table.c.public_email,
             ),
+            "distribution_consent_at": users_table.c.distribution_consent_at,
         },
+        # DB-managed search columns are not part of the domain entity.
+        exclude_properties=["search_vector", "search_text"],
         column_prefix="_col_",
     )
     _mapped = True

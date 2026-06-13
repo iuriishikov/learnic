@@ -37,6 +37,7 @@ from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
+    require_grants_within_actor_permissions,
 )
 from learnic.entities.common.limits import PRODUCT_COLLABORATION_LIMIT
 from learnic.entities.notification.enums import (
@@ -104,6 +105,7 @@ class InviteCollaboratorByUserCommandHandler:
         self._user_gateway: Final = user_gateway
         self._collab_gateway: Final = collab_gateway
         self._collab_saver: Final = collab_saver
+        self._role_gateway: Final = role_gateway
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
         self._notifier: Final = notifier
         self._event_bus: Final = event_bus
@@ -131,6 +133,13 @@ class InviteCollaboratorByUserCommandHandler:
             data.product_id,
             data.actor_id,
             [spec.role_id for spec in data.grants],
+        )
+        await require_grants_within_actor_permissions(
+            authorizer=self._authorizer,
+            role_gateway=self._role_gateway,
+            actor_id=data.actor_id,
+            product_id=data.product_id,
+            role_ids=[spec.role_id for spec in data.grants],
         )
         target = await self._user_gateway.with_id(data.target_user_id)
         if target is None:

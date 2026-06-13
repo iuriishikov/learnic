@@ -1,6 +1,18 @@
 from learnic.entities.common.errors import FieldError
 
 
+class InvalidCollageCaptionsLengthError(FieldError):
+    """Raised when a photo-collage ``captions`` array length != ``files``.
+
+    The multipart body must send one caption position per photo (empty
+    strings allowed) or omit ``captions`` entirely. Any other length is
+    ambiguous. Surfaces as HTTP 422 via the shared ``FieldError`` rule.
+    """
+
+    files_count: int
+    captions_count: int
+
+
 class EmptyBlockContentError(FieldError):
     """Raised when a block's body is empty after construction."""
 

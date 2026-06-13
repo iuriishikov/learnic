@@ -79,6 +79,7 @@ from learnic.application.common.errors import (
     ProductNameAlreadyTakenError,
     ProductNotArchivedError,
     ProductNotInDraftError,
+    WrongFileContentTypeError,
 )
 from learnic.entities.product.errors import ProductDoesNotSupportError
 from learnic.application.queries.enrollment.list_for_product import (
@@ -169,6 +170,7 @@ from learnic.presentation.http.common.errors.rules import (
     PRODUCT_NOT_ARCHIVED_RULE,
     PRODUCT_NOT_IN_DRAFT_RULE,
     RESOURCE_LIMIT_RULE,
+    WRONG_FILE_CONTENT_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.routes.tag import TagSchema
@@ -801,7 +803,8 @@ async def change_visibility(
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=ProductSchema,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE},
 )
 async def set_cover(
     request: Request,

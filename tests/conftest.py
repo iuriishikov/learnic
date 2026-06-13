@@ -8,9 +8,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from learnic.infrastructure.configs import (
+    AppConfig,
     ASGIConfig,
     Configs,
     PostgresConfig,
+    RecommendationsConfig,
     RedisConfig,
     RusenderConfig,
     S3Config,
@@ -52,6 +54,8 @@ def configs() -> Configs:
             cookie_secure=False,
         ),
         web_push=WebPushConfig(),
+        app=AppConfig(environment="production"),
+        recommendations=RecommendationsConfig(),
     )
 
 

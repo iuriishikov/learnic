@@ -14,6 +14,7 @@ from learnic.application.common.persistence.user import (
 )
 from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import User, UserID
+from learnic.entities.user.value_objects import normalize_email
 from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.user import users_table
 
@@ -30,12 +31,30 @@ class UserMapperAlchemy(UserGateway):
 
     @override
     async def with_email(self, email: str) -> User | None:
-        stmt = sa.select(User).where(users_table.c.email == email)
+        # Normalize the same way the Email VO does so a casing/whitespace
+        # variant still resolves to the stored account.
+        stmt = sa.select(User).where(
+            users_table.c.email == normalize_email(email)
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
 
 class UserReaderAlchemy(UserReader):
+    """Read-side projections for user profiles.
+
+    Ban-visibility policy (deliberate, applied consistently): a banned
+    user is removed from *discovery* surfaces — ``search_by_name`` and
+    the admins / top-teachers lists filter ``is_banned = False`` — but a
+    direct ``with_id`` profile read stays resolvable. That keeps content
+    the banned user authored (notes, blog posts) from breaking its
+    author link, and the returned ``UserView`` carries the ``is_banned``
+    flag so the SPA can badge or collapse the profile as it sees fit. If
+    the product later wants a hard "banned users have no public profile"
+    rule, add ``is_banned.is_(False)`` here and to the experience /
+    social-link readers in one change — do not split the policy.
+    """
+
     def __init__(self, session: AsyncSession) -> None:
         self._session: Final = session
 
@@ -131,56 +150,41 @@ class UserReaderAlchemy(UserReader):
         return await self._session.scalar(stmt)
 
     @override
-    async def search_by_name(
+    async def admins(
         self,
-        tokens: tuple[str, ...],
         pagination: Pagination,
     ) -> list[UserSummaryView]:
-        if not tokens:
-            return []
-
         avatar = files_table.alias("avatar")
 
-        stmt = sa.select(
-            users_table.c.oid,
-            users_table.c.email,
-            users_table.c.first_name,
-            users_table.c.last_name,
-            users_table.c.patronymic,
-            users_table.c.is_verified,
-            avatar.c.oid.label("avatar_oid"),
-            avatar.c.storage_name.label("avatar_storage_name"),
-            avatar.c.bucket.label("avatar_bucket"),
-            avatar.c.content_type.label("avatar_content_type"),
-            avatar.c.size_bytes.label("avatar_size_bytes"),
-        ).select_from(
-            users_table.outerjoin(
-                avatar,
-                sa.and_(
-                    users_table.c.avatar_file_id == avatar.c.oid,
-                    avatar.c.deleted_at.is_(None),
-                ),
+        stmt = (
+            sa.select(
+                users_table.c.oid,
+                users_table.c.email,
+                users_table.c.first_name,
+                users_table.c.last_name,
+                users_table.c.patronymic,
+                users_table.c.is_verified,
+                users_table.c.is_banned,
+                avatar.c.oid.label("avatar_oid"),
+                avatar.c.storage_name.label("avatar_storage_name"),
+                avatar.c.bucket.label("avatar_bucket"),
+                avatar.c.content_type.label("avatar_content_type"),
+                avatar.c.size_bytes.label("avatar_size_bytes"),
             )
-        )
-
-        # Each token must match at least one of the three name fields
-        # (substring, case-insensitive). Tokens combine with AND so the
-        # caller can narrow with multiple words ("ivan ivanov").
-        for token in tokens:
-            pattern = f"%{token}%"
-            stmt = stmt.where(
-                sa.or_(
-                    users_table.c.first_name.ilike(pattern),
-                    users_table.c.last_name.ilike(pattern),
+            .select_from(
+                users_table.outerjoin(
+                    avatar,
                     sa.and_(
-                        users_table.c.patronymic.is_not(None),
-                        users_table.c.patronymic.ilike(pattern),
+                        users_table.c.avatar_file_id == avatar.c.oid,
+                        avatar.c.deleted_at.is_(None),
                     ),
                 )
             )
-
-        stmt = (
-            stmt.order_by(
+            .where(
+                users_table.c.is_admin.is_(True),
+                users_table.c.is_banned.is_(False),
+            )
+            .order_by(
                 users_table.c.last_name.asc(),
                 users_table.c.first_name.asc(),
                 users_table.c.oid.asc(),
@@ -198,6 +202,118 @@ class UserReaderAlchemy(UserReader):
                 last_name=row.last_name,
                 patronymic=row.patronymic,
                 is_verified=row.is_verified,
+                is_banned=row.is_banned,
+                avatar=(
+                    FileMeta(
+                        oid=FileID(row.avatar_oid),
+                        storage_name=row.avatar_storage_name,
+                        bucket=row.avatar_bucket,
+                        content_type=row.avatar_content_type,
+                        size_bytes=row.avatar_size_bytes,
+                    )
+                    if row.avatar_oid is not None
+                    else None
+                ),
+            )
+            for row in rows
+        ]
+
+    @override
+    async def search_by_name(
+        self,
+        query: str,
+        pagination: Pagination,
+    ) -> list[UserSummaryView]:
+        # Full-text + trigram fuzzy over the name fields, mirroring the
+        # product catalog search. ``search_text`` is stored lower-cased
+        # by the trigger, so the query is lowered too (trigram ops are
+        # case-sensitive; tsvector matching is dictionary-driven and is
+        # case-insensitive regardless).
+        query_lower = query.strip().lower()
+        if not query_lower:
+            return []
+
+        # Default ``word_similarity_threshold = 0.6`` is too strict for
+        # short name queries — one extra char past a typo collapses the
+        # score below the cutoff. 0.4 still rejects noise. ``SET LOCAL``
+        # scopes the change to this transaction.
+        await self._session.execute(
+            sa.text("SET LOCAL pg_trgm.word_similarity_threshold = 0.4"),
+        )
+        # ``websearch_to_tsquery`` tolerates arbitrary input (quoted
+        # phrases, OR, leading ``-``) without raising. The regconfig is
+        # cast verbatim so asyncpg's ``$N::VARCHAR`` params don't break
+        # overload resolution (same trick as the product search).
+        russian_regconfig: sa.ColumnElement[str] = sa.literal_column(
+            "'russian'::regconfig",
+        )
+        tsq = sa.func.websearch_to_tsquery(russian_regconfig, query_lower)
+        rank_ts = sa.func.ts_rank_cd(
+            users_table.c.search_vector, tsq,
+        ).label("rank_ts")
+        # ``word_similarity`` scores the best-matching word substring —
+        # the right operator for a short query against a short name text.
+        rank_trgm = sa.func.word_similarity(
+            query_lower, users_table.c.search_text,
+        ).label("rank_trgm")
+
+        avatar = files_table.alias("avatar")
+
+        stmt = (
+            sa.select(
+                users_table.c.oid,
+                users_table.c.email,
+                users_table.c.first_name,
+                users_table.c.last_name,
+                users_table.c.patronymic,
+                users_table.c.is_verified,
+                users_table.c.is_banned,
+                avatar.c.oid.label("avatar_oid"),
+                avatar.c.storage_name.label("avatar_storage_name"),
+                avatar.c.bucket.label("avatar_bucket"),
+                avatar.c.content_type.label("avatar_content_type"),
+                avatar.c.size_bytes.label("avatar_size_bytes"),
+                rank_ts,
+                rank_trgm,
+            )
+            .select_from(
+                users_table.outerjoin(
+                    avatar,
+                    sa.and_(
+                        users_table.c.avatar_file_id == avatar.c.oid,
+                        avatar.c.deleted_at.is_(None),
+                    ),
+                )
+            )
+            .where(
+                sa.or_(
+                    users_table.c.search_vector.op("@@")(tsq),
+                    users_table.c.search_text.op("%>")(query_lower),
+                )
+            )
+            # tsvector (morphology + weights) carries twice the weight of
+            # trigram (typos/transliteration); tie-break by name then
+            # ``oid`` for stable pagination across equal-rank rows.
+            .order_by(
+                (rank_ts * sa.literal(2.0) + rank_trgm).desc(),
+                users_table.c.last_name.asc(),
+                users_table.c.first_name.asc(),
+                users_table.c.oid.asc(),
+            )
+            .limit(pagination.limit)
+            .offset(pagination.offset)
+        )
+
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            UserSummaryView(
+                oid=UserID(row.oid),
+                email=row.email,
+                first_name=row.first_name,
+                last_name=row.last_name,
+                patronymic=row.patronymic,
+                is_verified=row.is_verified,
+                is_banned=row.is_banned,
                 avatar=(
                     FileMeta(
                         oid=FileID(row.avatar_oid),

@@ -60,6 +60,7 @@ lesson_blocks_table = sa.Table(
             BlockType,
             name="lesson_block_type",
             values_callable=_enum_values,
+            create_type=False,
         ),
         nullable=False,
     ),

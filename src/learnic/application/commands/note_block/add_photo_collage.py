@@ -147,17 +147,21 @@ class AddPhotoCollageBlockCommandHandler:
             Permission.EDIT_LESSONS,
         )
 
+        # Gate the block-count limit BEFORE streaming the photos to
+        # storage so an over-limit lesson rejects cheaply instead of
+        # orphaning every uploaded collage item. Lock held across the
+        # uploads keeps the count authoritative through insert.
+        await self._block_gateway.lock_for_lesson(data.lesson_id)
+        existing = await self._block_gateway.list_for_lesson(data.lesson_id)
+        LESSON_BLOCK_LIMIT.ensure(len(existing))
+        next_position = max((b.position for b in existing), default=-1) + 1
+
         items = await self._validate_and_upload(
             data.items,
             actor_id=data.actor_id,
             quota_owner_id=product.author_id,
         )
         title = BlockTitle(data.title) if data.title is not None else None
-
-        await self._block_gateway.lock_for_lesson(data.lesson_id)
-        existing = await self._block_gateway.list_for_lesson(data.lesson_id)
-        LESSON_BLOCK_LIMIT.ensure(len(existing))
-        next_position = max((b.position for b in existing), default=-1) + 1
 
         block = PhotoCollageBlock.create(
             lesson_id=data.lesson_id,

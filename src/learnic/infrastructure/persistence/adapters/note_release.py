@@ -28,10 +28,14 @@ from learnic.application.common.persistence.note_release import (
     NoteReleaseContentView,
     NoteReleaseGateway,
     NoteReleaseReader,
+    NoteReleaseSchemeView,
     NoteReleaseSnapshotter,
     NoteReleaseSummaryView,
+    ReleaseLessonContentView,
     ReleaseLessonView,
     ReleaseModuleView,
+    SchemeLessonView,
+    SchemeModuleView,
 )
 from learnic.application.common.storage.file_storage import FileStorage
 from learnic.entities.note_block.ids import LessonBlockID
@@ -594,6 +598,131 @@ class NoteReleaseSnapshotterAlchemy(NoteReleaseSnapshotter):
 # ============================== reader ============================== #
 
 
+def _release_blocks_view_select() -> sa.Select[Any]:
+    """Release-block columns + the 11 subtype outerjoins.
+
+    The shared core of every view-projection read over release
+    blocks — callers append their own WHERE / ORDER BY (whole
+    release for ``get_content``, single lesson for ``get_lesson``).
+    Rows feed :func:`spec_for_row` → ``row_to_view``.
+    """
+    return sa.select(
+        note_release_blocks_table.c.oid,
+        note_release_blocks_table.c.release_lesson_id,
+        note_release_blocks_table.c.type,
+        note_release_blocks_table.c.position,
+        note_release_html_blocks_table.c.html,
+        note_release_katex_blocks_table.c.source,
+        note_release_rutube_video_blocks_table.c.external_id.label(
+            "rutube_external_id",
+        ),
+        note_release_rutube_video_blocks_table.c.title.label(
+            "rutube_title",
+        ),
+        note_release_code_blocks_table.c.tabs.label(
+            "code_tabs",
+        ),
+        note_release_single_choice_blocks_table.c.options.label(
+            "single_choice_options",
+        ),
+        note_release_single_choice_blocks_table.c.correct_option_id.label(
+            "single_choice_correct_option_id",
+        ),
+        note_release_multi_choice_blocks_table.c.options.label(
+            "multi_choice_options",
+        ),
+        note_release_multi_choice_blocks_table.c.correct_option_ids.label(
+            "multi_choice_correct_option_ids",
+        ),
+        note_release_text_input_blocks_table.c.accepted_answers.label(
+            "text_input_accepted_answers",
+        ),
+        note_release_text_input_blocks_table.c.case_sensitive.label(
+            "text_input_case_sensitive",
+        ),
+        note_release_text_input_blocks_table.c.trim_whitespace.label(
+            "text_input_trim_whitespace",
+        ),
+        note_release_file_blocks_table.c.file_id.label(
+            "file_block_file_id",
+        ),
+        note_release_file_blocks_table.c.title.label(
+            "file_block_title",
+        ),
+        note_release_video_file_blocks_table.c.file_id.label(
+            "video_file_block_file_id",
+        ),
+        note_release_video_file_blocks_table.c.title.label(
+            "video_file_block_title",
+        ),
+        note_release_photo_collage_blocks_table.c["items"].label(
+            "photo_collage_items",
+        ),
+        note_release_photo_collage_blocks_table.c.title.label(
+            "photo_collage_title",
+        ),
+        note_release_function_graph_blocks_table.c.config.label(
+            "function_graph_config",
+        ),
+    ).select_from(
+        note_release_blocks_table.outerjoin(
+            note_release_html_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_html_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_katex_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_katex_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_rutube_video_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_rutube_video_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_code_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_code_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_single_choice_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_single_choice_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_multi_choice_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_multi_choice_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_text_input_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_text_input_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_file_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_file_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_video_file_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_video_file_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_photo_collage_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_photo_collage_blocks_table.c.oid,
+        )
+        .outerjoin(
+            note_release_function_graph_blocks_table,
+            note_release_blocks_table.c.oid
+            == note_release_function_graph_blocks_table.c.oid,
+        ),
+    )
+
+
 class NoteReleaseReaderAlchemy(NoteReleaseReader):
     def __init__(
         self,
@@ -693,122 +822,7 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
 
         blocks_rows = (
             await self._session.execute(
-                sa.select(
-                    note_release_blocks_table.c.oid,
-                    note_release_blocks_table.c.release_lesson_id,
-                    note_release_blocks_table.c.type,
-                    note_release_blocks_table.c.position,
-                    note_release_html_blocks_table.c.html,
-                    note_release_katex_blocks_table.c.source,
-                    note_release_rutube_video_blocks_table.c.external_id.label(
-                        "rutube_external_id",
-                    ),
-                    note_release_rutube_video_blocks_table.c.title.label(
-                        "rutube_title",
-                    ),
-                    note_release_code_blocks_table.c.tabs.label(
-                        "code_tabs",
-                    ),
-                    note_release_single_choice_blocks_table.c.options.label(
-                        "single_choice_options",
-                    ),
-                    note_release_single_choice_blocks_table.c.correct_option_id.label(  # noqa: E501
-                        "single_choice_correct_option_id",
-                    ),
-                    note_release_multi_choice_blocks_table.c.options.label(
-                        "multi_choice_options",
-                    ),
-                    note_release_multi_choice_blocks_table.c.correct_option_ids.label(  # noqa: E501
-                        "multi_choice_correct_option_ids",
-                    ),
-                    note_release_text_input_blocks_table.c.accepted_answers.label(  # noqa: E501
-                        "text_input_accepted_answers",
-                    ),
-                    note_release_text_input_blocks_table.c.case_sensitive.label(  # noqa: E501
-                        "text_input_case_sensitive",
-                    ),
-                    note_release_text_input_blocks_table.c.trim_whitespace.label(  # noqa: E501
-                        "text_input_trim_whitespace",
-                    ),
-                    note_release_file_blocks_table.c.file_id.label(
-                        "file_block_file_id",
-                    ),
-                    note_release_file_blocks_table.c.title.label(
-                        "file_block_title",
-                    ),
-                    note_release_video_file_blocks_table.c.file_id.label(
-                        "video_file_block_file_id",
-                    ),
-                    note_release_video_file_blocks_table.c.title.label(
-                        "video_file_block_title",
-                    ),
-                    note_release_photo_collage_blocks_table.c["items"].label(
-                        "photo_collage_items",
-                    ),
-                    note_release_photo_collage_blocks_table.c.title.label(
-                        "photo_collage_title",
-                    ),
-                    note_release_function_graph_blocks_table.c.config.label(
-                        "function_graph_config",
-                    ),
-                )
-                .select_from(
-                    note_release_blocks_table.outerjoin(
-                        note_release_html_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_html_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_katex_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_katex_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_rutube_video_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_rutube_video_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_code_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_code_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_single_choice_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_single_choice_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_multi_choice_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_multi_choice_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_text_input_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_text_input_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_file_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_file_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_video_file_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_video_file_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_photo_collage_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_photo_collage_blocks_table.c.oid,
-                    )
-                    .outerjoin(
-                        note_release_function_graph_blocks_table,
-                        note_release_blocks_table.c.oid
-                        == note_release_function_graph_blocks_table.c.oid,
-                    ),
-                )
+                _release_blocks_view_select()
                 .where(note_release_blocks_table.c.release_id == release_id)
                 .order_by(
                     note_release_blocks_table.c.release_lesson_id.asc(),
@@ -866,6 +880,152 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
             notes=meta_row.notes,
             released_at=meta_row.released_at,
             modules=modules,
+        )
+
+    @override
+    async def get_scheme(
+        self,
+        release_id: NoteReleaseID,
+    ) -> NoteReleaseSchemeView | None:
+        meta_row = (
+            await self._session.execute(
+                sa.select(
+                    note_releases_table.c.oid,
+                    note_releases_table.c.product_id,
+                ).where(note_releases_table.c.oid == release_id),
+            )
+        ).one_or_none()
+        if meta_row is None:
+            return None
+
+        modules_rows = (
+            await self._session.execute(
+                sa.select(
+                    note_release_modules_table.c.oid,
+                    note_release_modules_table.c.title,
+                    note_release_modules_table.c.description,
+                    note_release_modules_table.c.position,
+                )
+                .where(note_release_modules_table.c.release_id == release_id)
+                .order_by(note_release_modules_table.c.position.asc()),
+            )
+        ).all()
+
+        lessons_rows = (
+            await self._session.execute(
+                sa.select(
+                    note_release_lessons_table.c.oid,
+                    note_release_lessons_table.c.release_module_id,
+                    note_release_lessons_table.c.title,
+                    note_release_lessons_table.c.position,
+                )
+                .where(note_release_lessons_table.c.release_id == release_id)
+                .order_by(
+                    note_release_lessons_table.c.release_module_id.asc(),
+                    note_release_lessons_table.c.position.asc(),
+                ),
+            )
+        ).all()
+
+        # Aggregate count instead of the content read's 11-way
+        # subtype join — the scheme never loads block payloads.
+        counts_rows = (
+            await self._session.execute(
+                sa.select(
+                    note_release_blocks_table.c.release_lesson_id,
+                    sa.func.count().label("block_count"),
+                )
+                .where(note_release_blocks_table.c.release_id == release_id)
+                .group_by(note_release_blocks_table.c.release_lesson_id),
+            )
+        ).all()
+        counts_by_lesson: dict[uuid.UUID, int] = {
+            row.release_lesson_id: row.block_count for row in counts_rows
+        }
+
+        lessons_by_module: dict[uuid.UUID, list[SchemeLessonView]] = {}
+        for row in lessons_rows:
+            lessons_by_module.setdefault(
+                row.release_module_id,
+                [],
+            ).append(
+                SchemeLessonView(
+                    oid=NoteLessonID(row.oid),
+                    title=row.title,
+                    position=row.position,
+                    block_count=counts_by_lesson.get(row.oid, 0),
+                ),
+            )
+
+        modules: list[SchemeModuleView] = [
+            SchemeModuleView(
+                oid=NoteModuleID(row.oid),
+                title=row.title,
+                description=row.description,
+                position=row.position,
+                lessons=lessons_by_module.get(row.oid, []),
+            )
+            for row in modules_rows
+        ]
+
+        return NoteReleaseSchemeView(
+            release_id=NoteReleaseID(meta_row.oid),
+            product_id=ProductID(meta_row.product_id),
+            modules=modules,
+        )
+
+    @override
+    async def get_lesson(
+        self,
+        lesson_id: NoteLessonID,
+    ) -> ReleaseLessonContentView | None:
+        lesson_row = (
+            await self._session.execute(
+                sa.select(
+                    note_release_lessons_table.c.oid,
+                    note_release_lessons_table.c.release_id,
+                    note_release_lessons_table.c.title,
+                    note_release_lessons_table.c.position,
+                    note_releases_table.c.product_id,
+                )
+                .join(
+                    note_releases_table,
+                    note_release_lessons_table.c.release_id
+                    == note_releases_table.c.oid,
+                )
+                .where(note_release_lessons_table.c.oid == lesson_id),
+            )
+        ).one_or_none()
+        if lesson_row is None:
+            return None
+
+        blocks_rows = (
+            await self._session.execute(
+                _release_blocks_view_select()
+                .where(
+                    note_release_blocks_table.c.release_lesson_id
+                    == lesson_id,
+                )
+                .order_by(note_release_blocks_table.c.position.asc()),
+            )
+        ).all()
+
+        files_by_id = await resolve_file_views(
+            self._session,
+            self._file_storage,
+            collect_file_ids(list(blocks_rows)),
+        )
+
+        return ReleaseLessonContentView(
+            oid=NoteLessonID(lesson_row.oid),
+            release_id=NoteReleaseID(lesson_row.release_id),
+            product_id=ProductID(lesson_row.product_id),
+            title=lesson_row.title,
+            position=lesson_row.position,
+            blocks=[
+                spec_for_row(row).row_to_view(row, files_by_id)
+                for row in blocks_rows
+            ],
         )
 
 
@@ -1039,3 +1199,17 @@ class NoteReleaseBlockGatewayAlchemy(NoteReleaseBlockGateway):
             updated_at=row.updated_at,
         )
         return spec_for_row(row).row_to_entity(row, common)
+
+    @override
+    async def release_id_for_block(
+        self,
+        oid: LessonBlockID,
+    ) -> NoteReleaseID | None:
+        release_id = await self._session.scalar(
+            sa.select(note_release_blocks_table.c.release_id).where(
+                note_release_blocks_table.c.oid == oid,
+            ),
+        )
+        if release_id is None:
+            return None
+        return NoteReleaseID(release_id)

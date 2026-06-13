@@ -44,11 +44,13 @@ from learnic.presentation.http.common.auth_deps import (
     Authenticator,
     access_cookie_scheme,
 )
+from learnic.application.common.errors import WrongFileContentTypeError
 from learnic.entities.common.limits import ResourceLimitReachedError
 from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_OWNER_FIELD_MAP,
     AUTHENTICATED_WITH_FIELD_MAP,
     RESOURCE_LIMIT_RULE,
+    WRONG_FILE_CONTENT_TYPE_RULE,
 )
 from learnic.presentation.http.common.router import DishkaErrorAwareRoute
 from learnic.presentation.http.common.schemas import (
@@ -499,7 +501,8 @@ async def delete_experience(
     status_code=status.HTTP_201_CREATED,
     dependencies=_AUTH_SECURITY,
     response_model=UploadedFileSchema,
-    error_map=AUTHENTICATED_OWNER_FIELD_MAP,
+    error_map=AUTHENTICATED_OWNER_FIELD_MAP
+    | {WrongFileContentTypeError: WRONG_FILE_CONTENT_TYPE_RULE},
 )
 async def upload_icon(
     request: Request,

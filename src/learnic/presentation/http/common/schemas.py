@@ -287,9 +287,10 @@ class UserSchema(UserBaseSchema):
 
 
 class UserSummarySchema(UserBaseSchema):
-    """Lightweight user projection returned by name search.
+    """Lightweight user projection returned by name search and
+    ``GET /users/admins``.
 
-    Adds nothing to :class:`UserBaseSchema`: a search hit is exactly
+    Adds nothing to :class:`UserBaseSchema`: both rows are exactly
     the shared identity projection — id, canonical display name,
     masked login email, verified badge, and avatar thumbnail. The
     full profile (description, cover, contact links) is only returned
@@ -319,6 +320,47 @@ class UserSummarySchema(UserBaseSchema):
     @classmethod
     def from_view(cls, view: UserSummaryOutput) -> Self:
         """Build the schema from a ``SearchUsersQueryHandler`` hit."""
+        return cls.model_validate(view)
+
+
+class AdminUserSummarySchema(UserSummarySchema):
+    """Admin-only user projection — the search summary plus ``is_banned``.
+
+    Returned by ``GET /admin/users/search`` (admin-only). The ban flag
+    is deliberately kept off the public :class:`UserSummarySchema`
+    (shared by ``GET /users/search`` and ``GET /users/admins``) so a
+    user's ban status is only exposed to administrators, who need it to
+    decide whether to offer a ban or an unban.
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "550e8400-e29b-41d4-a716-446655440000",
+                    "full_name": "Lovelace Ada",
+                    "email": "a*****a@example.com",
+                    "is_verified": True,
+                    "is_banned": False,
+                    "avatar": None,
+                },
+            ],
+        },
+    )
+
+    is_banned: bool = Field(
+        description=(
+            "Whether the user is currently banned from the platform. "
+            "Admin-only — drives the choice between offering `ban` and "
+            "`unban` on the admin moderation surface."
+        ),
+        examples=[False, True],
+    )
+
+    @classmethod
+    def from_view(cls, view: UserSummaryOutput) -> Self:
+        """Build the admin schema from a ``SearchUsersQueryHandler`` hit."""
         return cls.model_validate(view)
 
 

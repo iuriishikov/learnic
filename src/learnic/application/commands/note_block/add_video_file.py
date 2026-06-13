@@ -102,16 +102,20 @@ class AddVideoFileBlockCommandHandler:
             data.upload.size,
         )
 
-        file = await self._file_uploads.upload_stream(
-            data.upload,
-            data.actor_id,
-        )
-
+        # Gate the block-count limit BEFORE streaming bytes to storage so
+        # an over-limit lesson rejects cheaply instead of orphaning a
+        # discarded upload. Lock held across the upload keeps the count
+        # authoritative through insert.
         title = BlockTitle(data.title) if data.title is not None else None
         await self._block_gateway.lock_for_lesson(data.lesson_id)
         existing = await self._block_gateway.list_for_lesson(data.lesson_id)
         LESSON_BLOCK_LIMIT.ensure(len(existing))
         next_position = max((b.position for b in existing), default=-1) + 1
+
+        file = await self._file_uploads.upload_stream(
+            data.upload,
+            data.actor_id,
+        )
 
         block = VideoFileBlock.create(
             lesson_id=data.lesson_id,

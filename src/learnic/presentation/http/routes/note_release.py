@@ -39,6 +39,7 @@ from learnic.application.common.errors import (
 from learnic.application.common.persistence.note_content import (
     CodeBlockView,
     FileBlockView,
+    FunctionGraphBlockView,
     HtmlBlockView,
     KatexBlockView,
     LessonBlockView,
@@ -51,13 +52,21 @@ from learnic.application.common.persistence.note_content import (
 )
 from learnic.application.common.persistence.note_release import (
     NoteReleaseContentView,
+    NoteReleaseSchemeView,
     NoteReleaseSummaryView,
+    ReleaseLessonContentView,
     ReleaseLessonView,
     ReleaseModuleView,
+    SchemeLessonView,
+    SchemeModuleView,
 )
-from learnic.application.queries.note_content.get import (
-    GetNoteContentQuery,
-    GetNoteContentQueryHandler,
+from learnic.application.queries.note_content.get_release_lesson import (
+    GetReleaseLessonQuery,
+    GetReleaseLessonQueryHandler,
+)
+from learnic.application.queries.note_content.get_scheme import (
+    GetNoteSchemeQuery,
+    GetNoteSchemeQueryHandler,
 )
 from learnic.application.queries.note_release.get_content import (
     GetNoteReleaseContentQuery,
@@ -69,6 +78,7 @@ from learnic.application.queries.note_release.list_for_product import (
 )
 from learnic.entities.note_block.enums import BlockType
 from learnic.entities.note_block.ids import ChoiceOptionID, LessonBlockID
+from learnic.entities.note_lesson.ids import NoteLessonID
 from learnic.entities.note_block_answer.models import (
     SubmittedMultiChoice,
     SubmittedSingleChoice,
@@ -98,6 +108,7 @@ from learnic.presentation.http.routes.note_content import (
     NoteDraftLessonSchema,
     NoteDraftModuleSchema,
     FileBlockSchema,
+    FunctionGraphBlockSchema,
     HtmlBlockSchema,
     KatexBlockSchema,
     PhotoCollageBlockSchema,
@@ -129,6 +140,12 @@ _NOTE_ID_PATH: Final = Path(
 _RELEASE_ID_PATH: Final = Path(
     description="Target release UUID.",
     examples=["7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"],
+)
+_LESSON_ID_PATH: Final = Path(
+    description=(
+        "Release-side lesson UUID (as listed by the scheme endpoint)."
+    ),
+    examples=["a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"],
 )
 
 _NOTE_AUTHOR_MAP = AUTHENTICATED_OWNER_FIELD_MAP | {
@@ -419,6 +436,7 @@ _PublicLessonBlockSchemaUnion = (
     | FileBlockSchema
     | VideoFileBlockSchema
     | PhotoCollageBlockSchema
+    | FunctionGraphBlockSchema
 )
 
 PublicLessonBlockSchema = Annotated[
@@ -456,13 +474,34 @@ def _block_view_to_public_schema(
         return VideoFileBlockSchema.from_view(view)
     if isinstance(view, PhotoCollageBlockView):
         return PhotoCollageBlockSchema.from_view(view)
+    if isinstance(view, FunctionGraphBlockView):
+        return FunctionGraphBlockSchema.from_view(view)
     # mypy exhaustiveness — all variants of LessonBlockView are listed.
     msg = f"unknown lesson block view: {type(view).__name__!r}"
     raise RuntimeError(msg)
 
 
 class PublicReleaseLessonSchema(BaseModel):
-    """Lesson projection for the student-facing content tree."""
+    """One release lesson with student-safe block payloads.
+
+    Response of ``GET /notes/{note_id}/release-lessons/{lesson_id}``
+    — interactive blocks don't carry their correct answers. The
+    lesson ids come from the scheme endpoint; the SPA loads each
+    lesson's blocks on demand.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "oid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                    "title": "The event loop",
+                    "position": 0,
+                    "blocks": [],
+                },
+            ],
+        },
+    )
 
     oid: UUID
     title: str
@@ -470,7 +509,7 @@ class PublicReleaseLessonSchema(BaseModel):
     blocks: list[PublicLessonBlockSchema]
 
     @classmethod
-    def from_release_view(cls, view: ReleaseLessonView) -> Self:
+    def from_content_view(cls, view: ReleaseLessonContentView) -> Self:
         return cls(
             oid=view.oid,
             title=view.title,
@@ -479,36 +518,64 @@ class PublicReleaseLessonSchema(BaseModel):
         )
 
 
-class PublicReleaseModuleSchema(BaseModel):
-    """Module projection for the student-facing content tree."""
+# ============================== scheme schemas ============================== #
+
+
+class PublicSchemeLessonSchema(BaseModel):
+    """Lesson entry in the structure-only scheme tree.
+
+    Served by ``GET /notes/{note_id}/scheme``. Carries no block
+    payloads — only how many blocks the lesson has, so the catalog
+    page can render a "N materials" label.
+    """
+
+    oid: UUID
+    title: str
+    position: int
+    block_count: int = Field(
+        description="How many content blocks the lesson contains.",
+        examples=[4],
+    )
+
+    @classmethod
+    def from_view(cls, view: SchemeLessonView) -> Self:
+        return cls(
+            oid=view.oid,
+            title=view.title,
+            position=view.position,
+            block_count=view.block_count,
+        )
+
+
+class PublicSchemeModuleSchema(BaseModel):
+    """Module entry in the structure-only scheme tree."""
 
     oid: UUID
     title: str
     description: str | None
     position: int
-    lessons: list[PublicReleaseLessonSchema]
+    lessons: list[PublicSchemeLessonSchema]
 
     @classmethod
-    def from_release_view(cls, view: ReleaseModuleView) -> Self:
+    def from_view(cls, view: SchemeModuleView) -> Self:
         return cls(
             oid=view.oid,
             title=view.title,
             description=view.description,
             position=view.position,
-            lessons=[
-                PublicReleaseLessonSchema.from_release_view(ls) for ls in view.lessons
-            ],
+            lessons=[PublicSchemeLessonSchema.from_view(ls) for ls in view.lessons],
         )
 
 
-class PublicNoteReleaseContentSchema(BaseModel):
-    """Student-facing release content tree.
+class PublicNoteSchemeSchema(BaseModel):
+    """Structure-only release tree for ``GET /notes/{note_id}/scheme``.
 
-    Same shape as :class:`NoteReleaseContentSchema` but the
-    interactive blocks inside don't carry their correct answers.
-    Use this for any endpoint a learner can hit; reserve the
-    authoring schema for endpoints behind ``READ_PRODUCT`` (i.e.
-    collaborators only).
+    Lessons carry a ``block_count`` instead of block payloads, and
+    the release header is deliberately reduced to the ids — no
+    version triplet, kind, or author-written release notes (the
+    changelog can reference gated content). This keeps the
+    endpoint safe to expose publicly for invite-only (``private``)
+    notes whose full content is enrollment-gated.
     """
 
     model_config = ConfigDict(
@@ -517,12 +584,22 @@ class PublicNoteReleaseContentSchema(BaseModel):
                 {
                     "release_id": "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d",
                     "note_id": "3f2c8e64-7b3a-4d2c-9d11-9d4f0a44b6c8",
-                    "ordinal": 3,
-                    "version": {"major": 1, "minor": 1, "patch": 0},
-                    "kind": "minor",
-                    "notes": None,
-                    "released_at": "2026-05-01T10:00:00+00:00",
-                    "modules": [],
+                    "modules": [
+                        {
+                            "oid": "d1e2f3a4-5b6c-4d7e-8f90-1a2b3c4d5e6f",
+                            "title": "Asyncio internals",
+                            "description": None,
+                            "position": 0,
+                            "lessons": [
+                                {
+                                    "oid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                                    "title": "The event loop",
+                                    "position": 0,
+                                    "block_count": 4,
+                                },
+                            ],
+                        },
+                    ],
                 },
             ],
         },
@@ -530,30 +607,14 @@ class PublicNoteReleaseContentSchema(BaseModel):
 
     release_id: UUID
     note_id: UUID
-    ordinal: int
-    version: NoteReleaseVersionSchema
-    kind: NoteReleaseKind
-    notes: str | None
-    released_at: datetime
-    modules: list[PublicReleaseModuleSchema]
+    modules: list[PublicSchemeModuleSchema]
 
     @classmethod
-    def from_view(cls, view: NoteReleaseContentView) -> Self:
+    def from_view(cls, view: NoteReleaseSchemeView) -> Self:
         return cls(
             release_id=view.release_id,
             note_id=view.product_id,
-            ordinal=view.ordinal,
-            version=NoteReleaseVersionSchema(
-                major=view.major,
-                minor=view.minor,
-                patch=view.patch,
-            ),
-            kind=view.kind,
-            notes=view.notes,
-            released_at=view.released_at,
-            modules=[
-                PublicReleaseModuleSchema.from_release_view(m) for m in view.modules
-            ],
+            modules=[PublicSchemeModuleSchema.from_view(m) for m in view.modules],
         )
 
 
@@ -835,36 +896,39 @@ async def get_release_content(
     return NoteReleaseContentSchema.from_view(view)
 
 
-# ============================== student route ============================== #
+# ============================== student routes ============================== #
 
 
 @student_router.get(
-    "/{note_id}/content",
-    summary="Read note content (own enrollment or latest published)",
-    operation_id="getNoteContent",
-    response_model=PublicNoteReleaseContentSchema,
+    "/{note_id}/release-lessons/{lesson_id}",
+    summary="Read one release lesson's blocks",
+    operation_id="getNoteReleaseLesson",
+    response_model=PublicReleaseLessonSchema,
     error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
 )
-async def get_content(
+async def get_release_lesson(
     request: Request,
-    interactor: FromDishka[GetNoteContentQueryHandler],
+    interactor: FromDishka[GetReleaseLessonQueryHandler],
     auth: FromDishka[Authenticator],
-    note_id: Annotated[UUID, _NOTE_ID_PATH],
-) -> PublicNoteReleaseContentSchema:
-    """Return note content for the current viewer.
+    note_id: Annotated[UUID, _NOTE_ID_PATH],  # noqa: ARG001
+    lesson_id: Annotated[UUID, _LESSON_ID_PATH],
+) -> PublicReleaseLessonSchema:
+    """Return one release lesson's blocks for the current viewer.
 
     Public endpoint — the access cookie is read opportunistically
-    via :meth:`Authenticator.authenticate_optional`. The resolution
-    matrix is:
+    via :meth:`Authenticator.authenticate_optional`. The per-lesson
+    companion of ``GET /notes/{note_id}/scheme``: the scheme lists
+    the lesson ids, this endpoint loads one lesson's blocks on
+    demand. Access, first match wins:
 
-    * Caller has an ``ACTIVE`` enrollment for this note → their
-      **pinned** release. Strict pinning still holds; students do
-      not auto-upgrade.
-    * Anyone else (anonymous, signed-in but not enrolled, refunded /
-      revoked enrollments) viewing a ``PUBLISHED`` note → the
-      **latest** release of the product.
-    * Anything else (product missing, not a note, or in a
-      non-``PUBLISHED`` state with no active enrollment) → 404.
+    * Actively-enrolled student whose **pinned** release contains
+      the lesson (strict pinning — lessons of other releases fall
+      through to the open-distribution rule).
+    * Product author / collaborator with ``READ_PRODUCT`` — any
+      release, any product status.
+    * Anyone, including anonymous, when the note is ``PUBLISHED``
+      and openly distributed (``public`` visibility).
+    * Anything else → 404 (uniform across all "no access" cases).
 
     Blocks are projected through the **public** schema set:
     correct answers for interactive blocks are stripped
@@ -875,11 +939,70 @@ async def get_content(
         request: Source of the access cookie (optional).
         interactor: Injected handler.
         auth: Injected authenticator (used opportunistically).
+        note_id: Note product UUID (URL framing; authorization
+            walks lesson → release → product).
+        lesson_id: Release-side lesson UUID from the scheme.
+
+    Returns:
+        :class:`PublicReleaseLessonSchema` — the lesson with its
+        student-safe block payloads.
+
+    Raises:
+        EntityNotFoundError: HTTP 404 — lesson missing, product
+            missing or not a note, or the viewer has no access
+            under the rules above.
+    """
+    ctx = await auth.authenticate_optional(request)
+    view = await interactor.run(
+        GetReleaseLessonQuery(
+            actor_id=ctx.user_id if ctx is not None else None,
+            lesson_id=NoteLessonID(lesson_id),
+        ),
+    )
+    return PublicReleaseLessonSchema.from_content_view(view)
+
+
+@student_router.get(
+    "/{note_id}/scheme",
+    summary="Read note scheme (modules and lessons, no block payloads)",
+    operation_id="getNoteScheme",
+    response_model=PublicNoteSchemeSchema,
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+)
+async def get_scheme(
+    request: Request,
+    interactor: FromDishka[GetNoteSchemeQueryHandler],
+    auth: FromDishka[Authenticator],
+    note_id: Annotated[UUID, _NOTE_ID_PATH],
+) -> PublicNoteSchemeSchema:
+    """Return the structure-only tree for the current viewer.
+
+    Public endpoint — the access cookie is read opportunistically
+    via :meth:`Authenticator.authenticate_optional`. The entry
+    point of the student read flow: it hands the SPA the lesson
+    ids, whose blocks are then loaded one by one via
+    ``GET /notes/{note_id}/release-lessons/{lesson_id}``. Lessons
+    carry only a ``block_count`` instead of block payloads, so the
+    scheme stays public for **both** visibility variants:
+
+    * Caller has an ``ACTIVE`` enrollment for this note → their
+      **pinned** release.
+    * Anyone else viewing a ``PUBLISHED`` note → the **latest**
+      release — including ``private`` (invite-only) notes, which
+      are catalog-discoverable by design; only their full content
+      is enrollment-gated.
+    * Anything else (product missing, not a note, or in a
+      non-``PUBLISHED`` state with no active enrollment) → 404.
+
+    Args:
+        request: Source of the access cookie (optional).
+        interactor: Injected handler.
+        auth: Injected authenticator (used opportunistically).
         note_id: Note product UUID.
 
     Returns:
-        :class:`PublicNoteReleaseContentSchema` — student-safe
-        projection of the chosen release tree.
+        :class:`PublicNoteSchemeSchema` — modules and lessons of
+        the chosen release, no block payloads.
 
     Raises:
         EntityNotFoundError: HTTP 404 — product missing, product
@@ -888,12 +1011,12 @@ async def get_content(
     """
     ctx = await auth.authenticate_optional(request)
     view = await interactor.run(
-        GetNoteContentQuery(
+        GetNoteSchemeQuery(
             actor_id=ctx.user_id if ctx is not None else None,
             product_id=ProductID(note_id),
         ),
     )
-    return PublicNoteReleaseContentSchema.from_view(view)
+    return PublicNoteSchemeSchema.from_view(view)
 
 
 # ============================== check / reveal routes ============================== #
@@ -1089,8 +1212,9 @@ async def list_my_block_answers(
     """Return the caller's saved submissions for this note.
 
     Scoped to the release the caller is pinned to (their active
-    enrollment), so the answers line up with the content returned by
-    ``GET /notes/{note_id}/content``. A signed-in caller who is not
+    enrollment), so the answers line up with the lessons served by
+    ``GET /notes/{note_id}/release-lessons/{lesson_id}``. A
+    signed-in caller who is not
     actively enrolled (or for whom the product is not a note) simply
     has no saved answers — the endpoint returns an empty list rather
     than an error, so the SPA can call it unconditionally on load.

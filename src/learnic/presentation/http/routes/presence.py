@@ -35,7 +35,10 @@ from learnic.application.queries.presence.get_user_presence import (
     GetUserPresenceQueryHandler,
     UserPresenceView,
 )
-from learnic.entities.presence.constants import HEARTBEAT_INTERVAL_SECONDS
+from learnic.entities.presence.constants import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    MAX_PRESENCE_SUBSCRIPTIONS,
+)
 from learnic.entities.presence.value_objects import PresenceStatus
 from learnic.entities.user.models import UserID
 from learnic.presentation.http.common.auth_deps import (
@@ -222,13 +225,21 @@ async def presence_ws(websocket: WebSocket) -> None:
             kind = msg.get("type")
             ids = _parse_user_ids(msg.get("user_ids"))
             if kind == "subscribe" and ids:
-                subscriptions.update(ids)
-                online = await tracker.filter_online(list(ids))
+                # Bound the per-connection subscription set: drop ids
+                # once the cap is reached so a client cannot grow memory
+                # / the Redis pipeline without limit.
+                capacity = MAX_PRESENCE_SUBSCRIPTIONS - len(subscriptions)
+                if capacity <= 0:
+                    continue
+                accepted = list(ids)[:capacity]
+                subscriptions.update(accepted)
+                online = await tracker.filter_online(accepted)
                 await websocket.send_json(
                     {
                         "type": "snapshot",
                         "presences": [
-                            _presence_payload(uid, uid in online) for uid in ids
+                            _presence_payload(uid, uid in online)
+                            for uid in accepted
                         ],
                     },
                 )

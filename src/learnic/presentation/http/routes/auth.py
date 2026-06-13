@@ -58,6 +58,7 @@ from learnic.application.commands.session.revoke import (
 )
 from learnic.application.common.errors import (
     AccountBannedError,
+    AnonymousEmailRateLimitExceededError,
     EmailAlreadyRegisteredError,
     EmailNotVerifiedError,
     EntityNotFoundError,
@@ -111,6 +112,7 @@ from learnic.presentation.http.common.cookies import (
 from learnic.presentation.http.common.device import device_from_request
 from learnic.presentation.http.common.errors.rules import (
     ACCOUNT_BANNED_RULE,
+    ANON_EMAIL_RATE_LIMIT_RULE,
     AUTHENTICATED_MAP,
     EMAIL_ALREADY_REGISTERED_RULE,
     EMAIL_NOT_VERIFIED_RULE,
@@ -145,6 +147,7 @@ class RegisterSchema(BaseModel):
                     "first_name": "Ada",
                     "last_name": "Lovelace",
                     "patronymic": None,
+                    "distribution_consent": False,
                 },
             ],
         },
@@ -204,6 +207,17 @@ class RegisterSchema(BaseModel):
         ),
         max_length=PATRONYMIC_MAX_LEN,
         examples=[None, "Augusta"],
+    )
+    distribution_consent: bool = Field(
+        default=False,
+        description=(
+            "Whether the user gave consent to the distribution of their "
+            "personal data under Article 10.1 of 152-FZ (i.e. making "
+            "profile data publicly available). Optional; defaults to "
+            "`false`. Declining does NOT block registration. When `true`, "
+            "the server records the consent timestamp on the user."
+        ),
+        examples=[False, True],
     )
 
 
@@ -397,6 +411,7 @@ class ResetPasswordSchema(BaseModel):
     error_map={
         FieldError: FIELD_ERROR_RULE,
         EmailAlreadyRegisteredError: EMAIL_ALREADY_REGISTERED_RULE,
+        AnonymousEmailRateLimitExceededError: ANON_EMAIL_RATE_LIMIT_RULE,
     },
 )
 async def register(
@@ -438,6 +453,7 @@ async def register(
             first_name=payload.first_name,
             last_name=payload.last_name,
             patronymic=payload.patronymic,
+            distribution_consent=payload.distribution_consent,
         ),
     )
     await stats.record(Statistic.for_registration(actor_id=result.user_id))
@@ -577,6 +593,7 @@ async def logout(
     ctx = await auth.authenticate(request)
     await interactor.run(
         LogoutCommand(
+            user_id=ctx.user_id,
             refresh_token=request.cookies.get(REFRESH_COOKIE),
             access_family_id=ctx.family_id,
         )
@@ -717,7 +734,10 @@ async def email_verification_wait(
     operation_id="resendVerificationEmail",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=_SIGNUP_SESSION_SECURITY,
-    error_map={InvalidTokenError: INVALID_TOKEN_RULE},
+    error_map={
+        InvalidTokenError: INVALID_TOKEN_RULE,
+        AnonymousEmailRateLimitExceededError: ANON_EMAIL_RATE_LIMIT_RULE,
+    },
 )
 async def email_verification_resend(
     request: Request,
@@ -835,7 +855,10 @@ async def token_status(
     summary="Request a password-reset email",
     operation_id="requestPasswordReset",
     status_code=status.HTTP_204_NO_CONTENT,
-    error_map={FieldError: FIELD_ERROR_RULE},
+    error_map={
+        FieldError: FIELD_ERROR_RULE,
+        AnonymousEmailRateLimitExceededError: ANON_EMAIL_RATE_LIMIT_RULE,
+    },
 )
 async def password_reset_request(
     payload: RequestPasswordResetSchema,

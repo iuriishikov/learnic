@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Final, final
 
 from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
+from learnic.application.common.auth.role_hierarchy import RoleHierarchy
 from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
@@ -22,6 +23,7 @@ from learnic.application.common.persistence.product_collaboration import (
     ProductCollaborationGateway,
     ProductCollaborationSaver,
 )
+from learnic.application.common.persistence.role import RoleGateway
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.product_events import (
@@ -31,6 +33,9 @@ from learnic.application.common.product_events import (
 )
 from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.tasks.scheduler import TaskScheduler
+from learnic.application.commands.product_collaboration._grant_spec import (
+    require_grants_within_actor_permissions,
+)
 from learnic.application.commands.product_collaboration.invite_by_email import (
     EMAIL_INVITE_RATE_LIMIT_WINDOW,
     MAX_EMAIL_INVITES_PER_DAY,
@@ -70,11 +75,13 @@ class ReinviteCollaboratorCommandHandler:
     ``PENDING_INVITE`` collaboration.
 
     Authorisation gate is identical to the original invite flow —
-    caller must hold ``MANAGE_COLLABORATORS`` on the source
-    product. The role-hierarchy guard from the original invite is
-    not re-run here because the grants are copied verbatim from a
-    previously authorised invite (they were validated when the
-    source row was created); re-validating would only add latency.
+    caller must hold ``MANAGE_COLLABORATORS`` on the source product.
+    The role-hierarchy and permission-subset guards are re-run here
+    against the **current** actor: the source grants were validated
+    against whoever created that row, which may have been a
+    higher-ranked actor, so copying them verbatim without re-checking
+    would let a lower-ranked manager re-issue a grant they could never
+    assign directly (privilege escalation).
 
     Re-invite is rejected if the source collaboration is still active
     or pending, or if a sibling pending invite for the same target
@@ -86,9 +93,11 @@ class ReinviteCollaboratorCommandHandler:
         self,
         transaction: Transaction,
         authorizer: Authorizer,
+        hierarchy: RoleHierarchy,
         user_gateway: UserGateway,
         collab_gateway: ProductCollaborationGateway,
         collab_saver: ProductCollaborationSaver,
+        role_gateway: RoleGateway,
         scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
@@ -97,9 +106,11 @@ class ReinviteCollaboratorCommandHandler:
     ) -> None:
         self._transaction: Final = transaction
         self._authorizer: Final = authorizer
+        self._hierarchy: Final = hierarchy
         self._user_gateway: Final = user_gateway
         self._collab_gateway: Final = collab_gateway
         self._collab_saver: Final = collab_saver
+        self._role_gateway: Final = role_gateway
         self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
@@ -120,6 +131,25 @@ class ReinviteCollaboratorCommandHandler:
             AuthzTarget.for_product(source.product_id),
             Permission.MANAGE_COLLABORATORS,
         )
+        role_ids = [grant.role_id for grant in source.grants]
+        await self._hierarchy.require_can_assign_roles(
+            source.product_id,
+            data.actor_id,
+            role_ids,
+        )
+        await require_grants_within_actor_permissions(
+            authorizer=self._authorizer,
+            role_gateway=self._role_gateway,
+            actor_id=data.actor_id,
+            product_id=source.product_id,
+            role_ids=role_ids,
+        )
+        if source.collaborator_id is not None:
+            await self._hierarchy.require_can_act_on_user(
+                source.product_id,
+                data.actor_id,
+                source.collaborator_id,
+            )
         await self._guard_no_active_or_pending(source)
         PRODUCT_COLLABORATION_LIMIT.ensure(
             await self._collab_gateway.count_active_or_pending_for_product(

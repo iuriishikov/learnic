@@ -41,6 +41,7 @@ import uuid
 from typing import Sequence, Union
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from alembic import op
 
 
@@ -243,7 +244,12 @@ def downgrade() -> None:
         "roles",
         sa.Column(
             "kind",
-            sa.Enum("system", "custom", name="role_kind", create_type=False),
+            postgresql.ENUM(
+                "system",
+                "custom",
+                name="role_kind",
+                create_type=False,
+            ),
             nullable=True,
         ),
     )
@@ -251,7 +257,7 @@ def downgrade() -> None:
     op.alter_column(
         "roles",
         "kind",
-        existing_type=sa.Enum(
+        existing_type=postgresql.ENUM(
             "system",
             "custom",
             name="role_kind",

@@ -107,7 +107,7 @@ def fake_block_gateway() -> AsyncMock:
 @pytest.fixture
 def fake_html_sanitizer() -> MagicMock:
     sanitizer = MagicMock()
-    sanitizer.sanitize = MagicMock(side_effect=lambda raw: raw)
+    sanitizer.sanitize = AsyncMock(side_effect=lambda raw: raw)
     return sanitizer
 
 

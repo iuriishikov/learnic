@@ -17,12 +17,19 @@ class PushSubscriptionGateway(Protocol):
 
     async def upsert(self, subscription: PushSubscription) -> None: ...
 
-    async def delete_by_endpoint(self, endpoint: str) -> bool:
-        """Delete the subscription with the given endpoint.
+    async def delete_by_endpoint(
+        self,
+        endpoint: str,
+        user_id: UserID,
+    ) -> bool:
+        """Delete the caller's subscription with the given endpoint.
 
-        Returns ``True`` if a row was removed, ``False`` if the
-        endpoint was already absent. Callers can ignore the return —
-        unsubscribe is idempotent at the HTTP boundary.
+        Scoped to ``user_id`` so one user can never delete another
+        user's subscription by presenting its (opaque but possibly
+        leaked) endpoint string. Returns ``True`` if a row was
+        removed, ``False`` if the endpoint was absent for that user.
+        Callers can ignore the return — unsubscribe is idempotent at
+        the HTTP boundary.
         """
         ...
 

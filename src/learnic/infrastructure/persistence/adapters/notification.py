@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
-from learnic.application.common.auth.authorizer import Authorizer, AuthzTarget
+from learnic.application.common.auth.authorizer import Authorizer
 from learnic.application.common.notifications.gateway import (
     NotificationGateway,
 )
@@ -43,7 +43,6 @@ from learnic.entities.product_collaboration.ids import (
 )
 from learnic.entities.product_gift.enums import GiftStatus
 from learnic.entities.product_gift.ids import ProductGiftID
-from learnic.entities.role.permissions import Permission
 from learnic.entities.user.models import UserID
 from learnic.infrastructure.notifications.specs._persistence import (
     NotificationKindPersistence,
@@ -208,11 +207,24 @@ class NotificationReaderAlchemy(NotificationReader):
         if category is not None:
             stmt = stmt.where(notifications_table.c.category == category.value)
         if cursor is not None:
-            cursor_dt = _parse_cursor(cursor)
-            if cursor_dt is not None:
-                stmt = stmt.where(
-                    notifications_table.c.created_at < cursor_dt,
-                )
+            parsed = _parse_cursor(cursor)
+            if parsed is not None:
+                cursor_dt, cursor_oid = parsed
+                if cursor_oid is None:
+                    stmt = stmt.where(
+                        notifications_table.c.created_at < cursor_dt,
+                    )
+                else:
+                    # Composite keyset matching the (created_at DESC,
+                    # oid DESC) order, so notifications sharing the
+                    # boundary ``created_at`` are not skipped.
+                    stmt = stmt.where(
+                        sa.tuple_(
+                            notifications_table.c.created_at,
+                            notifications_table.c.oid,
+                        )
+                        < sa.tuple_(cursor_dt, cursor_oid),
+                    )
         stmt = stmt.order_by(
             notifications_table.c.created_at.desc(),
             notifications_table.c.oid.desc(),
@@ -227,7 +239,11 @@ class NotificationReaderAlchemy(NotificationReader):
         details_by_id = await self._load_details_for_rows(rows)
         refs = await self._resolve_refs(recipient_id, details_by_id)
         items = self._project_rows(rows, details_by_id, refs)
-        next_cursor = rows[-1].created_at.isoformat() if has_more else None
+        if has_more:
+            last = rows[-1]
+            next_cursor = f"{last.created_at.isoformat()}|{last.oid}"
+        else:
+            next_cursor = None
         return NotificationListPage(items=items, next_cursor=next_cursor)
 
     @override
@@ -578,17 +594,13 @@ class NotificationReaderAlchemy(NotificationReader):
         recipient_id: UserID,
         product_ids: set[ProductID],
     ) -> dict[ProductID, bool]:
-        result: dict[ProductID, bool] = {}
-        for product_id in product_ids:
-            permissions = await self._authorizer.effective_permissions(
-                recipient_id,
-                AuthzTarget.for_product(product_id),
-            )
-            result[product_id] = (
-                permissions is not None
-                and Permission.MANAGE_COLLABORATORS in permissions.permissions
-            )
-        return result
+        # Single batched authorizer call instead of one
+        # effective_permissions(...) per product (the former N+1 — each
+        # call fanned out to ~4 queries).
+        return await self._authorizer.manage_collaborators_for_products(
+            recipient_id,
+            product_ids,
+        )
 
     def _row_to_view(
         self,
@@ -631,8 +643,22 @@ def _build_actor(row: sa.Row[Any]) -> UserRefView | None:
     )
 
 
-def _parse_cursor(cursor: str) -> datetime | None:
+def _parse_cursor(cursor: str) -> tuple[datetime, UUID | None] | None:
+    """Decode a ``<created_at>|<oid>`` keyset cursor.
+
+    Returns ``(created_at, oid)``. Tolerates a legacy
+    ``created_at``-only cursor (no ``|``) by returning ``oid=None`` so
+    in-flight clients holding an old cursor still paginate (on the
+    coarse created_at boundary) rather than 500.
+    """
+    raw_dt, sep, raw_oid = cursor.partition("|")
     try:
-        return datetime.fromisoformat(cursor)
+        created_at = datetime.fromisoformat(raw_dt)
+    except ValueError:
+        return None
+    if not sep:
+        return (created_at, None)
+    try:
+        return (created_at, UUID(raw_oid))
     except ValueError:
         return None

@@ -35,7 +35,7 @@ class SetUserAvatarCommandHandler:
         if user is None:
             raise EntityNotFoundError(data.user_id)
 
-        file = await self._file_uploads.upload_stream(
+        file = await self._file_uploads.upload_image_stream(
             data.upload,
             data.user_id,
         )

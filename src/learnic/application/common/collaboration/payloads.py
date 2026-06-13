@@ -749,6 +749,13 @@ def _block_snapshot_from_wire(data: dict[str, Any]) -> BlockSnapshot:
             ],
             title=data.get("title"),
         )
+    if block_type == "function_graph":
+        return FunctionGraphBlockSnapshot(
+            type="function_graph",
+            oid=data["oid"],
+            position=data["position"],
+            config=data["config"],
+        )
     msg = f"unknown block snapshot type: {block_type!r}"
     raise ValueError(msg)
 

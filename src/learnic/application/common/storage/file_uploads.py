@@ -1,5 +1,6 @@
 from typing import Final, NewType, final
 
+from learnic.application.common.errors import WrongFileContentTypeError
 from learnic.application.common.persistence.file import FilesGateway
 from learnic.application.common.persistence.transaction import (
     EntitySaver,
@@ -25,6 +26,10 @@ of infrastructure imports. A ``NewType`` over ``str`` keeps the DI
 graph statically distinguishable from arbitrary strings.
 """
 
+IMAGE_CONTENT_TYPE_PREFIX: Final = "image/"
+"""Single source of truth for the "this upload must be an image" rule
+shared by the avatar / cover / experience-icon / product-cover flows."""
+
 
 @final
 class FileUploadService:
@@ -48,9 +53,17 @@ class FileUploadService:
     (``parent.set_cover(file.oid)``) and inspect attributes for
     follow-up logic.
 
-    The S3 ``put`` runs before the row is flushed; on a later
-    rollback the blob is orphaned and swept by the file-lifecycle
-    worker — same behaviour as the previous inlined code.
+    The S3 ``put`` runs before the row is flushed: this ordering keeps
+    a committed ``files`` row from ever pointing at a missing blob (the
+    inverse — row first, then put — would leave the quota aggregate
+    counting a file that storage never received on a put failure). The
+    cost is that a rollback *after* a successful put orphans the blob,
+    since there is no bucket-scanning reaper. Callers must therefore do
+    every cheap precondition (auth, block-count limit, content-type)
+    BEFORE calling this — see the file-block handlers — so the only
+    residual orphan window is an unexpected post-put failure, which is
+    rare. The deliberate-deletion path (``soft_delete_previous`` →
+    ``purge_file_from_storage_task``) is self-healing and never leaks.
     """
 
     def __init__(
@@ -110,6 +123,33 @@ class FileUploadService:
         await self._transaction.flush()
         return file
 
+    async def upload_image_stream(
+        self,
+        upload: IncomingUpload,
+        uploaded_by: UserID,
+    ) -> File:
+        """Like :meth:`upload_stream` but rejects non-image uploads.
+
+        Used by the avatar / cover / experience-icon / product-cover
+        handlers, which are all documented image-only. Enforces the
+        ``image/*`` content-type BEFORE any bytes reach storage, so a
+        ``text/html`` or ``image/svg+xml`` payload cannot be stored and
+        later served inline as a "photo" (content-type confusion). This
+        mirrors the explicit prefix guard the note/blog image blocks
+        already apply.
+
+        Raises:
+            WrongFileContentTypeError: ``upload.content_type`` is not an
+                ``image/*`` type; HTTP 415.
+        """
+        if not upload.content_type.startswith(IMAGE_CONTENT_TYPE_PREFIX):
+            raise WrongFileContentTypeError(
+                file_id="<upload>",
+                expected_prefix=IMAGE_CONTENT_TYPE_PREFIX,
+                actual=upload.content_type,
+            )
+        return await self.upload_stream(upload, uploaded_by)
+
     async def previous_file_size(
         self,
         previous_file_id: FileID | None,
@@ -137,27 +177,55 @@ class FileUploadService:
     async def soft_delete_previous(
         self,
         previous_file_id: FileID | None,
-    ) -> None:
-        """Mark the file being replaced as deleted and queue S3 purge.
+    ) -> bool:
+        """Mark the file being freed as deleted and queue S3 purge.
 
         Idempotent: no-ops when ``previous_file_id`` is ``None``,
         when the row is missing, or when it is already soft-deleted.
 
-        Side effect: enqueues
+        **Release-protecting.** A published release shares the exact
+        ``files`` row of the draft it was snapshotted from — the
+        snapshot copies ``file_id`` verbatim, it does not duplicate
+        the blob. So a file the caller is freeing (a removed/replaced
+        draft block, or a quota-eviction candidate) may still be the
+        only copy a live release serves. When
+        :meth:`FilesGateway.is_referenced_by_release` reports a
+        release still pins it, the file is left fully intact — not
+        even soft-deleted, so it stays visible to release reads and
+        the quota aggregate. This holds the invariant that an
+        already-published release never loses its media, whether the
+        trigger is a draft edit or automatic quota enforcement.
+
+        Side effect: when the file is not release-pinned, enqueues
         :func:`purge_file_from_storage_task` so the worker physically
         removes the S3 blob shortly after the caller's transaction
         commits — that's how the user's plan quota actually frees up
         space on the cloud provider, not just inside the DB
-        aggregate. The task re-checks ``deleted_at`` before touching
-        storage, so a producer that rolls back after this call does
-        not leak a deletion to S3.
+        aggregate. The task re-checks ``deleted_at`` (and the release
+        guard) before touching storage, so a producer that rolls back
+        after this call does not leak a deletion to S3.
+
+        Returns:
+            ``True`` if the file was soft-deleted and queued for
+            purge; ``False`` when it was spared — a no-op id /
+            missing / already-deleted row, or a release still pins
+            it. The reconcile job uses this to credit ``freed_bytes``
+            only for files it genuinely evicted.
         """
         if previous_file_id is None:
-            return
+            return False
         previous_file = await self._files_gateway.with_id(previous_file_id)
         if previous_file is None or previous_file.is_deleted:
-            return
+            return False
+        if await self._files_gateway.is_referenced_by_release(
+            previous_file_id,
+        ):
+            # A published release still serves this exact blob. Freeing
+            # it would strip media out of immutable, already-published
+            # content, so leave it untouched.
+            return False
         previous_file.mark_deleted()
         await self._task_scheduler.schedule_purge_file_from_storage(
             previous_file_id,
         )
+        return True

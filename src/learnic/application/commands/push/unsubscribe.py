@@ -16,11 +16,11 @@ class UnsubscribePushCommand:
 class UnsubscribePushCommandHandler:
     """Drop a Web Push subscription owned by the caller.
 
-    Idempotent: deleting an unknown endpoint returns silently.
-    Cross-user attempts are silently no-op'd too — the gateway
-    only matches on ``endpoint``, which is opaque enough that
-    leaking nothing is acceptable; foreign endpoints will simply
-    not match anything in this user's row set in practice.
+    Idempotent: deleting an unknown endpoint returns silently. The
+    delete is scoped to the authenticated ``user_id`` so a caller can
+    never remove another user's subscription by presenting its
+    endpoint string (which, while opaque, can leak via shared devices
+    or logs).
     """
 
     def __init__(
@@ -32,6 +32,5 @@ class UnsubscribePushCommandHandler:
         self._gateway: Final = gateway
 
     async def run(self, data: UnsubscribePushCommand) -> None:
-        del data.user_id
-        await self._gateway.delete_by_endpoint(data.endpoint)
+        await self._gateway.delete_by_endpoint(data.endpoint, data.user_id)
         await self._transaction.commit()

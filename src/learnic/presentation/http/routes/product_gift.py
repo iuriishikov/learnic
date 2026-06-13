@@ -73,6 +73,7 @@ from learnic.presentation.http.common.errors.rules import (
     AUTHENTICATED_AUTHORIZED_FIELD_MAP,
     GIFT_ACCEPT_MAP,
     GIFT_GET_MAP,
+    GIFT_INVITE_BY_USER_MAP,
     GIFT_INVITE_MAP,
     GIFT_REVOKE_MAP,
 )
@@ -319,7 +320,7 @@ async def list_gifts(
     status_code=status.HTTP_201_CREATED,
     response_model=CreatedGiftSchema,
     dependencies=_AUTH_SECURITY,
-    error_map=GIFT_INVITE_MAP,
+    error_map=GIFT_INVITE_BY_USER_MAP,
 )
 async def invite_by_user(
     request: Request,
