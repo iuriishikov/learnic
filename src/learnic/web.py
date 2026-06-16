@@ -185,13 +185,16 @@ without a REST refetch.
 
 `collaboration_*` events carry
 `{"collaboration_id": "<UUID>", "collaborator_id": "<UUID | absent>",
-"invited_email": "<string | absent>"}`. `collaboration_id` is
+"invited_email": "<masked string | absent>"}`. `collaboration_id` is
 always present; `collaborator_id` is set on
 `collaboration_invited` for by-user invites, on every
 `collaboration_accepted`, and on `collaboration_revoked` /
 `collaboration_grants_updated` when the affected row carries one;
 `invited_email` appears only on `collaboration_invited` for
-by-email invites that have not yet been accepted. SPA action per
+by-email invites that have not yet been accepted, and is **masked**
+(`f*****d@domain.com`) — the channel fans out to every READ_PRODUCT
+subscriber, so the raw address is never broadcast; it matches the
+masked email the REST collaborator list returns. SPA action per
 kind:
 
 - `collaboration_invited` — append the row to the collaborators

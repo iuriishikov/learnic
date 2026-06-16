@@ -3,7 +3,7 @@ from typing import Annotated, Final, Literal, Self
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka
-from fastapi import Depends, Path, Request, status
+from fastapi import Depends, Path, Query, Request, status
 from fastapi_error_map import ErrorAwareRouter
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
@@ -50,6 +50,10 @@ from learnic.application.common.persistence.note_content import (
     TextInputBlockView,
     VideoFileBlockView,
 )
+from learnic.application.common.pagination import (
+    SEARCH_QUERY_MAX_LEN,
+    SEARCH_QUERY_MIN_LEN,
+)
 from learnic.application.common.persistence.note_release import (
     NoteReleaseContentView,
     NoteReleaseSchemeView,
@@ -57,6 +61,7 @@ from learnic.application.common.persistence.note_release import (
     ReleaseLessonContentView,
     ReleaseLessonView,
     ReleaseModuleView,
+    ReleaseSearchMatch,
     SchemeLessonView,
     SchemeModuleView,
 )
@@ -67,6 +72,10 @@ from learnic.application.queries.note_content.get_release_lesson import (
 from learnic.application.queries.note_content.get_scheme import (
     GetNoteSchemeQuery,
     GetNoteSchemeQueryHandler,
+)
+from learnic.application.queries.note_content.search_content import (
+    SearchNoteContentQuery,
+    SearchNoteContentQueryHandler,
 )
 from learnic.application.queries.note_release.get_content import (
     GetNoteReleaseContentQuery,
@@ -518,6 +527,97 @@ class PublicReleaseLessonSchema(BaseModel):
         )
 
 
+class NoteContentSearchResultSchema(BaseModel):
+    """One ranked match from ``GET /notes/{note_id}/search``.
+
+    Each result locates a hit inside the viewer's release: a content
+    block (``block_id`` set — open ``lesson_id`` and scroll to the
+    block) or a module / lesson title hit (``block_id`` ``null`` —
+    open ``lesson_id`` at the top). ``snippet`` is a short excerpt
+    with matched terms wrapped in ``<<hl>>…<</hl>>`` markers — the
+    SPA splits on the markers and renders its own highlight element;
+    it must NOT inject the snippet as HTML (the source text may itself
+    contain markup that was stripped before excerpting).
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "module_id": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                    "module_title": "Пределы и непрерывность",
+                    "lesson_id": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                    "lesson_title": "Что такое предел",
+                    "block_id": "c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+                    "block_type": "html",
+                    "snippet": (
+                        "…определение <<hl>>предела<</hl>> функции в "
+                        "точке…"
+                    ),
+                },
+            ],
+        },
+    )
+
+    module_id: UUID = Field(
+        description="UUID of the module containing the match.",
+        examples=["b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e"],
+    )
+    module_title: str = Field(
+        description="Title of the containing module (breadcrumb).",
+        examples=["Пределы и непрерывность"],
+    )
+    lesson_id: UUID = Field(
+        description=(
+            "Release-side lesson UUID to open. Load its blocks via "
+            "``GET /notes/{note_id}/release-lessons/{lesson_id}``."
+        ),
+        examples=["a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"],
+    )
+    lesson_title: str = Field(
+        description="Title of the lesson the match lives in.",
+        examples=["Что такое предел"],
+    )
+    block_id: UUID | None = Field(
+        default=None,
+        description=(
+            "UUID of the matched content block — scroll to it inside "
+            "the lesson. ``null`` for a module / lesson **title** "
+            "match (open the lesson at the top)."
+        ),
+        examples=["c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f"],
+    )
+    block_type: str | None = Field(
+        default=None,
+        description=(
+            "Discriminator of the matched block (``html``, ``katex``, "
+            "``code``, …) for an optional icon; ``null`` for a title "
+            "match."
+        ),
+        examples=["html"],
+    )
+    snippet: str = Field(
+        description=(
+            "Excerpt around the match. Matched terms are wrapped in "
+            "``<<hl>>…<</hl>>`` markers — render as highlights by "
+            "splitting on the markers, never as raw HTML."
+        ),
+        examples=["…определение <<hl>>предела<</hl>> функции…"],
+    )
+
+    @classmethod
+    def from_match(cls, match: ReleaseSearchMatch) -> Self:
+        return cls(
+            module_id=match.module_id,
+            module_title=match.module_title,
+            lesson_id=match.lesson_id,
+            lesson_title=match.lesson_title,
+            block_id=match.block_id,
+            block_type=match.block_type,
+            snippet=match.snippet,
+        )
+
+
 # ============================== scheme schemas ============================== #
 
 
@@ -960,6 +1060,88 @@ async def get_release_lesson(
         ),
     )
     return PublicReleaseLessonSchema.from_content_view(view)
+
+
+@student_router.get(
+    "/{note_id}/search",
+    summary="Full-text search a note's content",
+    operation_id="searchNoteContent",
+    response_model=list[NoteContentSearchResultSchema],
+    error_map={EntityNotFoundError: ENTITY_NOT_FOUND_RULE},
+)
+async def search_note_content(
+    request: Request,
+    interactor: FromDishka[SearchNoteContentQueryHandler],
+    auth: FromDishka[Authenticator],
+    note_id: Annotated[UUID, _NOTE_ID_PATH],
+    q: Annotated[
+        str,
+        Query(
+            min_length=SEARCH_QUERY_MIN_LEN,
+            max_length=SEARCH_QUERY_MAX_LEN,
+            description=(
+                "Free-text query. Searches the **content** of the "
+                "viewer's release — every block's text (HTML stripped "
+                "to plain text, KaTeX source, code, choice options, "
+                "accepted answers, photo captions, media titles, "
+                "function-graph labels) plus module titles / "
+                "descriptions and lesson titles — with Russian-config "
+                "full-text matching (stemming) and a typo-tolerant "
+                "``pg_trgm`` fallback, ranked by relevance. Length "
+                f"bounds `[{SEARCH_QUERY_MIN_LEN}, "
+                f"{SEARCH_QUERY_MAX_LEN}]` (`SEARCH_QUERY_MIN_LEN` / "
+                "`SEARCH_QUERY_MAX_LEN`)."
+            ),
+            examples=["предел", "машинное обучение"],
+        ),
+    ],
+) -> list[NoteContentSearchResultSchema]:
+    """Full-text search one note's release content for the viewer.
+
+    Public endpoint — the access cookie is read opportunistically via
+    :meth:`Authenticator.authenticate_optional`. The companion of
+    ``GET /notes/{note_id}/scheme``: the scheme lists the structure,
+    this searches the block payloads. The searchable release is the
+    one whose content the viewer may read, decided exactly like the
+    per-lesson read (first match wins):
+
+    * Actively-enrolled student → their **pinned** release.
+    * Author / collaborator with ``READ_PRODUCT`` → the latest
+      published release.
+    * Anyone, including anonymous → the latest published release, but
+      only when the note is ``PUBLISHED`` **and** ``public``. A
+      ``PRIVATE`` note's structure is public yet its content is
+      gated, so searching one as an outsider returns 404.
+    * Anything else → 404 (uniform across all "no access" cases).
+
+    Args:
+        request: Source of the access cookie (optional).
+        interactor: Injected handler.
+        auth: Injected authenticator (used opportunistically).
+        note_id: Note product UUID (the search scope).
+        q: Free-text query, length-bounded at the boundary.
+
+    Returns:
+        ``200 OK`` with a relevance-ranked
+        ``list[NoteContentSearchResultSchema]`` (best first, capped
+        server-side). Each item locates a block or title hit and
+        carries a marker-highlighted ``snippet``. An empty list means
+        no match.
+
+    Raises:
+        EntityNotFoundError: HTTP 404 — product missing, not a note,
+            or the viewer has no access to its content under the
+            rules above.
+    """
+    ctx = await auth.authenticate_optional(request)
+    matches = await interactor.run(
+        SearchNoteContentQuery(
+            actor_id=ctx.user_id if ctx is not None else None,
+            product_id=ProductID(note_id),
+            query=q,
+        ),
+    )
+    return [NoteContentSearchResultSchema.from_match(m) for m in matches]
 
 
 @student_router.get(

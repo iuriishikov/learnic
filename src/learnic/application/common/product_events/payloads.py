@@ -21,6 +21,7 @@ sub-object the SPA expects; the bus serializer adds the envelope
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
+from learnic.application.common.formatting import mask_email
 from learnic.entities.product_collaboration.ids import (
     ProductCollaborationID,
 )
@@ -151,6 +152,14 @@ class QaDeletedPayload:
 # the invitee is an existing user); ``invited_email`` is set for
 # by-email invites where no user account exists yet. Either is
 # enough for the SPA to identify the affected entry.
+#
+# SECURITY: this payload is broadcast to *every* READ_PRODUCT
+# subscriber on the product WS channel (READ_PRODUCT is implied by
+# every editor/viewer role), so ``invited_email`` MUST be masked —
+# it goes out at the same privacy level as the REST collaborator
+# list (``mask_email`` in queries/product_collaboration), never the
+# raw address. Masking is applied centrally in ``.of`` below so no
+# publisher can leak a plain email onto the wire.
 # ---------------------------------------------------------------- #
 
 
@@ -174,7 +183,12 @@ class CollaborationInvitedPayload:
             collaborator_id=(
                 str(collaborator_id) if collaborator_id is not None else None
             ),
-            invited_email=invited_email,
+            # Masked before it reaches the wire: the product channel fans
+            # this out to all READ_PRODUCT subscribers, so the raw invitee
+            # address must never be broadcast (see the SECURITY note above).
+            invited_email=(
+                mask_email(invited_email) if invited_email is not None else None
+            ),
         )
 
 

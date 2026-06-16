@@ -6,7 +6,10 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
-from learnic.application.common.errors import InvalidTokenError
+from learnic.application.common.errors import (
+    InvalidTokenError,
+    RefreshTokenReuseError,
+)
 from learnic.application.common.security.refresh_tokens import (
     DeviceContext,
     IssuedRefreshToken,
@@ -98,9 +101,14 @@ class RefreshTokenStoreAlchemy(RefreshTokenStore):
             raise InvalidTokenError
 
         if row.revoked_at is not None:
-            # Reuse detected: kill the entire family.
+            # Reuse detected: revoke the entire family. The UPDATE lives
+            # in the request's still-open transaction; the gateway never
+            # commits it (CLAUDE.md rule 4). Raising the distinct
+            # RefreshTokenReuseError tells RefreshCommandHandler to commit
+            # the revocation before returning 401 — otherwise the request
+            # rollback discards it and the reuse tripwire never fires.
             await self._revoke_family(row.family_id)
-            raise InvalidTokenError
+            raise RefreshTokenReuseError
 
         if row.expires_at <= now:
             raise InvalidTokenError

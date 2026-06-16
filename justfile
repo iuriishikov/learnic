@@ -46,13 +46,28 @@ dev-up:
 dev-down:
     {{compose_dev}} down
 
-[doc("Build and start the production-like stack")]
+[private]
+[doc("Create the shared external edge network if it doesn't exist yet")]
+_net:
+    docker network inspect learnic-edge >/dev/null 2>&1 || docker network create learnic-edge
+
+[doc("Build and start the production stack with the API edge (split / two-host deploy)")]
 prod-up:
     #!/usr/bin/env bash
     set -euo pipefail
+    just _net
     just _kill-port 80
     just _kill-port 443
     docker compose up -d --build --wait
+
+[doc("Start as the SINGLE co-located edge — Caddy fronts BOTH frontend + API. Run the frontend with `just prod-up-colocated`.")]
+prod-up-colocated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _net
+    just _kill-port 80
+    just _kill-port 443
+    BACKEND_CADDYFILE=./deploy/caddy/Caddyfile.colocated docker compose up -d --build --wait
 
 [doc("Stop the production-like stack (keeps volumes)")]
 prod-down:

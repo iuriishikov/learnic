@@ -65,14 +65,20 @@ class RefreshTokenStore(Protocol):
         """Rotate ``presented`` into a new refresh token.
 
         Must implement reuse detection: if ``presented`` is already
-        revoked or not the latest token in its family, the whole family
-        is revoked and ``InvalidTokenError`` is raised. The new row is
+        revoked, the whole family is revoked and
+        ``RefreshTokenReuseError`` is raised. That revocation is left
+        uncommitted (gateways never commit), so the transaction-owning
+        caller must commit before propagating the error — otherwise the
+        request rollback discards the family kill. The new row is
         stamped with ``device`` so the active-sessions view shows the
         most recent location/device the family was seen from.
 
         Raises:
-            InvalidTokenError: token unknown, expired, revoked, or
-                reuse detected.
+            RefreshTokenReuseError: ``presented`` was already revoked
+                (reuse); the family revocation has been issued and must
+                be committed by the caller. Subtype of
+                ``InvalidTokenError`` (HTTP 401).
+            InvalidTokenError: token unknown or expired.
         """
         ...
 

@@ -34,6 +34,7 @@ from learnic.application.common.persistence.note_release import (
     ReleaseLessonContentView,
     ReleaseLessonView,
     ReleaseModuleView,
+    ReleaseSearchMatch,
     SchemeLessonView,
     SchemeModuleView,
 )
@@ -723,6 +724,174 @@ def _release_blocks_view_select() -> sa.Select[Any]:
     )
 
 
+# ``ts_headline`` excerpt options. Custom markers (not the default
+# ``<b>``) so the SPA splits on them and wraps matches in its own
+# element — raw block HTML never reaches the DOM as markup.
+_HEADLINE_OPTS: Final = (
+    "StartSel=<<hl>>, StopSel=<</hl>>, "
+    "MaxFragments=2, MaxWords=20, MinWords=6"
+)
+
+# On-the-fly full-text search over ONE release's content tree. The
+# candidate set is a single note's blocks, so an inline ``to_tsvector``
+# (no precomputed column / GIN index) is plenty fast — unlike the
+# global product catalog search. ``units`` is a UNION of three match
+# sources: every block's extracted text, every lesson title, and every
+# module title+description (attributed to the module's first lesson so
+# the result still opens somewhere). Matching is Russian-config FTS
+# (stemming) OR a ``pg_trgm`` word-similarity fallback for typos; the
+# ranking blends ``ts_rank_cd`` with ``word_similarity`` exactly like
+# the catalog search. Block text is assembled from every text-bearing
+# subtype: HTML (tags stripped via ``strip_html``), KaTeX source, code
+# tab labels/source/language, choice option labels, accepted answers,
+# media titles, photo-collage title + captions, and function-graph
+# string leaves.
+_SEARCH_CONTENT_SQL: Final = sa.text(
+    """
+WITH units AS (
+    SELECT
+        m.oid AS module_id,
+        m.title AS module_title,
+        l.oid AS lesson_id,
+        l.title AS lesson_title,
+        b.oid AS block_id,
+        b.type::text AS block_type,
+        concat_ws(
+            ' ',
+            strip_html(coalesce(h.html, '')),
+            k.source,
+            rv.title,
+            (
+                SELECT string_agg(
+                    concat_ws(
+                        ' ',
+                        t->>'label',
+                        t->>'source',
+                        t->>'language'
+                    ),
+                    ' '
+                )
+                FROM jsonb_array_elements(cb.tabs) AS t
+            ),
+            (
+                SELECT string_agg(o->>'label', ' ')
+                FROM jsonb_array_elements(scb.options) AS o
+            ),
+            (
+                SELECT string_agg(o->>'label', ' ')
+                FROM jsonb_array_elements(mcb.options) AS o
+            ),
+            (
+                SELECT string_agg(a #>> '{}', ' ')
+                FROM jsonb_array_elements(tib.accepted_answers) AS a
+            ),
+            fb.title,
+            vfb.title,
+            pcb.title,
+            (
+                SELECT string_agg(it->>'caption', ' ')
+                FROM jsonb_array_elements(pcb.items) AS it
+            ),
+            (
+                SELECT string_agg(s #>> '{}', ' ')
+                FROM jsonb_array_elements(
+                    jsonb_path_query_array(
+                        fgb.config,
+                        '$.**?(@.type() == "string")'
+                    )
+                ) AS s
+            )
+        ) AS content
+    FROM note_release_blocks AS b
+    JOIN note_release_lessons AS l
+        ON b.release_lesson_id = l.oid
+    JOIN note_release_modules AS m
+        ON l.release_module_id = m.oid
+    LEFT JOIN note_release_html_blocks AS h ON b.oid = h.oid
+    LEFT JOIN note_release_katex_blocks AS k ON b.oid = k.oid
+    LEFT JOIN note_release_rutube_video_blocks AS rv
+        ON b.oid = rv.oid
+    LEFT JOIN note_release_code_blocks AS cb ON b.oid = cb.oid
+    LEFT JOIN note_release_single_choice_blocks AS scb
+        ON b.oid = scb.oid
+    LEFT JOIN note_release_multi_choice_blocks AS mcb
+        ON b.oid = mcb.oid
+    LEFT JOIN note_release_text_input_blocks AS tib
+        ON b.oid = tib.oid
+    LEFT JOIN note_release_file_blocks AS fb ON b.oid = fb.oid
+    LEFT JOIN note_release_video_file_blocks AS vfb
+        ON b.oid = vfb.oid
+    LEFT JOIN note_release_photo_collage_blocks AS pcb
+        ON b.oid = pcb.oid
+    LEFT JOIN note_release_function_graph_blocks AS fgb
+        ON b.oid = fgb.oid
+    WHERE b.release_id = :rid
+
+    UNION ALL
+    SELECT
+        m.oid,
+        m.title,
+        l.oid,
+        l.title,
+        NULL::uuid,
+        NULL::text,
+        l.title
+    FROM note_release_lessons AS l
+    JOIN note_release_modules AS m
+        ON l.release_module_id = m.oid
+    WHERE l.release_id = :rid
+
+    UNION ALL
+    SELECT
+        m.oid,
+        m.title,
+        fl.oid,
+        fl.title,
+        NULL::uuid,
+        NULL::text,
+        concat_ws(' ', m.title, m.description)
+    FROM note_release_modules AS m
+    JOIN LATERAL (
+        SELECT l2.oid, l2.title
+        FROM note_release_lessons AS l2
+        WHERE l2.release_module_id = m.oid
+        ORDER BY l2.position ASC
+        LIMIT 1
+    ) AS fl ON TRUE
+    WHERE m.release_id = :rid
+)
+SELECT
+    module_id,
+    module_title,
+    lesson_id,
+    lesson_title,
+    block_id,
+    block_type,
+    ts_headline(
+        'russian',
+        content,
+        websearch_to_tsquery('russian', :q),
+        :opts
+    ) AS snippet
+FROM units
+WHERE
+    content <> ''
+    AND (
+        to_tsvector('russian', content)
+            @@ websearch_to_tsquery('russian', :q)
+        OR content %> :q
+    )
+ORDER BY
+    ts_rank_cd(
+        to_tsvector('russian', content),
+        websearch_to_tsquery('russian', :q)
+    ) * 2.0 + word_similarity(:q, content) DESC,
+    lesson_title ASC
+LIMIT :limit
+""",
+)
+
+
 class NoteReleaseReaderAlchemy(NoteReleaseReader):
     def __init__(
         self,
@@ -1027,6 +1196,49 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
                 for row in blocks_rows
             ],
         )
+
+    @override
+    async def search_content(
+        self,
+        release_id: NoteReleaseID,
+        query: str,
+        limit: int,
+    ) -> list[ReleaseSearchMatch]:
+        # pg_trgm word-similarity fallback threshold (typo tolerance),
+        # same value as the product catalog search. SET LOCAL keeps it
+        # scoped to this transaction.
+        await self._session.execute(
+            sa.text(
+                "SET LOCAL pg_trgm.word_similarity_threshold = 0.4",
+            ),
+        )
+        rows = (
+            await self._session.execute(
+                _SEARCH_CONTENT_SQL,
+                {
+                    "rid": release_id,
+                    "q": query,
+                    "opts": _HEADLINE_OPTS,
+                    "limit": limit,
+                },
+            )
+        ).all()
+        return [
+            ReleaseSearchMatch(
+                module_id=NoteModuleID(row.module_id),
+                module_title=row.module_title,
+                lesson_id=NoteLessonID(row.lesson_id),
+                lesson_title=row.lesson_title,
+                block_id=(
+                    LessonBlockID(row.block_id)
+                    if row.block_id is not None
+                    else None
+                ),
+                block_type=row.block_type,
+                snippet=row.snippet,
+            )
+            for row in rows
+        ]
 
 
 # ============================== release block gateway ============================== #

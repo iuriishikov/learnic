@@ -216,6 +216,29 @@ class NoteReleaseSchemeView:
     modules: list[SchemeModuleView]
 
 
+@dataclass(slots=True, frozen=True)
+class ReleaseSearchMatch:
+    """One full-text match inside a release's content tree.
+
+    Returned by :meth:`NoteReleaseReader.search_content`, ranked best
+    first. A match is either a content block (``block_id`` set — the
+    reader opens the lesson and jumps to that block) or a module /
+    lesson title hit (``block_id`` and ``block_type`` ``None`` — the
+    reader opens the lesson at the top). ``snippet`` is a
+    ``ts_headline`` excerpt with the matched terms wrapped in
+    ``<<hl>>…<</hl>>`` markers; the route forwards them verbatim and
+    the SPA renders them as highlights (it never injects raw HTML).
+    """
+
+    module_id: NoteModuleID
+    module_title: str
+    lesson_id: NoteLessonID
+    lesson_title: str
+    block_id: LessonBlockID | None
+    block_type: str | None
+    snippet: str
+
+
 class NoteReleaseReader(Protocol):
     """Read-side queries returning release projections."""
 
@@ -243,4 +266,22 @@ class NoteReleaseReader(Protocol):
         lesson_id: NoteLessonID,
     ) -> ReleaseLessonContentView | None:
         """Return one release lesson with its blocks, or ``None``."""
+        ...
+
+    async def search_content(
+        self,
+        release_id: NoteReleaseID,
+        query: str,
+        limit: int,
+    ) -> list[ReleaseSearchMatch]:
+        """Full-text search a release's content + titles, ranked.
+
+        Scans every block's text (HTML stripped to plain text, KaTeX
+        source, code tabs, choice option labels, accepted answers,
+        photo captions, media titles, function-graph string leaves)
+        plus module titles / descriptions and lesson titles, scoped to
+        the one release. Matching is Russian-config full-text
+        (stemming) with a ``pg_trgm`` word-similarity fallback for
+        typos. Returns at most ``limit`` matches, best rank first.
+        """
         ...

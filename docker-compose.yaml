@@ -52,6 +52,11 @@ services:
       context: .
       target: runtime
     container_name: learnic-app
+    # Also on the shared edge network so the frontend `web` (a separate compose
+    # project, co-located deploy) can reach it by container name (learnic-app).
+    networks:
+      - learnic-net
+      - learnic-edge
     env_file:
       - .env
     environment:
@@ -118,17 +123,42 @@ services:
 
   caddy:
     <<: *default
-    image: caddy:2-alpine
+    # Custom build: stock Caddy + the caddy-ratelimit module (see deploy/caddy/Dockerfile).
+    build:
+      context: ./deploy/caddy
     container_name: learnic-caddy
+    # Also on the shared edge network so that — in a co-located deploy — this
+    # Caddy can reach the frontend `web` container (learnic-web) by name.
+    networks:
+      - learnic-net
+      - learnic-edge
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     environment:
-      DOMAIN: ${DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      SITE_DOMAIN: ${SITE_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL}
+      RATE_LIMIT_EVENTS: ${RATE_LIMIT_EVENTS:-200}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      RATE_LIMIT_EXEMPT_IPS: ${RATE_LIMIT_EXEMPT_IPS:-127.0.0.1/32}
+      # Tighter API zones: auth endpoints + expensive FTS search (both Caddyfiles).
+      AUTH_RATE_LIMIT_EVENTS: ${AUTH_RATE_LIMIT_EVENTS:-20}
+      AUTH_RATE_LIMIT_WINDOW: ${AUTH_RATE_LIMIT_WINDOW:-1m}
+      SEARCH_RATE_LIMIT_EVENTS: ${SEARCH_RATE_LIMIT_EVENTS:-60}
+      SEARCH_RATE_LIMIT_WINDOW: ${SEARCH_RATE_LIMIT_WINDOW:-1m}
+      # Per-user throttle on the learnic.ru block (co-located Caddyfile only).
+      SITE_RATE_LIMIT_EVENTS: ${SITE_RATE_LIMIT_EVENTS:-300}
+      SITE_RATE_LIMIT_WINDOW: ${SITE_RATE_LIMIT_WINDOW:-1m}
+      # Tight auth-form-submit zone on the learnic.ru block (co-located only).
+      SITE_AUTH_RATE_LIMIT_EVENTS: ${SITE_AUTH_RATE_LIMIT_EVENTS:-10}
+      SITE_AUTH_RATE_LIMIT_WINDOW: ${SITE_AUTH_RATE_LIMIT_WINDOW:-1m}
     volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Default = api-only (split deploy). Set BACKEND_CADDYFILE to
+      # ./deploy/caddy/Caddyfile.colocated for a single-host deploy that fronts
+      # both domains.
+      - ${BACKEND_CADDYFILE:-./deploy/caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -136,7 +166,7 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *healthcheck-defaults
-      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/healthz"]
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8081/healthz"]
 
 volumes:
   postgres-data:
@@ -149,3 +179,11 @@ volumes:
 networks:
   learnic-net:
     driver: bridge
+  # Shared external network spanning the backend and frontend compose projects.
+  # Lets `web` ↔ `app` (and the co-located Caddy ↔ `learnic-web`) reach each
+  # other by container name. Created once via `just _net` (or
+  # `docker network create learnic-edge`). In a split deploy it just holds this
+  # stack's edge-facing services.
+  learnic-edge:
+    external: true
+    name: learnic-edge

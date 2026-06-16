@@ -772,6 +772,9 @@ from learnic.application.queries.note_content.get_release_lesson import (
 from learnic.application.queries.note_content.get_scheme import (
     GetNoteSchemeQueryHandler,
 )
+from learnic.application.queries.note_content.search_content import (
+    SearchNoteContentQueryHandler,
+)
 from learnic.application.queries.note_release.get_content import (
     GetNoteReleaseContentQueryHandler,
 )
@@ -1821,6 +1824,7 @@ class InteractorsProvider(Provider):
         GetLessonBlockQueryHandler,
         GetNoteSchemeQueryHandler,
         GetReleaseLessonQueryHandler,
+        SearchNoteContentQueryHandler,
         CreateNoteReleaseCommandHandler,
         ListNoteReleasesQueryHandler,
         GetNoteReleaseContentQueryHandler,

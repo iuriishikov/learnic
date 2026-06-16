@@ -18,6 +18,20 @@ class InvalidTokenError(ApplicationError):
     """Raised when a token is missing, expired, revoked or malformed."""
 
 
+class RefreshTokenReuseError(InvalidTokenError):
+    """Raised when an already-revoked refresh token is replayed.
+
+    Signals reuse detection inside ``RefreshTokenStore.rotate``: the
+    rotate call has already issued the family-wide revocation, but that
+    UPDATE lives in the request's still-open transaction. The refresh
+    handler catches this (a subtype of :class:`InvalidTokenError`, so
+    clients still see HTTP 401) to commit the revocation before the
+    failing request would roll it back, then re-raises a plain
+    ``InvalidTokenError``. Without this distinct type the family kill
+    is silently discarded and the reuse tripwire never fires.
+    """
+
+
 class EmailAlreadyRegisteredError(ApplicationError):
     """Raised when registration is attempted with an existing email."""
 

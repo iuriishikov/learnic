@@ -1,8 +1,21 @@
 {
 	email {$ACME_EMAIL}
+	# rate_limit is a third-party HTTP handler (caddy-ratelimit); it must be
+	# explicitly ordered into the directive chain.
+	order rate_limit before basicauth
 }
 
-{$DOMAIN} {
+# Host-agnostic internal health endpoint for the Docker healthcheck. A probe to
+# the public domain can't match the site block when sent to 127.0.0.1, so expose
+# a dedicated plaintext listener the container healthcheck can always reach.
+http://:8081 {
+	respond /healthz "ok" 200
+}
+
+# Public API edge — split (two-host) deploy, where the backend owns :443 for its
+# own subdomain. The single-host variant that also fronts the frontend lives in
+# Caddyfile.colocated.
+{$API_DOMAIN} {
 	log {
 		output stdout
 		format json
@@ -18,6 +31,46 @@
 	encode zstd gzip
 
 	respond /healthz "ok" 200
+
+	# Per-source-IP rate limit for external clients. Trusted callers (the
+	# frontend host doing SSR / Server-Action fetches in a split deploy) are
+	# exempted via RATE_LIMIT_EXEMPT_IPS so their aggregate traffic isn't
+	# throttled. In a co-located deploy the frontend reaches the API over the
+	# internal network and never passes through this edge.
+	@external {
+		not remote_ip {$RATE_LIMIT_EXEMPT_IPS:127.0.0.1/32}
+	}
+	# Per-zone limits: tight for sensitive/expensive endpoints, loose catch-all
+	# for the rest. A request is counted against EVERY zone whose `match` it
+	# satisfies (cumulative), so the tightest applicable limit bites first; the
+	# `api` zone has no `match` and therefore applies to everything.
+	# NOTE: these bite only for clients hitting the API DIRECTLY. The SPA's auth
+	# is a Next Server Action, so /auth/* traffic arrives as the exempt frontend
+	# host (not end-user IPs) — the auth zone here defends the public API against
+	# scripted brute force, not the in-UI login flow.
+	rate_limit @external {
+		zone auth {
+			match {
+				path /auth/*
+			}
+			key {remote_host}
+			events {$AUTH_RATE_LIMIT_EVENTS:20}
+			window {$AUTH_RATE_LIMIT_WINDOW:1m}
+		}
+		zone search {
+			match {
+				path /notes/*/search /users/search /tags
+			}
+			key {remote_host}
+			events {$SEARCH_RATE_LIMIT_EVENTS:60}
+			window {$SEARCH_RATE_LIMIT_WINDOW:1m}
+		}
+		zone api {
+			key {remote_host}
+			events {$RATE_LIMIT_EVENTS:200}
+			window {$RATE_LIMIT_WINDOW:1m}
+		}
+	}
 
 	reverse_proxy app:8000 {
 		header_up X-Real-IP {remote_host}

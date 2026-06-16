@@ -1,0 +1,141 @@
+{
+	email {$ACME_EMAIL}
+	# rate_limit is a third-party HTTP handler (caddy-ratelimit); it must be
+	# explicitly ordered into the directive chain.
+	order rate_limit before basicauth
+}
+
+# ===========================================================================
+# Co-located single-host deploy. This Caddy is the SINGLE public edge and
+# fronts BOTH the frontend and the API. The frontend `web` container runs
+# edge-less on the shared learnic-edge network and is reached by container name
+# (learnic-web). Switch to this file via BACKEND_CADDYFILE in .env.
+# ===========================================================================
+
+# Host-agnostic internal health endpoint for the Docker healthcheck. A probe to
+# either public domain can't match when sent to 127.0.0.1, so expose a dedicated
+# plaintext listener the container healthcheck can always reach.
+http://:8081 {
+	respond /healthz "ok" 200
+}
+
+# --- Frontend UI -----------------------------------------------------------
+{$SITE_DOMAIN} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	encode zstd gzip
+
+	respond /healthz "ok" 200
+
+	# Per-user throttle (anti-scraping). In co-located mode THIS Caddy fronts
+	# learnic.ru, so {remote_host} is the real visitor IP. Mirrors the frontend
+	# edge in learnic-web/deploy/caddy/Caddyfile. Static/asset paths excluded.
+	@throttled {
+		not path /_next/* /healthz /favicon.ico /icon* /apple-icon* /opengraph-image* /twitter-image* /manifest.webmanifest
+	}
+	# Tight zone for auth-form submits (real visitor IP — this is where the
+	# in-UI login/register/reset brute force actually shows up, since the
+	# browser hits this edge directly and the Server Action POSTs to the page
+	# path). Only POSTs count, so page loads don't trip it. The loose `site`
+	# zone (no `match`) still covers everything for anti-scraping.
+	rate_limit @throttled {
+		zone auth {
+			match {
+				method POST
+				path */login */register */forgot-password */reset-password
+			}
+			key {remote_host}
+			events {$SITE_AUTH_RATE_LIMIT_EVENTS:10}
+			window {$SITE_AUTH_RATE_LIMIT_WINDOW:1m}
+		}
+		zone site {
+			key {remote_host}
+			events {$SITE_RATE_LIMIT_EVENTS:300}
+			window {$SITE_RATE_LIMIT_WINDOW:1m}
+		}
+	}
+
+	reverse_proxy learnic-web:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 5s
+	}
+}
+
+# --- Public API (rate-limited) --------------------------------------------
+# Mirrors deploy/caddy/Caddyfile — keep the two API blocks in sync. The
+# frontend's own SSR / Server-Action traffic does NOT pass through here in a
+# co-located deploy (it uses the internal learnic-app:8000), so it is never
+# rate-limited regardless of RATE_LIMIT_EXEMPT_IPS.
+{$API_DOMAIN} {
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	encode zstd gzip
+
+	respond /healthz "ok" 200
+
+	@external {
+		not remote_ip {$RATE_LIMIT_EXEMPT_IPS:127.0.0.1/32}
+	}
+	# Mirrors deploy/caddy/Caddyfile — keep the zones in sync. Tight for
+	# sensitive/expensive endpoints, loose catch-all for the rest; cumulative
+	# across zones. /auth/* here defends the public API against scripted brute
+	# force (the in-UI login flow never reaches this edge — see the note above).
+	rate_limit @external {
+		zone auth {
+			match {
+				path /auth/*
+			}
+			key {remote_host}
+			events {$AUTH_RATE_LIMIT_EVENTS:20}
+			window {$AUTH_RATE_LIMIT_WINDOW:1m}
+		}
+		zone search {
+			match {
+				path /notes/*/search /users/search /tags
+			}
+			key {remote_host}
+			events {$SEARCH_RATE_LIMIT_EVENTS:60}
+			window {$SEARCH_RATE_LIMIT_WINDOW:1m}
+		}
+		zone api {
+			key {remote_host}
+			events {$RATE_LIMIT_EVENTS:200}
+			window {$RATE_LIMIT_WINDOW:1m}
+		}
+	}
+
+	reverse_proxy app:8000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		health_uri /healthcheck
+		health_interval 10s
+		health_timeout 5s
+	}
+}
