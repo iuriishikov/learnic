@@ -43,6 +43,12 @@ from learnic.infrastructure.persistence.models.note_block import (
     photo_collage_items_table,
     video_file_blocks_table,
 )
+from learnic.infrastructure.persistence.models.note_release import (
+    note_release_blocks_table,
+    note_release_file_blocks_table,
+    note_release_video_file_blocks_table,
+    note_releases_table,
+)
 from learnic.infrastructure.persistence.models.file import files_table
 from learnic.infrastructure.persistence.models.product import products_table
 from learnic.infrastructure.persistence.models.subscription import (
@@ -82,14 +88,19 @@ class SubscriptionMapperAlchemy(SubscriptionGateway):
         self,
         user_id: UserID,
     ) -> Subscription | None:
-        stmt = sa.select(Subscription).where(
-            subscriptions_table.c.user_id == user_id,
-            subscriptions_table.c.revoked_at.is_(None),
-            sa.or_(
-                subscriptions_table.c.expires_at.is_(None),
-                subscriptions_table.c.expires_at > sa.func.now(),
-            ),
-        ).order_by(subscriptions_table.c.granted_at.desc()).limit(1)
+        stmt = (
+            sa.select(Subscription)
+            .where(
+                subscriptions_table.c.user_id == user_id,
+                subscriptions_table.c.revoked_at.is_(None),
+                sa.or_(
+                    subscriptions_table.c.expires_at.is_(None),
+                    subscriptions_table.c.expires_at > sa.func.now(),
+                ),
+            )
+            .order_by(subscriptions_table.c.granted_at.desc())
+            .limit(1)
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -135,15 +146,26 @@ class SubscriptionReaderAlchemy(SubscriptionReader):
 class FileUsageReaderAlchemy(FileUsageReader):
     """Sums ``files.size_bytes`` for files referenced from author's blocks.
 
-    Joins through three pathways (one per file-backed block type) and
-    deduplicates via the outer ``DISTINCT files.oid`` — a file
-    referenced from multiple blocks (e.g. same image in two collages)
-    is paid for once. Soft-deleted files are excluded via the
-    ``files.deleted_at IS NULL`` predicate.
+    Counts files referenced from BOTH the author's draft blocks AND
+    their published-release snapshots. A published release shares the
+    draft's exact ``files`` row (the snapshot copies ``file_id``
+    verbatim), so a file kept alive only by a release — its draft block
+    deleted, the file spared by the release-pin guard — would otherwise
+    be invisible to the quota and let an author accumulate unpaid
+    storage by republishing-then-deleting. Counting the release mirrors
+    closes that hole.
 
-    Collage items live in their own ``photo_collage_items`` table
-    (one row per photo), so the collage path is a straight join —
-    no JSONB expansion needed.
+    Deduplicates via the outer ``DISTINCT files.oid`` — a file
+    referenced from multiple blocks (e.g. the same image in a draft
+    block and one or more releases) is paid for once. Soft-deleted
+    files are excluded via the ``files.deleted_at IS NULL`` predicate.
+
+    Draft collage items live in their own ``photo_collage_items`` table
+    (one row per photo), so that path is a straight join. Release
+    collage items are still denormalised into a JSONB column and are
+    NOT yet counted here — that gap closes with the migration of the
+    release collage to its own child table; release file- and
+    video-file blocks (the dominant media weight) ARE counted.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -174,8 +196,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -196,8 +217,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -208,10 +228,64 @@ class FileUsageReaderAlchemy(FileUsageReader):
                 photo_collage_items_table.c.file_id.is_not(None),
             )
         )
+        # Release-mirror paths: reach the author through
+        # release block -> note_releases -> products.author_id.
+        release_file_path = (
+            sa.select(
+                note_release_file_blocks_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                note_release_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_file_blocks_table.c.oid,
+                )
+                .join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                )
+                .join(
+                    products_table,
+                    products_table.c.oid == note_releases_table.c.product_id,
+                ),
+            )
+            .where(
+                products_table.c.author_id == user_id,
+                note_release_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        release_video_path = (
+            sa.select(
+                note_release_video_file_blocks_table.c.file_id.label(
+                    "file_id",
+                ),
+            )
+            .select_from(
+                note_release_video_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_video_file_blocks_table.c.oid,
+                )
+                .join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                )
+                .join(
+                    products_table,
+                    products_table.c.oid == note_releases_table.c.product_id,
+                ),
+            )
+            .where(
+                products_table.c.author_id == user_id,
+                note_release_video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
         referenced_file_ids = sa.union_all(
             file_path,
             video_path,
             collage_path,
+            release_file_path,
+            release_video_path,
         ).subquery("referenced_file_ids")
         stmt = sa.select(
             sa.func.coalesce(sa.func.sum(files_table.c.size_bytes), 0),
@@ -247,8 +321,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ),
             )
             .where(
@@ -263,8 +336,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ),
             )
             .where(
@@ -272,10 +344,54 @@ class FileUsageReaderAlchemy(FileUsageReader):
                 photo_collage_items_table.c.file_id.is_not(None),
             )
         )
+        # Release-mirror paths: note_releases carries product_id, so
+        # scope on it directly — no products join needed.
+        release_file_path = (
+            sa.select(
+                note_release_file_blocks_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                note_release_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_file_blocks_table.c.oid,
+                ).join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                ),
+            )
+            .where(
+                note_releases_table.c.product_id == product_id,
+                note_release_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        release_video_path = (
+            sa.select(
+                note_release_video_file_blocks_table.c.file_id.label(
+                    "file_id",
+                ),
+            )
+            .select_from(
+                note_release_video_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_video_file_blocks_table.c.oid,
+                ).join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                ),
+            )
+            .where(
+                note_releases_table.c.product_id == product_id,
+                note_release_video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
         referenced_file_ids = sa.union_all(
             file_path,
             video_path,
             collage_path,
+            release_file_path,
+            release_video_path,
         ).subquery("product_referenced_file_ids")
         stmt = sa.select(
             sa.func.coalesce(sa.func.sum(files_table.c.size_bytes), 0),
@@ -317,8 +433,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -334,8 +449,7 @@ class FileUsageReaderAlchemy(FileUsageReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -343,14 +457,71 @@ class FileUsageReaderAlchemy(FileUsageReader):
             )
             .where(photo_collage_items_table.c.file_id.is_not(None))
         )
-        per_author_file = (
-            sa.union_all(file_path, video_path, collage_path)
-            .subquery("per_author_file")
+        # Release-mirror paths, carrying author_id via
+        # release block -> note_releases -> products.
+        release_file_path = (
+            sa.select(
+                products_table.c.author_id.label("author_id"),
+                note_release_file_blocks_table.c.file_id.label("file_id"),
+            )
+            .select_from(
+                note_release_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_file_blocks_table.c.oid,
+                )
+                .join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                )
+                .join(
+                    products_table,
+                    products_table.c.oid == note_releases_table.c.product_id,
+                ),
+            )
+            .where(note_release_file_blocks_table.c.file_id.is_not(None))
         )
-        dedup = sa.select(
-            per_author_file.c.author_id,
-            per_author_file.c.file_id,
-        ).distinct().subquery("dedup")
+        release_video_path = (
+            sa.select(
+                products_table.c.author_id.label("author_id"),
+                note_release_video_file_blocks_table.c.file_id.label(
+                    "file_id",
+                ),
+            )
+            .select_from(
+                note_release_video_file_blocks_table.join(
+                    note_release_blocks_table,
+                    note_release_blocks_table.c.oid
+                    == note_release_video_file_blocks_table.c.oid,
+                )
+                .join(
+                    note_releases_table,
+                    note_releases_table.c.oid == note_release_blocks_table.c.release_id,
+                )
+                .join(
+                    products_table,
+                    products_table.c.oid == note_releases_table.c.product_id,
+                ),
+            )
+            .where(
+                note_release_video_file_blocks_table.c.file_id.is_not(None),
+            )
+        )
+        per_author_file = sa.union_all(
+            file_path,
+            video_path,
+            collage_path,
+            release_file_path,
+            release_video_path,
+        ).subquery("per_author_file")
+        dedup = (
+            sa.select(
+                per_author_file.c.author_id,
+                per_author_file.c.file_id,
+            )
+            .distinct()
+            .subquery("dedup")
+        )
         stmt = (
             sa.select(
                 dedup.c.author_id,
@@ -443,8 +614,7 @@ class AuthorActiveFilesReaderAlchemy(AuthorActiveFilesReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -462,8 +632,7 @@ class AuthorActiveFilesReaderAlchemy(AuthorActiveFilesReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ).join(
                     products_table,
                     products_table.c.oid == lesson_blocks_table.c.product_id,
@@ -580,8 +749,7 @@ class StorageQuotaLockAlchemy(StorageQuotaLock):
     async def acquire_for(self, quota_owner_id: UserID) -> None:
         await self._session.execute(
             sa.text(
-                "SELECT pg_advisory_xact_lock("
-                "hashtextextended(:k, 0))",
+                "SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))",
             ),
             {"k": str(quota_owner_id)},
         )
