@@ -25,7 +25,7 @@ from learnic.infrastructure.persistence.models.note_block import (
 )
 from learnic.infrastructure.persistence.models.note_release import (
     note_release_file_blocks_table,
-    note_release_photo_collage_blocks_table,
+    note_release_photo_collage_items_table,
     note_release_video_file_blocks_table,
 )
 from learnic.infrastructure.persistence.models.file import files_table
@@ -45,11 +45,10 @@ class FilesMapperAlchemy(FilesGateway):
     @override
     async def is_referenced_by_release(self, oid: FileID) -> bool:
         # Only published-release snapshots pin a file against deletion
-        # (they share the draft's exact blob). Two mirrors carry an FK
-        # ``file_id``; the collage mirror keeps items in a JSONB array
-        # of ``{"oid", "file_id", "caption"}`` dicts, matched with a
-        # ``@>`` containment probe rather than an FK compare.
-        collage_probe = [{"file_id": str(oid)}]
+        # (they share the draft's exact blob). All three file-backed
+        # mirrors now carry an FK ``file_id`` column — collage items
+        # moved from a JSONB array into their own child table — so each
+        # is a plain EXISTS compare.
         pinned = sa.or_(
             sa.select(sa.literal(1))
             .where(note_release_file_blocks_table.c.file_id == oid)
@@ -58,14 +57,7 @@ class FilesMapperAlchemy(FilesGateway):
             .where(note_release_video_file_blocks_table.c.file_id == oid)
             .exists(),
             sa.select(sa.literal(1))
-            .where(
-                # Subscript access: a column literally named ``items``
-                # collides with ``ColumnCollection.items()`` under
-                # attribute access (typing + runtime), so index it.
-                note_release_photo_collage_blocks_table.c["items"].contains(
-                    collage_probe,
-                ),
-            )
+            .where(note_release_photo_collage_items_table.c.file_id == oid)
             .exists(),
         )
         result = await self._session.execute(sa.select(pinned))
@@ -154,8 +146,7 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ),
             )
             .where(
@@ -171,8 +162,7 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ),
             )
             .where(
@@ -180,12 +170,9 @@ class FilesReaderAlchemy(FilesReader):
                 photo_collage_items_table.c.file_id.is_not(None),
             )
         )
-        cover_path = (
-            sa.select(products_table.c.cover_file_id.label("file_id"))
-            .where(
-                products_table.c.oid == product_id,
-                products_table.c.cover_file_id.is_not(None),
-            )
+        cover_path = sa.select(products_table.c.cover_file_id.label("file_id")).where(
+            products_table.c.oid == product_id,
+            products_table.c.cover_file_id.is_not(None),
         )
         union = sa.union_all(
             file_path,
@@ -229,8 +216,7 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ),
             )
             .where(
@@ -245,8 +231,7 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ),
             )
             .where(
@@ -285,8 +270,7 @@ class FilesReaderAlchemy(FilesReader):
                     lesson_blocks_table.c.oid == file_blocks_table.c.oid,
                 ).join(
                     note_lessons_table,
-                    note_lessons_table.c.oid
-                    == lesson_blocks_table.c.lesson_id,
+                    note_lessons_table.c.oid == lesson_blocks_table.c.lesson_id,
                 ),
             )
             .where(
@@ -299,12 +283,10 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 video_file_blocks_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == video_file_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == video_file_blocks_table.c.oid,
                 ).join(
                     note_lessons_table,
-                    note_lessons_table.c.oid
-                    == lesson_blocks_table.c.lesson_id,
+                    note_lessons_table.c.oid == lesson_blocks_table.c.lesson_id,
                 ),
             )
             .where(
@@ -319,12 +301,10 @@ class FilesReaderAlchemy(FilesReader):
             .select_from(
                 photo_collage_items_table.join(
                     lesson_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == photo_collage_items_table.c.block_id,
+                    lesson_blocks_table.c.oid == photo_collage_items_table.c.block_id,
                 ).join(
                     note_lessons_table,
-                    note_lessons_table.c.oid
-                    == lesson_blocks_table.c.lesson_id,
+                    note_lessons_table.c.oid == lesson_blocks_table.c.lesson_id,
                 ),
             )
             .where(

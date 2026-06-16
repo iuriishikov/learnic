@@ -157,9 +157,7 @@ def _jsonb_to_tabs(raw: Any) -> list[CodeTab]:
 
 
 def _jsonb_to_option_views(raw: Any) -> list[ChoiceOptionView]:
-    return [
-        ChoiceOptionView(oid=item["oid"], label=item["label"]) for item in raw
-    ]
+    return [ChoiceOptionView(oid=item["oid"], label=item["label"]) for item in raw]
 
 
 def _jsonb_to_options(raw: Any) -> list[ChoiceOption]:
@@ -732,9 +730,11 @@ def _photo_collage_release_insert_value(
     row: sa.Row[Any],
     new_oid: Any,
 ) -> dict[str, Any]:
+    # Items no longer live on the block (they moved to the
+    # note_release_photo_collage_items child table); the snapshotter
+    # inserts those rows separately. Only block-level columns here.
     return {
         "oid": new_oid,
-        "items": row.photo_collage_items,
         "title": row.photo_collage_title,
     }
 

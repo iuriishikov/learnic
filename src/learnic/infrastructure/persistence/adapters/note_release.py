@@ -89,6 +89,7 @@ from learnic.infrastructure.persistence.models.note_release import (
     note_release_modules_table,
     note_release_multi_choice_blocks_table,
     note_release_photo_collage_blocks_table,
+    note_release_photo_collage_items_table,
     note_release_rutube_video_blocks_table,
     note_release_single_choice_blocks_table,
     note_release_text_input_blocks_table,
@@ -290,11 +291,7 @@ async def _load_release_collage_items_payload(
     collage_ids = [
         row.oid
         for row in rows
-        if (
-            row.type
-            if isinstance(row.type, BlockType)
-            else BlockType(row.type)
-        )
+        if (row.type if isinstance(row.type, BlockType) else BlockType(row.type))
         is BlockType.PHOTO_COLLAGE
     ]
     if not collage_ids:
@@ -318,9 +315,7 @@ async def _load_release_collage_items_payload(
         out.setdefault(row.block_id, []).append(
             {
                 "oid": str(row.oid),
-                "file_id": (
-                    str(row.file_id) if row.file_id is not None else None
-                ),
+                "file_id": (str(row.file_id) if row.file_id is not None else None),
                 "caption": row.caption,
             },
         )
@@ -363,9 +358,7 @@ def _attach_release_collage_items(
     out: list[Any] = []
     for row in rows:
         block_type = (
-            row.type
-            if isinstance(row.type, BlockType)
-            else BlockType(row.type)
+            row.type if isinstance(row.type, BlockType) else BlockType(row.type)
         )
         if block_type is not BlockType.PHOTO_COLLAGE:
             out.append(row)
@@ -373,6 +366,69 @@ def _attach_release_collage_items(
         items = items_by_block.get(row.oid, [])
         out.append(_RowWithCollageItems(row, items))
     return out
+
+
+async def _load_release_collage_items_from_table(
+    session: AsyncSession,
+    block_oids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, list[dict[str, Any]]]:
+    """Read release collage items as ``{block_oid: [item dict, ...]}``.
+
+    Reader counterpart of :func:`_load_release_collage_items_payload`
+    (which reads the *draft* child table for the snapshot). Items now
+    live in ``note_release_photo_collage_items``; ``source_item_id`` is
+    surfaced as the item's ``oid`` so the view keeps the same identity
+    the old JSONB carried (the table's own ``oid`` is a fresh surrogate
+    PK). Non-collage oids in ``block_oids`` simply match nothing.
+    """
+    if not block_oids:
+        return {}
+    stmt = (
+        sa.select(
+            note_release_photo_collage_items_table.c.block_id,
+            note_release_photo_collage_items_table.c.source_item_id,
+            note_release_photo_collage_items_table.c.file_id,
+            note_release_photo_collage_items_table.c.caption,
+        )
+        .where(
+            note_release_photo_collage_items_table.c.block_id.in_(block_oids),
+        )
+        .order_by(
+            note_release_photo_collage_items_table.c.block_id.asc(),
+            note_release_photo_collage_items_table.c.position.asc(),
+        )
+    )
+    rows = (await session.execute(stmt)).all()
+    out: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(row.block_id, []).append(
+            {
+                "oid": (
+                    str(row.source_item_id) if row.source_item_id is not None else None
+                ),
+                "file_id": (str(row.file_id) if row.file_id is not None else None),
+                "caption": row.caption,
+            },
+        )
+    return out
+
+
+async def _with_release_collage_items(
+    session: AsyncSession,
+    rows: Sequence[sa.Row[Any]],
+) -> list[Any]:
+    """Wrap collage rows with items loaded from the child table.
+
+    Mirrors the draft reader: collage rows get a
+    :class:`_RowWithCollageItems` proxy exposing ``photo_collage_items``
+    so the registry's row → view / entity helpers (and
+    ``collect_file_ids``) read items the same way on both sides.
+    """
+    items_by_block = await _load_release_collage_items_from_table(
+        session,
+        [row.oid for row in rows],
+    )
+    return _attach_release_collage_items(rows, items_by_block)
 
 
 class _BlocksSnapshotPhase(_SnapshotPhase):
@@ -397,33 +453,56 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
         if not rows:
             return {}
 
-        # Photo-collage items live in a child table on the draft side
-        # but are persisted as a denormalised JSONB array on the
-        # release side. Load each collage's items once and stash them
-        # on a per-row proxy so the registry's existing
-        # ``_photo_collage_release_insert_value`` reads them under
-        # the same attribute name it expects on the release reader
-        # path.
-        collage_payload = await _load_release_collage_items_payload(
-            session,
-            rows,
-        )
-        attached_rows = _attach_release_collage_items(rows, collage_payload)
-
-        mapping: _IdMap = {row.oid: uuid.uuid4() for row in attached_rows}
+        mapping: _IdMap = {row.oid: uuid.uuid4() for row in rows}
         await session.execute(
             sa.insert(note_release_blocks_table),
             [
                 self._parent_value(row, mapping[row.oid], release, prior_maps)
-                for row in attached_rows
+                for row in rows
             ],
         )
 
         for table, values in self._partition_subtypes(
-            attached_rows, mapping,
+            rows,
+            mapping,
         ).items():
             if values:
                 await session.execute(sa.insert(table), values)
+
+        # Photo-collage items live in a child table on both sides now.
+        # Load each draft collage's items and insert one release row per
+        # item, keyed to the freshly-minted release block id. ``oid`` is
+        # a fresh surrogate PK; ``source_item_id`` preserves the draft
+        # item identity the reader surfaces.
+        collage_payload = await _load_release_collage_items_payload(
+            session,
+            rows,
+        )
+        item_values: list[dict[str, Any]] = []
+        for draft_block_oid, items in collage_payload.items():
+            release_block_oid = mapping[draft_block_oid]
+            for position, item in enumerate(items):
+                item_values.append(
+                    {
+                        "oid": uuid.uuid4(),
+                        "block_id": release_block_oid,
+                        "source_item_id": (
+                            uuid.UUID(item["oid"]) if item["oid"] is not None else None
+                        ),
+                        "position": position,
+                        "file_id": (
+                            uuid.UUID(item["file_id"])
+                            if item["file_id"] is not None
+                            else None
+                        ),
+                        "caption": item["caption"],
+                    },
+                )
+        if item_values:
+            await session.execute(
+                sa.insert(note_release_photo_collage_items_table),
+                item_values,
+            )
         return mapping
 
     @staticmethod
@@ -520,8 +599,7 @@ class _BlocksSnapshotPhase(_SnapshotPhase):
                 )
                 .outerjoin(
                     function_graph_blocks_table,
-                    lesson_blocks_table.c.oid
-                    == function_graph_blocks_table.c.oid,
+                    lesson_blocks_table.c.oid == function_graph_blocks_table.c.oid,
                 ),
             )
             .where(lesson_blocks_table.c.product_id == release.product_id)
@@ -656,9 +734,6 @@ def _release_blocks_view_select() -> sa.Select[Any]:
         note_release_video_file_blocks_table.c.title.label(
             "video_file_block_title",
         ),
-        note_release_photo_collage_blocks_table.c["items"].label(
-            "photo_collage_items",
-        ),
         note_release_photo_collage_blocks_table.c.title.label(
             "photo_collage_title",
         ),
@@ -668,13 +743,11 @@ def _release_blocks_view_select() -> sa.Select[Any]:
     ).select_from(
         note_release_blocks_table.outerjoin(
             note_release_html_blocks_table,
-            note_release_blocks_table.c.oid
-            == note_release_html_blocks_table.c.oid,
+            note_release_blocks_table.c.oid == note_release_html_blocks_table.c.oid,
         )
         .outerjoin(
             note_release_katex_blocks_table,
-            note_release_blocks_table.c.oid
-            == note_release_katex_blocks_table.c.oid,
+            note_release_blocks_table.c.oid == note_release_katex_blocks_table.c.oid,
         )
         .outerjoin(
             note_release_rutube_video_blocks_table,
@@ -683,8 +756,7 @@ def _release_blocks_view_select() -> sa.Select[Any]:
         )
         .outerjoin(
             note_release_code_blocks_table,
-            note_release_blocks_table.c.oid
-            == note_release_code_blocks_table.c.oid,
+            note_release_blocks_table.c.oid == note_release_code_blocks_table.c.oid,
         )
         .outerjoin(
             note_release_single_choice_blocks_table,
@@ -703,8 +775,7 @@ def _release_blocks_view_select() -> sa.Select[Any]:
         )
         .outerjoin(
             note_release_file_blocks_table,
-            note_release_blocks_table.c.oid
-            == note_release_file_blocks_table.c.oid,
+            note_release_blocks_table.c.oid == note_release_file_blocks_table.c.oid,
         )
         .outerjoin(
             note_release_video_file_blocks_table,
@@ -728,8 +799,7 @@ def _release_blocks_view_select() -> sa.Select[Any]:
 # ``<b>``) so the SPA splits on them and wraps matches in its own
 # element — raw block HTML never reaches the DOM as markup.
 _HEADLINE_OPTS: Final = (
-    "StartSel=<<hl>>, StopSel=<</hl>>, "
-    "MaxFragments=2, MaxWords=20, MinWords=6"
+    "StartSel=<<hl>>, StopSel=<</hl>>, MaxFragments=2, MaxWords=20, MinWords=6"
 )
 
 # On-the-fly full-text search over ONE release's content tree. The
@@ -789,8 +859,9 @@ WITH units AS (
             vfb.title,
             pcb.title,
             (
-                SELECT string_agg(it->>'caption', ' ')
-                FROM jsonb_array_elements(pcb.items) AS it
+                SELECT string_agg(pci.caption, ' ')
+                FROM note_release_photo_collage_items AS pci
+                WHERE pci.block_id = pcb.oid
             ),
             (
                 SELECT string_agg(s #>> '{}', ' ')
@@ -1000,6 +1071,10 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
             )
         ).all()
 
+        blocks_rows = await _with_release_collage_items(
+            self._session,
+            list(blocks_rows),
+        )
         files_by_id = await resolve_file_views(
             self._session,
             self._file_storage,
@@ -1172,13 +1247,16 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
             await self._session.execute(
                 _release_blocks_view_select()
                 .where(
-                    note_release_blocks_table.c.release_lesson_id
-                    == lesson_id,
+                    note_release_blocks_table.c.release_lesson_id == lesson_id,
                 )
                 .order_by(note_release_blocks_table.c.position.asc()),
             )
         ).all()
 
+        blocks_rows = await _with_release_collage_items(
+            self._session,
+            list(blocks_rows),
+        )
         files_by_id = await resolve_file_views(
             self._session,
             self._file_storage,
@@ -1192,8 +1270,7 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
             title=lesson_row.title,
             position=lesson_row.position,
             blocks=[
-                spec_for_row(row).row_to_view(row, files_by_id)
-                for row in blocks_rows
+                spec_for_row(row).row_to_view(row, files_by_id) for row in blocks_rows
             ],
         )
 
@@ -1230,9 +1307,7 @@ class NoteReleaseReaderAlchemy(NoteReleaseReader):
                 lesson_id=NoteLessonID(row.lesson_id),
                 lesson_title=row.lesson_title,
                 block_id=(
-                    LessonBlockID(row.block_id)
-                    if row.block_id is not None
-                    else None
+                    LessonBlockID(row.block_id) if row.block_id is not None else None
                 ),
                 block_type=row.block_type,
                 snippet=row.snippet,
@@ -1301,9 +1376,6 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
             note_release_video_file_blocks_table.c.title.label(
                 "video_file_block_title",
             ),
-            note_release_photo_collage_blocks_table.c["items"].label(
-                "photo_collage_items",
-            ),
             note_release_photo_collage_blocks_table.c.title.label(
                 "photo_collage_title",
             ),
@@ -1314,13 +1386,11 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
         .select_from(
             note_release_blocks_table.join(
                 note_releases_table,
-                note_release_blocks_table.c.release_id
-                == note_releases_table.c.oid,
+                note_release_blocks_table.c.release_id == note_releases_table.c.oid,
             )
             .outerjoin(
                 note_release_html_blocks_table,
-                note_release_blocks_table.c.oid
-                == note_release_html_blocks_table.c.oid,
+                note_release_blocks_table.c.oid == note_release_html_blocks_table.c.oid,
             )
             .outerjoin(
                 note_release_katex_blocks_table,
@@ -1334,8 +1404,7 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
             )
             .outerjoin(
                 note_release_code_blocks_table,
-                note_release_blocks_table.c.oid
-                == note_release_code_blocks_table.c.oid,
+                note_release_blocks_table.c.oid == note_release_code_blocks_table.c.oid,
             )
             .outerjoin(
                 note_release_single_choice_blocks_table,
@@ -1354,8 +1423,7 @@ def _select_release_block_with_id(oid: LessonBlockID) -> sa.Select[Any]:
             )
             .outerjoin(
                 note_release_file_blocks_table,
-                note_release_blocks_table.c.oid
-                == note_release_file_blocks_table.c.oid,
+                note_release_blocks_table.c.oid == note_release_file_blocks_table.c.oid,
             )
             .outerjoin(
                 note_release_video_file_blocks_table,
@@ -1402,6 +1470,8 @@ class NoteReleaseBlockGatewayAlchemy(NoteReleaseBlockGateway):
         ).one_or_none()
         if row is None:
             return None
+        rows = await _with_release_collage_items(self._session, [row])
+        row = rows[0]
         common = _CommonBlockAttrs(
             oid=LessonBlockID(row.oid),
             lesson_id=NoteLessonID(row.lesson_id),
