@@ -19,6 +19,7 @@ from learnic.entities.note_block.constants import (
     BLOCK_TITLE_MAX_LEN,
     HTML_BLOCK_MAX_LEN,
     KATEX_BLOCK_MAX_LEN,
+    PHOTO_COLLAGE_CAPTION_MAX_LEN,
     RUTUBE_VIDEO_ID_LENGTH,
     VIDEO_TITLE_MAX_LEN,
 )
@@ -390,11 +391,55 @@ note_release_photo_collage_blocks_table = sa.Table(
         sa.ForeignKey("note_release_blocks.oid", ondelete="CASCADE"),
         primary_key=True,
     ),
-    sa.Column("items", JSONB, nullable=False),
     sa.Column(
         "title",
         sa.String(BLOCK_TITLE_MAX_LEN),
         nullable=True,
+    ),
+)
+
+
+# Snapshot mirror of the draft ``photo_collage_items`` child table.
+# A published release used to denormalise items into a JSONB column on
+# the block; they now live as rows so reads, the release-pin probe and
+# storage-usage accounting are plain joins, symmetric with the draft
+# side. ``oid`` is a fresh per-release surrogate PK — release tables
+# never reuse draft ids — and ``source_item_id`` carries the draft item
+# id so the reader can expose the same item identity the JSONB did.
+# ``file_id`` stays ``ON DELETE SET NULL`` like the other file-backed
+# release mirrors: a deleted file degrades to a placeholder, not a
+# failed read.
+note_release_photo_collage_items_table = sa.Table(
+    "note_release_photo_collage_items",
+    mapper_registry.metadata,
+    sa.Column("oid", sa.Uuid, primary_key=True),
+    sa.Column(
+        "block_id",
+        sa.Uuid,
+        sa.ForeignKey(
+            "note_release_photo_collage_blocks.oid",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    ),
+    sa.Column("source_item_id", sa.Uuid, nullable=True),
+    sa.Column("position", sa.Integer(), nullable=False),
+    sa.Column(
+        "file_id",
+        sa.Uuid,
+        sa.ForeignKey("files.oid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column(
+        "caption",
+        sa.String(PHOTO_COLLAGE_CAPTION_MAX_LEN),
+        nullable=True,
+    ),
+    sa.UniqueConstraint(
+        "block_id",
+        "position",
+        name="uq_note_release_photo_collage_items_block_position",
     ),
 )
 
