@@ -9,8 +9,6 @@ from learnic.application.common.email.components import (
     EmailParagraph,
 )
 from learnic.application.common.errors import InvalidTokenError
-from learnic.application.common.notifications.channels import EmailPayload
-from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
@@ -21,10 +19,7 @@ from learnic.application.common.security.policies import SecurityPolicies
 from learnic.application.common.security.signup_sessions import (
     SignupSessionStore,
 )
-from learnic.entities.notification.enums import (
-    NotificationCategory,
-    NotificationChannel,
-)
+from learnic.application.common.tasks.scheduler import TaskScheduler
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,7 +48,7 @@ class ResendVerificationCommandHandler:
         user_gateway: UserGateway,
         signup_sessions: SignupSessionStore,
         email_tokens: EmailTokenStore,
-        notifier: Notifier,
+        task_scheduler: TaskScheduler,
         config: SecurityPolicies,
         anon_rate_limiter: AnonymousEmailRateLimiter,
     ) -> None:
@@ -61,7 +56,7 @@ class ResendVerificationCommandHandler:
         self._user_gateway: Final = user_gateway
         self._signup_sessions: Final = signup_sessions
         self._email_tokens: Final = email_tokens
-        self._notifier: Final = notifier
+        self._task_scheduler: Final = task_scheduler
         self._config: Final = config
         self._anon_rate_limiter: Final = anon_rate_limiter
 
@@ -87,20 +82,15 @@ class ResendVerificationCommandHandler:
         await self._transaction.commit()
         base = self._config.frontend_base_url.rstrip("/")
         link = f"{base}/confirm/email?token={raw_token}"
-        await self._notifier.send(
-            recipient_id=user.oid,
-            category=NotificationCategory.SECURITY,
-            payloads={
-                NotificationChannel.EMAIL: EmailPayload(
-                    subject="Подтверждение email",
-                    components=[
-                        EmailParagraph.text("Здравствуйте!"),
-                        EmailParagraph.text(
-                            "Подтвердите ваш email, нажав на кнопку ниже:",
-                        ),
-                        EmailButton(label="Подтвердить email", url=link),
-                        EmailParagraph.text("Ссылка действует 24 часа."),
-                    ],
+        await self._task_scheduler.schedule_send_email(
+            to=user.email.value,
+            subject="Подтверждение email",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Подтвердите ваш email, нажав на кнопку ниже:",
                 ),
-            },
+                EmailButton(label="Подтвердить email", url=link),
+                EmailParagraph.text("Ссылка действует 24 часа."),
+            ],
         )

@@ -8,8 +8,6 @@ from learnic.application.common.email.components import (
     EmailButton,
     EmailParagraph,
 )
-from learnic.application.common.notifications.channels import EmailPayload
-from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
@@ -17,10 +15,7 @@ from learnic.application.common.security.email_tokens import (
     EmailTokenStore,
 )
 from learnic.application.common.security.policies import SecurityPolicies
-from learnic.entities.notification.enums import (
-    NotificationCategory,
-    NotificationChannel,
-)
+from learnic.application.common.tasks.scheduler import TaskScheduler
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,14 +36,14 @@ class RequestPasswordResetCommandHandler:
         transaction: Transaction,
         user_gateway: UserGateway,
         email_tokens: EmailTokenStore,
-        notifier: Notifier,
+        task_scheduler: TaskScheduler,
         config: SecurityPolicies,
         anon_rate_limiter: AnonymousEmailRateLimiter,
     ) -> None:
         self._transaction: Final = transaction
         self._user_gateway: Final = user_gateway
         self._email_tokens: Final = email_tokens
-        self._notifier: Final = notifier
+        self._task_scheduler: Final = task_scheduler
         self._config: Final = config
         self._anon_rate_limiter: Final = anon_rate_limiter
 
@@ -70,20 +65,15 @@ class RequestPasswordResetCommandHandler:
 
         base = self._config.frontend_base_url.rstrip("/")
         link = f"{base}/reset-password?token={raw_token}"
-        await self._notifier.send(
-            recipient_id=user.oid,
-            category=NotificationCategory.SECURITY,
-            payloads={
-                NotificationChannel.EMAIL: EmailPayload(
-                    subject="Сброс пароля",
-                    components=[
-                        EmailParagraph.text("Здравствуйте!"),
-                        EmailParagraph.text(
-                            "Чтобы установить новый пароль, нажмите на кнопку ниже:",
-                        ),
-                        EmailButton(label="Сбросить пароль", url=link),
-                        EmailParagraph.text("Ссылка действует 1 час."),
-                    ],
+        await self._task_scheduler.schedule_send_email(
+            to=user.email.value,
+            subject="Сброс пароля",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Чтобы установить новый пароль, нажмите на кнопку ниже:",
                 ),
-            },
+                EmailButton(label="Сбросить пароль", url=link),
+                EmailParagraph.text("Ссылка действует 1 час."),
+            ],
         )

@@ -7,11 +7,6 @@ from learnic.application.commands.auth.register import (
     RegisterCommandHandler,
 )
 from learnic.application.common.errors import EmailAlreadyRegisteredError
-from learnic.application.common.notifications.channels import EmailPayload
-from learnic.entities.notification.enums import (
-    NotificationCategory,
-    NotificationChannel,
-)
 from learnic.infrastructure.configs import SecurityConfig
 
 
@@ -23,7 +18,7 @@ def _build_handler(
     hasher: MagicMock,
     email_tokens: AsyncMock,
     signup_sessions: AsyncMock,
-    notifier: AsyncMock,
+    task_scheduler: AsyncMock,
     config: SecurityConfig,
     anon_rate_limiter: AsyncMock,
 ) -> RegisterCommandHandler:
@@ -34,20 +29,20 @@ def _build_handler(
         hasher=hasher,
         email_tokens=email_tokens,
         signup_sessions=signup_sessions,
-        notifier=notifier,
+        task_scheduler=task_scheduler,
         config=config,
         anon_rate_limiter=anon_rate_limiter,
     )
 
 
-async def test_register_success_mints_tokens_and_notifies(
+async def test_register_success_mints_tokens_and_schedules_email(
     fake_transaction: AsyncMock,
     fake_entity_saver: MagicMock,
     fake_user_gateway: AsyncMock,
     fake_hasher: MagicMock,
     fake_email_tokens: AsyncMock,
     fake_signup_sessions: AsyncMock,
-    fake_notifier: AsyncMock,
+    fake_scheduler: AsyncMock,
     security_config: SecurityConfig,
     fake_anon_rate_limiter: AsyncMock,
 ) -> None:
@@ -60,7 +55,7 @@ async def test_register_success_mints_tokens_and_notifies(
         hasher=fake_hasher,
         email_tokens=fake_email_tokens,
         signup_sessions=fake_signup_sessions,
-        notifier=fake_notifier,
+        task_scheduler=fake_scheduler,
         config=security_config,
         anon_rate_limiter=fake_anon_rate_limiter,
     )
@@ -78,15 +73,11 @@ async def test_register_success_mints_tokens_and_notifies(
     fake_email_tokens.issue.assert_awaited_once()
     fake_signup_sessions.issue.assert_awaited_once()
     fake_transaction.commit.assert_awaited_once()
-    fake_notifier.send.assert_awaited_once()
-    sent_kwargs = fake_notifier.send.await_args.kwargs
-    assert sent_kwargs["category"] is NotificationCategory.SECURITY
-    payloads = sent_kwargs["payloads"]
-    assert NotificationChannel.EMAIL in payloads
-    email_payload = payloads[NotificationChannel.EMAIL]
-    assert isinstance(email_payload, EmailPayload)
-    assert email_payload.subject == "Подтверждение email"
-    assert len(email_payload.components) > 0
+    fake_scheduler.schedule_send_email.assert_awaited_once()
+    sent_kwargs = fake_scheduler.schedule_send_email.await_args.kwargs
+    assert sent_kwargs["to"] == "new@example.com"
+    assert sent_kwargs["subject"] == "Подтверждение email"
+    assert len(sent_kwargs["components"]) > 0
 
 
 async def test_register_rejects_existing_email(
@@ -96,7 +87,7 @@ async def test_register_rejects_existing_email(
     fake_hasher: MagicMock,
     fake_email_tokens: AsyncMock,
     fake_signup_sessions: AsyncMock,
-    fake_notifier: AsyncMock,
+    fake_scheduler: AsyncMock,
     security_config: SecurityConfig,
     fake_anon_rate_limiter: AsyncMock,
     verified_user,
@@ -110,7 +101,7 @@ async def test_register_rejects_existing_email(
         hasher=fake_hasher,
         email_tokens=fake_email_tokens,
         signup_sessions=fake_signup_sessions,
-        notifier=fake_notifier,
+        task_scheduler=fake_scheduler,
         config=security_config,
         anon_rate_limiter=fake_anon_rate_limiter,
     )
@@ -127,4 +118,4 @@ async def test_register_rejects_existing_email(
 
     fake_entity_saver.add_one.assert_not_called()
     fake_transaction.commit.assert_not_called()
-    fake_notifier.send.assert_not_called()
+    fake_scheduler.schedule_send_email.assert_not_called()
