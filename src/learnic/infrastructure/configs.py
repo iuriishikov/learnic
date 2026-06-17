@@ -56,7 +56,6 @@ class TaskIQConfig(BaseSettings):
     broker_url: str = "redis://localhost:6379/0"
     result_backend_url: str = "redis://localhost:6379/1"
     in_memory: bool = False
-    workers: int = 2
 
 
 class RedisConfig(BaseSettings):
