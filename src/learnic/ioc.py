@@ -26,6 +26,9 @@ from learnic.application.commands.auth.logout import LogoutCommandHandler
 from learnic.application.commands.auth.logout_all import (
     LogoutAllCommandHandler,
 )
+from learnic.application.commands.auth.purge_unverified_users import (
+    PurgeUnverifiedUsersCommandHandler,
+)
 from learnic.application.commands.auth.refresh import RefreshCommandHandler
 from learnic.application.commands.auth.register import (
     RegisterCommandHandler,
@@ -1692,6 +1695,7 @@ class InteractorsProvider(Provider):
         VerifyWaitCommandHandler,
         VerifyTokenCommandHandler,
         ResendVerificationCommandHandler,
+        PurgeUnverifiedUsersCommandHandler,
         GetTokenStatusQueryHandler,
         RequestPasswordResetCommandHandler,
         ResetPasswordCommandHandler,

@@ -1,4 +1,5 @@
 from learnic.infrastructure.tasks.handlers import (
+    auth,
     billing,
     email,
     example,
@@ -9,6 +10,7 @@ from learnic.infrastructure.tasks.handlers import (
 )
 
 __all__ = [
+    "auth",
     "billing",
     "email",
     "example",
