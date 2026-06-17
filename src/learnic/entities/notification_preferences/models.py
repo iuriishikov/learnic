@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Final
 
 from learnic.entities.notification.enums import (
     NotificationCategory,
@@ -11,12 +12,31 @@ def _all_categories_default(value: bool) -> dict[NotificationCategory, bool]:
     return {category: value for category in NotificationCategory}
 
 
+# Email is opt-in per category by default — digest-style mail must not surprise
+# users — EXCEPT account-safety / transactional categories, which must always be
+# able to reach the inbox. Without this, a user who has never opened the
+# settings page (no stored preferences row) silently never receives security
+# mail: defaults_for() would set every category False and is_enabled() would
+# gate EMAIL off (exactly how the new-login / verification mail went missing).
+_EMAIL_ON_BY_DEFAULT: Final[frozenset[NotificationCategory]] = frozenset(
+    {NotificationCategory.SECURITY},
+)
+
+
+def _email_category_defaults() -> dict[NotificationCategory, bool]:
+    return {
+        category: category in _EMAIL_ON_BY_DEFAULT
+        for category in NotificationCategory
+    }
+
+
 @dataclass
 class NotificationPreferences:
     """Per-user matrix of channel × category opt-in flags.
 
     One row per user; missing rows are treated as "all defaults"
-    (push on, email off, in-app on) — the reader materialises a
+    (push on; email off except account-safety ``SECURITY``, which is
+    on; in-app on) — the reader materialises a
     default object so callers never have to special-case the
     first-time path. ``IN_APP`` is always ``True`` regardless of
     storage; the publisher must not gate the in-app fanout on this
@@ -28,7 +48,7 @@ class NotificationPreferences:
         default_factory=lambda: _all_categories_default(True),
     )
     email: dict[NotificationCategory, bool] = field(
-        default_factory=lambda: _all_categories_default(False),
+        default_factory=_email_category_defaults,
     )
 
     @classmethod
@@ -37,14 +57,17 @@ class NotificationPreferences:
 
         Push: opted in for every category — most common expectation
         after the user clicked "Enable notifications". Email: opted
-        out by default to avoid surprising legacy users with new
-        digest mail; the settings page lets them flip individual
-        categories on.
+        out by default to avoid surprising legacy users with digest
+        mail, EXCEPT account-safety/transactional categories
+        (``SECURITY``), which default ON so security mail (new-login
+        alert, etc.) always reaches a user who has never touched the
+        settings page. The settings page still lets users flip
+        individual categories.
         """
         return cls(
             user_id=user_id,
             push=_all_categories_default(True),
-            email={category: False for category in NotificationCategory},
+            email=_email_category_defaults(),
         )
 
     def is_enabled(
