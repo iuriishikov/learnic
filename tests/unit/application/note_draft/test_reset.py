@@ -13,6 +13,7 @@ from learnic.application.common.errors import (
     EntityNotFoundError,
     InsufficientPermissionsError,
 )
+from learnic.entities.file.ids import FileID
 from learnic.entities.note_release.enums import NoteReleaseKind
 from learnic.entities.note_release.ids import NoteReleaseID
 from learnic.entities.note_release.models import NoteRelease
@@ -73,13 +74,21 @@ def _make_handler() -> tuple[
     resetter = AsyncMock()
     event_bus = AsyncMock()
     event_bus.publish = AsyncMock()
+    files_reader = AsyncMock()
+    files_reader.file_ids_for_product = AsyncMock(return_value=[])
+    file_uploads = AsyncMock()
+    file_uploads.soft_delete_previous = AsyncMock(return_value=False)
+    quota_publisher = AsyncMock()
     handler = ResetNoteDraftCommandHandler(
         transaction=transaction,
         authorizer=authorizer,
         product_gateway=product_gw,
         release_gateway=release_gw,
         resetter=resetter,
+        files_reader=files_reader,
+        file_uploads=file_uploads,
         event_bus=event_bus,
+        quota_publisher=quota_publisher,
     )
     return (
         handler,
@@ -129,6 +138,69 @@ async def test_reset_rehydrates_draft_and_publishes_event() -> None:
         ordinal=2,
         version=[1, 1, 0],
     )
+
+
+async def test_reset_sweeps_orphan_files_excludes_cover_publishes_usage() -> (
+    None
+):
+    author = _author_id()
+    note = _note(author)
+    cover_id = FileID(uuid.uuid4())
+    note.set_cover(cover_id)
+    release = _release(note.oid, author)
+
+    transaction = AsyncMock()
+    authorizer = AsyncMock()
+    product_gw = AsyncMock()
+    product_gw.with_id.return_value = note
+    release_gw = AsyncMock()
+    release_gw.with_id.return_value = release
+    resetter = AsyncMock()
+    event_bus = AsyncMock()
+    files_reader = AsyncMock()
+    orphan_id = FileID(uuid.uuid4())
+    release_pinned_id = FileID(uuid.uuid4())
+    files_reader.file_ids_for_product.return_value = [
+        cover_id,
+        orphan_id,
+        release_pinned_id,
+    ]
+    file_uploads = AsyncMock()
+    # Orphan gets freed (True); release-pinned is spared by the guard
+    # (False). The cover is excluded before the loop and never reaches here.
+    file_uploads.soft_delete_previous.side_effect = (
+        lambda fid: fid == orphan_id
+    )
+    quota_publisher = AsyncMock()
+
+    handler = ResetNoteDraftCommandHandler(
+        transaction=transaction,
+        authorizer=authorizer,
+        product_gateway=product_gw,
+        release_gateway=release_gw,
+        resetter=resetter,
+        files_reader=files_reader,
+        file_uploads=file_uploads,
+        event_bus=event_bus,
+        quota_publisher=quota_publisher,
+    )
+
+    await handler.run(
+        ResetNoteDraftCommand(
+            actor_id=author,
+            product_id=note.oid,
+            release_id=release.oid,
+        ),
+    )
+
+    swept = [
+        call.args[0]
+        for call in file_uploads.soft_delete_previous.await_args_list
+    ]
+    assert cover_id not in swept
+    assert orphan_id in swept
+    assert release_pinned_id in swept
+    quota_publisher.usage_changed.assert_awaited_once_with(author)
 
 
 async def test_reset_missing_product_raises() -> None:
