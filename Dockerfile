@@ -59,7 +59,7 @@ EXPOSE 8000
 # app's HTTP healthcheck is defined on the `app` service in docker-compose.yaml
 # instead, so the non-HTTP services don't inherit a check they can never pass.
 CMD ["gunicorn", \
-     "--workers", "4", \
+     "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--graceful-timeout", "30", \
