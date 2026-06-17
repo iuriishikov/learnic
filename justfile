@@ -72,6 +72,11 @@ prod-up:
         files="$files -f docker-compose.postgres.yaml"
     fi
     docker compose $files up -d --build --wait
+    # Caddyfile is a bind mount, so `up -d` won't recreate caddy when only the file
+    # content changed, and Caddy doesn't watch it. Gracefully reload to apply config
+    # edits with zero downtime (harmless re-apply on a fresh start; a broken config
+    # makes reload exit non-zero under `set -e` while the old config keeps serving).
+    docker compose $files exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 
 [doc("Start as the SINGLE co-located edge — Caddy fronts BOTH frontend + API. Run the frontend with `just prod-up-colocated`.")]
 prod-up-colocated:
@@ -88,6 +93,11 @@ prod-up-colocated:
         files="$files -f docker-compose.postgres.yaml"
     fi
     BACKEND_CADDYFILE=./deploy/caddy/Caddyfile.colocated docker compose $files up -d --build --wait
+    # Caddyfile is a bind mount, so `up -d` won't recreate caddy when only the file
+    # content changed, and Caddy doesn't watch it. Gracefully reload to apply config
+    # edits with zero downtime (harmless re-apply on a fresh start; a broken config
+    # makes reload exit non-zero under `set -e` while the old config keeps serving).
+    docker compose $files exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 
 [doc("Stop the production-like stack (keeps volumes)")]
 prod-down:
