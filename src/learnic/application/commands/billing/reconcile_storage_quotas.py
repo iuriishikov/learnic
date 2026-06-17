@@ -15,9 +15,14 @@ covers every author with any deduplicated storage usage today:
    and the absolute ``grace_until`` cutoff.
 3. **Enforcement.** Once ``now - breach.detected_at >=
    OVER_QUOTA_GRACE_PERIOD_DAYS``, walk the author's files
-   newest-first and soft-delete them until used bytes drop to the
-   cap. Publish a ``storage_quota_enforced`` card with the count
-   and freed bytes. Drop the breach record.
+   (draft-only first, then release-pinned, each newest-first) and
+   soft-delete them until used bytes drop to the cap. Files a
+   published release still pins ARE evicted here — quota wins over
+   release immutability, and the release degrades to a missing-media
+   placeholder. If the pass brings the author back under cap, publish
+   a ``storage_quota_enforced`` card and drop the breach record;
+   otherwise keep the breach (preserving ``detected_at``) so the next
+   pass re-enforces without restarting grace.
 4. **Recovery.** Authors who freed up space on their own (or
    upgraded plans) have their breach record dropped without any
    notification — silence is fine, the in-app subscription view
@@ -274,30 +279,52 @@ class ReconcileStorageQuotasCommandHandler:
         for ref in candidates:
             if freed >= to_free:
                 break
-            # soft_delete_previous spares files a published release
-            # still pins (it shares the exact blob) — releases stay
-            # immutable even under enforcement. Only credit the bytes
-            # it actually evicted, and keep walking so a spared file
-            # does not stall reclamation of the next candidate.
-            if await self._file_uploads.soft_delete_previous(ref.file_id):
+            # ``newest_first`` orders draft-only files ahead of
+            # release-pinned ones, so published media is only touched
+            # once evicting the draft-only files is not enough. Forward
+            # ``is_release_pinned`` so a release-pinned candidate takes
+            # the guard-bypassing eviction path (quota wins over release
+            # immutability) while a draft-only one stays on the normal
+            # path. Credit only bytes actually evicted.
+            if await self._file_uploads.soft_delete_previous(
+                ref.file_id,
+                evict_release_pinned=ref.is_release_pinned,
+            ):
                 freed += ref.size_bytes
                 deleted_count += 1
 
-        # Drop the breach: this enforcement pass should bring the
-        # author back under cap. If somehow it didn't (race with
-        # a concurrent upload), the next reconcile will reopen a
-        # fresh breach with a new ``detected_at``.
-        await self._breaches.delete(breach)
-        notification = Notification.for_storage_quota_enforced(
-            recipient_id=user_id,
-            plan_code=plan.code,
-            deleted_files_count=deleted_count,
-            freed_bytes=freed,
-        )
-        await self._publisher.publish(notification)
+        if used - freed <= cap:
+            # Back under cap — resolve the breach. The publisher commits
+            # the soft-deletes + breach delete atomically with the card.
+            await self._breaches.delete(breach)
+            notification = Notification.for_storage_quota_enforced(
+                recipient_id=user_id,
+                plan_code=plan.code,
+                deleted_files_count=deleted_count,
+                freed_bytes=freed,
+            )
+            await self._publisher.publish(notification)
+            summary.enforcements += 1
+        else:
+            # Could not free enough this pass — a concurrent upload
+            # landed, or a release published mid-pass made a candidate
+            # be spared for safety. KEEP the breach so its
+            # ``detected_at`` (and thus the elapsed grace) is preserved:
+            # the next pass re-enforces immediately instead of
+            # restarting the 14-day countdown. Commit the partial
+            # soft-deletes; do NOT publish a misleading "enforced" card.
+            await self._transaction.commit()
+            summary.enforcements += 1
+            _logger.warning(
+                "storage_quota_reconcile.enforce_incomplete",
+                extra={
+                    "user_id": str(user_id),
+                    "freed_bytes": freed,
+                    "needed_bytes": to_free,
+                },
+            )
         if deleted_count:
             await self._quota_publisher.usage_changed(user_id)
-        summary.enforcements += 1
 
 
 @dataclass(slots=True)

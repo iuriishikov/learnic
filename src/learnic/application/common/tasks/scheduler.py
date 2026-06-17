@@ -20,6 +20,8 @@ class TaskScheduler(Protocol):
         self,
         file_id: FileID,
         attempt: int = 0,
+        *,
+        force_release_pinned: bool = False,
     ) -> None:
         """Enqueue physical removal of a soft-deleted file's S3 object.
 
@@ -36,13 +38,19 @@ class TaskScheduler(Protocol):
         and video-file blocks (draft and blog) reference the file
         with ``ON DELETE CASCADE`` — they are dropped with the file;
         photo-collage items and note-release mirror rows use
-        ``ON DELETE SET NULL`` / a no-FK JSONB mirror, so the worker
-        excises the offending item explicitly.
+        ``ON DELETE SET NULL`` — the worker excises the draft items
+        explicitly and the release mirrors degrade to a placeholder.
 
         Args:
             file_id: Target file's ``FileID``.
             attempt: Re-enqueue counter; callers leave it at ``0``.
                 The worker increments it on each "still live" retry.
+            force_release_pinned: When ``True``, the worker skips its
+                defensive ``is_referenced_by_release`` re-check and
+                purges even a release-pinned blob. Set only by the
+                over-quota reconcile job, which deliberately evicts
+                release media (quota wins over release immutability);
+                the soft-delete producer already decided the eviction.
         """
         ...
 
