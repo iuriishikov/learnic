@@ -58,8 +58,10 @@ EXPOSE 8000
 # worker, scheduler and migrate, but only `app` serves HTTP on :8000. The
 # app's HTTP healthcheck is defined on the `app` service in docker-compose.yaml
 # instead, so the non-HTTP services don't inherit a check they can never pass.
+# Web-worker count comes from WEB_CONCURRENCY (gunicorn honors it natively when
+# --workers is omitted). Set per-environment in .env; docker-compose.yaml
+# defaults the app service to 2.
 CMD ["gunicorn", \
-     "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--graceful-timeout", "30", \
