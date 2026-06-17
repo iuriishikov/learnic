@@ -67,6 +67,28 @@ class UserGateway(Protocol):
         """
         ...
 
+    async def delete_abandoned_unverified_by_email(
+        self,
+        email: str,
+        now: datetime,
+    ) -> bool:
+        """Delete the abandoned unverified row squatting ``email``.
+
+        Same liveness gate as :meth:`delete_abandoned_unverified` but
+        scoped to a single (normalized) ``email``: the row is removed
+        only when it is unverified with no active VERIFY token and no
+        active signup session — exactly the rows the periodic purge
+        reaps. Lets a fresh registration reclaim an address held by a
+        long-dead signup without waiting for the next sweep.
+
+        Returns ``True`` if a row was deleted (the address is now
+        free), ``False`` if no reclaimable row exists — either the
+        address is unused, or it belongs to a verified account or one
+        still inside its verification window, which must NOT be
+        displaced.
+        """
+        ...
+
 
 class UserReader(Protocol):
     """Read-side queries returning :class:`UserView` projections."""

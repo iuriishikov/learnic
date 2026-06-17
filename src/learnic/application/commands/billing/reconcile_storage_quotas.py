@@ -46,8 +46,10 @@ from learnic.application.common.notifications.publisher import (
 from learnic.application.common.persistence.billing import (
     AuthorActiveFilesReader,
     FileUsageReader,
-    GlobalSchedulerLock,
     StorageQuotaBreachGateway,
+)
+from learnic.application.common.persistence.scheduler_lock import (
+    GlobalSchedulerLock,
 )
 from learnic.application.common.persistence.transaction import (
     EntitySaver,

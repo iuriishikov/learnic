@@ -49,8 +49,10 @@ class UserMapperAlchemy(UserGateway):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
-    @override
-    async def delete_abandoned_unverified(self, now: datetime) -> int:
+    def _abandoned_unverified_where(
+        self,
+        now: datetime,
+    ) -> tuple[sa.ColumnElement[bool], ...]:
         # "Abandoned" = unverified AND unable to self-recover: no live
         # VERIFY token (email link dead) and no live signup session
         # (resend impossible). Login is then blocked and the UNIQUE
@@ -58,6 +60,8 @@ class UserMapperAlchemy(UserGateway):
         # forever — safe and necessary to delete. email_tokens /
         # signup_sessions children cascade via ON DELETE CASCADE; an
         # abandoned signup never logged in, so nothing else refs it.
+        # Shared verbatim by the bulk purge and the per-email reclaim
+        # so the two can never drift on what "abandoned" means.
         active_verify_token = (
             sa.select(sa.literal(1))
             .select_from(email_tokens_table)
@@ -81,14 +85,38 @@ class UserMapperAlchemy(UserGateway):
             .correlate(users_table)
             .exists()
         )
-        stmt = sa.delete(users_table).where(
+        return (
             users_table.c.email_verified.is_(False),
             ~active_verify_token,
             ~active_signup_session,
         )
+
+    @override
+    async def delete_abandoned_unverified(self, now: datetime) -> int:
+        stmt = sa.delete(users_table).where(
+            *self._abandoned_unverified_where(now),
+        )
         result = await self._session.execute(stmt)
         rowcount: int | None = getattr(result, "rowcount", None)
         return rowcount or 0
+
+    @override
+    async def delete_abandoned_unverified_by_email(
+        self,
+        email: str,
+        now: datetime,
+    ) -> bool:
+        # Same liveness gate as the bulk purge, scoped to one address
+        # so a fresh registration can reclaim it on demand. Normalize
+        # the email the same way the Email VO / ``with_email`` do so a
+        # casing/whitespace variant still targets the stored row.
+        stmt = sa.delete(users_table).where(
+            users_table.c.email == normalize_email(email),
+            *self._abandoned_unverified_where(now),
+        )
+        result = await self._session.execute(stmt)
+        rowcount: int | None = getattr(result, "rowcount", None)
+        return (rowcount or 0) > 0
 
 
 class UserReaderAlchemy(UserReader):

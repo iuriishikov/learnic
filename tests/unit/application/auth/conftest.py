@@ -52,7 +52,19 @@ def fake_user_gateway() -> AsyncMock:
     gateway = AsyncMock()
     gateway.with_id = AsyncMock()
     gateway.with_email = AsyncMock()
+    gateway.delete_abandoned_unverified = AsyncMock(return_value=0)
+    gateway.delete_abandoned_unverified_by_email = AsyncMock(
+        return_value=False,
+    )
     return gateway
+
+
+@pytest.fixture
+def fake_global_scheduler_lock() -> AsyncMock:
+    lock = AsyncMock()
+    lock.try_acquire = AsyncMock(return_value=True)
+    lock.release = AsyncMock()
+    return lock
 
 
 @pytest.fixture

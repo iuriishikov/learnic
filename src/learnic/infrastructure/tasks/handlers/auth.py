@@ -14,7 +14,7 @@ _logger = logging.getLogger(__name__)
 
 
 @broker.task(
-    schedule=[{"cron": "0 3 * * *"}],
+    schedule=[{"cron": "*/15 * * * *"}],
 )
 @inject
 async def purge_unverified_users_task(
@@ -22,9 +22,12 @@ async def purge_unverified_users_task(
 ) -> None:
     """Delete abandoned unverified accounts past self-recovery.
 
-    Cron: ``0 3 * * *`` (every day at 03:00 UTC) via the TaskIQ
-    scheduler (see ``learnic/worker.py``). Same nightly slot as the
-    gift / collaboration-invite and storage-quota sweeps.
+    Cron: ``*/15 * * * *`` (every 15 minutes) via the TaskIQ
+    scheduler (see ``learnic/worker.py``). The frequent cadence frees
+    a squatted address within ~15 min of it becoming reclaimable
+    instead of up to a day; re-registration also reclaims the exact
+    same rows on demand (see ``RegisterCommandHandler``), so this is
+    the backstop sweep, not the only path.
 
     A user who registered but never confirmed their email is locked
     out once their verify link (24h) and signup session (30m) expire:
@@ -33,8 +36,12 @@ async def purge_unverified_users_task(
     forever. This sweep removes exactly those unrecoverable rows;
     ``email_tokens`` / ``signup_sessions`` children cascade via FK.
 
-    Idempotent — a duplicate scheduler tick deletes zero rows on the
-    second pass. The deleted count is logged for observability.
+    The handler holds a cluster-wide ``GlobalSchedulerLock`` for the
+    pass, so a tick that overlaps a still-running pass (the 15-min
+    interval is shorter than a worst-case full-table sweep) or a
+    duplicate from an accidentally-scaled scheduler skips instead of
+    stacking a second delete. Idempotent regardless — a duplicate
+    tick deletes zero rows. The deleted count is logged.
     """
     summary = await handler.run(PurgeUnverifiedUsersCommand())
     _logger.info(
