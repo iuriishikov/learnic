@@ -545,7 +545,7 @@ version = "1.42.41"
 description = "Type annotations and code completion for botocore"
 optional = false
 python-versions = ">=3.9"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "botocore_stubs-1.42.41-py3-none-any.whl", hash = "sha256:9423110fb0e391834bd2ed44ae5f879d8cb370a444703d966d30842ce2bcb5f0"},
     {file = "botocore_stubs-1.42.41.tar.gz", hash = "sha256:dbeac2f744df6b814ce83ec3f3777b299a015cbea57a2efc41c33b8c38265825"},
@@ -3818,7 +3818,7 @@ version = "13.4.0"
 description = "Type annotations for aioboto3 13.4.0 generated with mypy-boto3-builder 8.8.0"
 optional = false
 python-versions = ">=3.8"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "types_aioboto3-13.4.0-py3-none-any.whl", hash = "sha256:73749e313eb3c64523efdefdf2e76d6ea5112298cf3e10074e3981a982ca7f36"},
     {file = "types_aioboto3-13.4.0.tar.gz", hash = "sha256:c313ff9f02b00b311decdc6d24b34e504b36871ee3b7d8b11a4a7fc15bde1b96"},
@@ -4245,7 +4245,7 @@ version = "3.5.0"
 description = "Type annotations for aiobotocore 3.5.0 generated with mypy-boto3-builder 8.12.0"
 optional = false
 python-versions = ">=3.9"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "types_aiobotocore-3.5.0-py3-none-any.whl", hash = "sha256:7c75ff73c10098d1d885e5b061f05945afdc4e9d0d5b573274292c329abe8a62"},
     {file = "types_aiobotocore-3.5.0.tar.gz", hash = "sha256:8636c9e5a9837d41e45264570349d98c0cdad51fe7961ee19664a11094bb2262"},
@@ -4689,7 +4689,7 @@ version = "2.18.0.post1"
 description = "Type annotations for aiobotocore S3 2.18.0 service generated with mypy-boto3-builder 8.9.0"
 optional = false
 python-versions = ">=3.8"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "types_aiobotocore_s3-2.18.0.post1-py3-none-any.whl", hash = "sha256:d8c05b7c2ed7732296b868e6d36503b38061af9926b25b9c3dd647b23f5dd0e7"},
     {file = "types_aiobotocore_s3-2.18.0.post1.tar.gz", hash = "sha256:94b5a5e63362f280bfc9dc85d705754587c727c71eea95718394117b25ac27bd"},
@@ -4701,7 +4701,7 @@ version = "0.31.3"
 description = "Type annotations and code completion for awscrt"
 optional = false
 python-versions = ">=3.8"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "types_awscrt-0.31.3-py3-none-any.whl", hash = "sha256:e5ce65a00a2ab4f35eacc1e3d700d792338d56e4823ee7b4dbe017f94cfc4458"},
     {file = "types_awscrt-0.31.3.tar.gz", hash = "sha256:09d3eaf00231e0f47e101bd9867e430873bc57040050e2a3bd8305cb4fc30865"},
@@ -4725,7 +4725,7 @@ version = "0.16.0"
 description = "Type annotations and code completion for s3transfer"
 optional = false
 python-versions = ">=3.9"
-groups = ["lint"]
+groups = ["main"]
 files = [
     {file = "types_s3transfer-0.16.0-py3-none-any.whl", hash = "sha256:1c0cd111ecf6e21437cb410f5cddb631bfb2263b77ad973e79b9c6d0cb24e0ef"},
     {file = "types_s3transfer-0.16.0.tar.gz", hash = "sha256:b4636472024c5e2b62278c5b759661efeb52a81851cde5f092f24100b1ecb443"},
@@ -5418,4 +5418,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.14,<4.0"
-content-hash = "97003b0bc67c7c01329548d89bc740e6e6bbc6c8f45d85a4e5ba76920cdf60b2"
+content-hash = "65ec72b95b9a00a338895594a880856974e682293772f7a746c00c89d39ed479"
