@@ -15,8 +15,6 @@ from learnic.application.common.errors import (
     CollaborationAlreadyExistsError,
     EntityNotFoundError,
 )
-from learnic.application.common.notifications.channels import EmailPayload
-from learnic.application.common.notifications.notifier import Notifier
 from learnic.application.common.notifications.publisher import (
     NotificationPublisher,
 )
@@ -34,16 +32,13 @@ from learnic.application.common.product_events import (
     publish_product_event,
 )
 from learnic.application.common.security.policies import SecurityPolicies
+from learnic.application.common.tasks.scheduler import TaskScheduler
 from learnic.application.commands.product_collaboration._grant_spec import (
     GrantSpec,
     GrantSpecResolver,
     require_grants_within_actor_permissions,
 )
 from learnic.entities.common.limits import PRODUCT_COLLABORATION_LIMIT
-from learnic.entities.notification.enums import (
-    NotificationCategory,
-    NotificationChannel,
-)
 from learnic.entities.notification.models import Notification
 from learnic.entities.product.ids import ProductID
 from learnic.entities.product_collaboration.constants import (
@@ -93,7 +88,7 @@ class InviteCollaboratorByUserCommandHandler:
         collab_saver: ProductCollaborationSaver,
         role_gateway: RoleGateway,
         lineage: ResourceLineageReader,
-        notifier: Notifier,
+        scheduler: TaskScheduler,
         event_bus: ProductEventBus,
         notifications: NotificationPublisher,
         security: SecurityPolicies,
@@ -107,7 +102,7 @@ class InviteCollaboratorByUserCommandHandler:
         self._collab_saver: Final = collab_saver
         self._role_gateway: Final = role_gateway
         self._resolver: Final = GrantSpecResolver(role_gateway, lineage)
-        self._notifier: Final = notifier
+        self._scheduler: Final = scheduler
         self._event_bus: Final = event_bus
         self._notifications: Final = notifications
         self._security: Final = security
@@ -178,27 +173,22 @@ class InviteCollaboratorByUserCommandHandler:
             f"/collaboration-invitation/{collab.oid}"
             f"/accept?token={token.value}"
         )
-        await self._notifier.send(
-            recipient_id=data.target_user_id,
-            category=NotificationCategory.TEACHING,
-            payloads={
-                NotificationChannel.EMAIL: EmailPayload(
-                    subject="Приглашение к совместной работе на Learnic",
-                    components=[
-                        EmailParagraph.text("Здравствуйте!"),
-                        EmailParagraph.text(
-                            "Вас пригласили в совместную работу над продуктом "
-                            "на платформе Learnic.",
-                        ),
-                        EmailButton(label="Принять приглашение", url=link),
-                        EmailParagraph.text(
-                            f"Ссылка действует {INVITE_TOKEN_TTL_DAYS} дней. "
-                            "После того как вы примете приглашение, нужные "
-                            "права будут выданы автоматически.",
-                        ),
-                    ],
+        await self._scheduler.schedule_send_email(
+            to=target.email.value,
+            subject="Приглашение к совместной работе на Learnic",
+            components=[
+                EmailParagraph.text("Здравствуйте!"),
+                EmailParagraph.text(
+                    "Вас пригласили в совместную работу над продуктом "
+                    "на платформе Learnic.",
                 ),
-            },
+                EmailButton(label="Принять приглашение", url=link),
+                EmailParagraph.text(
+                    f"Ссылка действует {INVITE_TOKEN_TTL_DAYS} дней. "
+                    "После того как вы примете приглашение, нужные "
+                    "права будут выданы автоматически.",
+                ),
+            ],
         )
         await publish_product_event(
             self._event_bus,
