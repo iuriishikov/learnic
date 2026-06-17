@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from learnic.application.common.pagination import Pagination
@@ -51,6 +52,20 @@ class UserGateway(Protocol):
     async def with_id(self, oid: UserID) -> User | None: ...
 
     async def with_email(self, email: str) -> User | None: ...
+
+    async def delete_abandoned_unverified(self, now: datetime) -> int:
+        """Bulk-delete unverified accounts past self-recovery.
+
+        Targets exactly the rows that can no longer self-verify:
+        ``email_verified`` is false, there is no active VERIFY email
+        token, and no active signup session (both judged against
+        ``now``). Such a row is a permanent squatter — login is
+        blocked, resend needs the gone signup session, and the UNIQUE
+        ``email`` blocks re-registration — so removing it frees the
+        address and stops indefinite accumulation. Returns the number
+        of rows deleted (zero on a no-op pass).
+        """
+        ...
 
 
 class UserReader(Protocol):

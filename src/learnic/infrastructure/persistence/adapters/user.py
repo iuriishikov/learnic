@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Final
 
 import sqlalchemy as sa
@@ -12,10 +13,19 @@ from learnic.application.common.persistence.user import (
     UserSummaryView,
     UserView,
 )
+from learnic.application.common.security.email_tokens import (
+    EmailTokenPurpose,
+)
 from learnic.entities.file.ids import FileID
 from learnic.entities.user.models import User, UserID
 from learnic.entities.user.value_objects import normalize_email
+from learnic.infrastructure.persistence.models.email_token import (
+    email_tokens_table,
+)
 from learnic.infrastructure.persistence.models.file import files_table
+from learnic.infrastructure.persistence.models.signup_session import (
+    signup_sessions_table,
+)
 from learnic.infrastructure.persistence.models.user import users_table
 
 
@@ -38,6 +48,47 @@ class UserMapperAlchemy(UserGateway):
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @override
+    async def delete_abandoned_unverified(self, now: datetime) -> int:
+        # "Abandoned" = unverified AND unable to self-recover: no live
+        # VERIFY token (email link dead) and no live signup session
+        # (resend impossible). Login is then blocked and the UNIQUE
+        # email blocks re-registration, so the row squats the address
+        # forever — safe and necessary to delete. email_tokens /
+        # signup_sessions children cascade via ON DELETE CASCADE; an
+        # abandoned signup never logged in, so nothing else refs it.
+        active_verify_token = (
+            sa.select(sa.literal(1))
+            .select_from(email_tokens_table)
+            .where(
+                email_tokens_table.c.user_id == users_table.c.oid,
+                email_tokens_table.c.purpose
+                == EmailTokenPurpose.VERIFY.value,
+                email_tokens_table.c.consumed_at.is_(None),
+                email_tokens_table.c.expires_at > now,
+            )
+            .correlate(users_table)
+            .exists()
+        )
+        active_signup_session = (
+            sa.select(sa.literal(1))
+            .select_from(signup_sessions_table)
+            .where(
+                signup_sessions_table.c.user_id == users_table.c.oid,
+                signup_sessions_table.c.expires_at > now,
+            )
+            .correlate(users_table)
+            .exists()
+        )
+        stmt = sa.delete(users_table).where(
+            users_table.c.email_verified.is_(False),
+            ~active_verify_token,
+            ~active_signup_session,
+        )
+        result = await self._session.execute(stmt)
+        rowcount: int | None = getattr(result, "rowcount", None)
+        return rowcount or 0
 
 
 class UserReaderAlchemy(UserReader):

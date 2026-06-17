@@ -42,10 +42,6 @@ class User(BaseEntity[UserID]):
     # consent on record; withdrawal clears it back to ``None``.
     distribution_consent_at: datetime | None = None
 
-    def change_email(self, new_email: Email) -> None:
-        self.email = new_email
-        self.email_verified = False
-
     def change_first_name(self, new_first_name: FirstName) -> None:
         self.first_name = new_first_name
 
