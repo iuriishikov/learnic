@@ -177,55 +177,76 @@ class FileUploadService:
     async def soft_delete_previous(
         self,
         previous_file_id: FileID | None,
+        *,
+        evict_release_pinned: bool = False,
     ) -> bool:
         """Mark the file being freed as deleted and queue S3 purge.
 
         Idempotent: no-ops when ``previous_file_id`` is ``None``,
         when the row is missing, or when it is already soft-deleted.
 
-        **Release-protecting.** A published release shares the exact
+        **Release guard.** A published release shares the exact
         ``files`` row of the draft it was snapshotted from — the
         snapshot copies ``file_id`` verbatim, it does not duplicate
         the blob. So a file the caller is freeing (a removed/replaced
         draft block, or a quota-eviction candidate) may still be the
-        only copy a live release serves. When
-        :meth:`FilesGateway.is_referenced_by_release` reports a
-        release still pins it, the file is left fully intact — not
-        even soft-deleted, so it stays visible to release reads and
-        the quota aggregate. This holds the invariant that an
-        already-published release never loses its media, whether the
-        trigger is a draft edit or automatic quota enforcement.
+        only copy a live release serves. By default
+        (``evict_release_pinned=False``) such a file is left fully
+        intact — not even soft-deleted — so a normal draft edit never
+        strips media out of already-published content. This is the
+        invariant every interactive editing path relies on.
 
-        Side effect: when the file is not release-pinned, enqueues
+        **Quota enforcement override.** ``evict_release_pinned=True``
+        (passed only by the over-quota reconcile job, after the grace
+        period) drops that protection: a release-pinned file IS
+        soft-deleted and purged. The published release degrades to a
+        missing-media placeholder (its mirror FK is ``ON DELETE SET
+        NULL``). This is the deliberate "quota wins over release
+        immutability" policy — the author was warned for the whole
+        grace window. ``force_release_pinned`` is propagated to the
+        purge task so its own release re-check does not veto the
+        physical delete.
+
+        Side effect: when the file is freed, enqueues
         :func:`purge_file_from_storage_task` so the worker physically
         removes the S3 blob shortly after the caller's transaction
         commits — that's how the user's plan quota actually frees up
         space on the cloud provider, not just inside the DB
-        aggregate. The task re-checks ``deleted_at`` (and the release
-        guard) before touching storage, so a producer that rolls back
-        after this call does not leak a deletion to S3.
+        aggregate. The task re-checks ``deleted_at`` before touching
+        storage, so a producer that rolls back after this call does
+        not leak a deletion to S3.
+
+        Args:
+            previous_file_id: File to free, or ``None`` for a no-op.
+            evict_release_pinned: When ``True``, evict the file even
+                if a published release still pins it. Default ``False``
+                spares release-pinned files (interactive edits).
 
         Returns:
             ``True`` if the file was soft-deleted and queued for
             purge; ``False`` when it was spared — a no-op id /
-            missing / already-deleted row, or a release still pins
-            it. The reconcile job uses this to credit ``freed_bytes``
-            only for files it genuinely evicted.
+            missing / already-deleted row, or a release pins it and
+            ``evict_release_pinned`` is ``False``. The reconcile job
+            uses this to credit ``freed_bytes`` only for files it
+            genuinely evicted.
         """
         if previous_file_id is None:
             return False
         previous_file = await self._files_gateway.with_id(previous_file_id)
         if previous_file is None or previous_file.is_deleted:
             return False
-        if await self._files_gateway.is_referenced_by_release(
+        pinned_by_release = await self._files_gateway.is_referenced_by_release(
             previous_file_id,
-        ):
-            # A published release still serves this exact blob. Freeing
-            # it would strip media out of immutable, already-published
-            # content, so leave it untouched.
+        )
+        if pinned_by_release and not evict_release_pinned:
+            # A published release still serves this exact blob and the
+            # caller is an interactive edit, not quota enforcement.
+            # Freeing it would strip media out of immutable,
+            # already-published content, so leave it untouched.
             return False
         previous_file.mark_deleted()
         await self._task_scheduler.schedule_purge_file_from_storage(
             previous_file_id,
+            force_release_pinned=pinned_by_release,
         )
         return True

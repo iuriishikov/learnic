@@ -106,15 +106,21 @@ class FileUsageReader(Protocol):
 class AuthorFileRef:
     """Pointer to one of an author's live files for the LIFO picker.
 
-    The reconciliation job soft-deletes by walking these in
-    ``uploaded_at DESC`` order and updating ``file.mark_deleted()``
-    until ``used <= limit``. Only ``oid`` + ``size_bytes`` are needed
-    — name, content type, etc. are irrelevant to the eviction
-    decision.
+    The reconciliation job soft-deletes by walking these in eviction
+    order and updating ``file.mark_deleted()`` until ``used <= limit``.
+
+    ``is_release_pinned`` flags files a published release still
+    references. Quota enforcement may now evict them (quota wins over
+    release immutability), but the picker orders draft-only files
+    first so published content is only stripped when evicting the
+    draft-only files is not enough to get back under cap. The handler
+    forwards the flag to ``soft_delete_previous`` so only genuinely
+    release-pinned files take the guard-bypassing path.
     """
 
     file_id: FileID
     size_bytes: int
+    is_release_pinned: bool = False
 
 
 class StorageQuotaBreachGateway(Protocol):
@@ -148,12 +154,19 @@ class StorageQuotaBreachGateway(Protocol):
 class AuthorActiveFilesReader(Protocol):
     """Read-side projection of an author's live files for LIFO eviction.
 
-    Returns files referenced from notes authored by ``user_id``,
-    ordered by ``uploaded_at`` descending (newest first), filtered
-    to ``deleted_at IS NULL``. The reconciliation job walks the
-    iterator until ``cumulative_size >= over_bytes`` and stops —
-    no need to load the full list for owners with thousands of
-    files.
+    Returns files referenced from notes authored by ``user_id`` —
+    from BOTH the author's draft blocks AND their published-release
+    snapshots — filtered to ``deleted_at IS NULL``. This MUST cover
+    the same set :class:`FileUsageReader` sums, otherwise an author
+    over quota purely on release media would be billed for bytes the
+    eviction loop can never reach and stay over cap forever.
+
+    Ordered ``is_release_pinned`` ascending, then ``uploaded_at``
+    descending: draft-only files (newest first) are offered before
+    any release-pinned file, so the enforcement loop only reaches
+    into published content once evicting the draft-only files is not
+    enough. The reconciliation job walks until
+    ``cumulative_size >= over_bytes`` and stops.
     """
 
     async def newest_first(

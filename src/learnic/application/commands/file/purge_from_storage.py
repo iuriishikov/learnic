@@ -66,6 +66,7 @@ harmlessly (the blob is a legitimate live file that must NOT be deleted)."""
 class PurgeFileFromStorageCommand:
     file_id: FileID
     attempt: int = 0
+    force_release_pinned: bool = False
 
 
 @final
@@ -100,15 +101,21 @@ class PurgeFileFromStorageCommandHandler:
         Final release guard: even when the row is soft-deleted, the
         worker re-checks :meth:`FilesGateway.is_referenced_by_release`
         and aborts if a published release still pins the file. That
-        check covers all three mirror shapes — the single-file and
-        video-file FK mirrors AND the photo-collage JSONB ``items``
-        array — so a release published before this task runs is always
-        seen. The producer
+        check covers all three mirror shapes — the single-file,
+        video-file and photo-collage-item FK mirrors — so a release
+        published before this task runs is always seen. The producer
         (:meth:`FileUploadService.soft_delete_previous`) already gates
         on this, so a hit here means a producer skipped the check — the
         warning makes that observable while preventing the data-losing
         physical delete (a release shares the exact blob, it does not
         own a copy).
+
+        Quota-enforcement exception: when ``force_release_pinned`` is
+        set the producer was the over-quota reconcile job, which
+        deliberately evicts release media (quota wins over release
+        immutability). The guard is skipped so the blob is physically
+        removed; the release mirror FKs are ``ON DELETE SET NULL``, so
+        the published release degrades to a missing-media placeholder.
 
         Accepted residual race: a release that commits its snapshot in
         the narrow window *between* this guard's read and this task's
@@ -134,6 +141,7 @@ class PurgeFileFromStorageCommandHandler:
                 await self._task_scheduler.schedule_purge_file_from_storage(
                     data.file_id,
                     attempt=data.attempt + 1,
+                    force_release_pinned=data.force_release_pinned,
                 )
             else:
                 _logger.info(
@@ -144,7 +152,9 @@ class PurgeFileFromStorageCommandHandler:
                     },
                 )
             return
-        if await self._files_gateway.is_referenced_by_release(data.file_id):
+        if not data.force_release_pinned and (
+            await self._files_gateway.is_referenced_by_release(data.file_id)
+        ):
             _logger.warning(
                 "file_purge.release_pinned",
                 extra={"file_id": str(data.file_id)},

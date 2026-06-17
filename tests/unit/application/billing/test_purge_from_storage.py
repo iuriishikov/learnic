@@ -168,6 +168,43 @@ async def test_release_pinned_file_is_not_purged(
     fake_transaction.commit.assert_not_called()
 
 
+async def test_force_release_pinned_purges_release_pinned_file(
+    fake_transaction: AsyncMock,
+    fake_files_gateway: AsyncMock,
+    fake_block_gateway: AsyncMock,
+    fake_file_storage: AsyncMock,
+) -> None:
+    # Over-quota enforcement set force_release_pinned: the worker must
+    # skip its defensive release re-check and physically purge the blob
+    # even though a published release still pins it. The release degrades
+    # to a missing-media placeholder via the mirror's ON DELETE SET NULL.
+    file = _make_file(deleted=True)
+    fake_files_gateway.with_id.return_value = file
+    fake_files_gateway.is_referenced_by_release.return_value = True
+    handler = _build_handler(
+        transaction=fake_transaction,
+        files_gateway=fake_files_gateway,
+        block_gateway=fake_block_gateway,
+        file_storage=fake_file_storage,
+    )
+
+    await handler.run(
+        PurgeFileFromStorageCommand(
+            file_id=file.oid,
+            force_release_pinned=True,
+        ),
+    )
+
+    # Guard skipped entirely — not even consulted — and the blob/row go.
+    fake_files_gateway.is_referenced_by_release.assert_not_called()
+    fake_file_storage.delete.assert_called_once_with(
+        bucket=file.bucket.value,
+        name=file.storage_name.value,
+    )
+    fake_files_gateway.delete.assert_called_once_with(file.oid)
+    fake_transaction.commit.assert_called_once()
+
+
 async def test_purge_order_s3_then_collages_then_row(
     fake_transaction: AsyncMock,
     fake_files_gateway: AsyncMock,

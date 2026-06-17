@@ -15,6 +15,7 @@ from learnic.infrastructure.tasks.broker import broker
 async def purge_file_from_storage_task(
     file_id: FileID,
     attempt: int,
+    force_release_pinned: bool,
     handler: FromDishka[PurgeFileFromStorageCommandHandler],
 ) -> None:
     """Delete the S3 / MinIO blob for one soft-deleted file.
@@ -24,7 +25,16 @@ async def purge_file_from_storage_task(
     storage and re-enqueues itself (incrementing ``attempt``) while the
     row is still live, so neither "schedule then commit" nor "schedule
     then rollback" can orphan a blob or delete a live file.
+
+    ``force_release_pinned`` is set only by the over-quota reconcile
+    job; it tells the handler to skip its defensive release re-check
+    and purge even a blob a published release still pins (the release
+    degrades to a missing-media placeholder).
     """
     await handler.run(
-        PurgeFileFromStorageCommand(file_id=file_id, attempt=attempt),
+        PurgeFileFromStorageCommand(
+            file_id=file_id,
+            attempt=attempt,
+            force_release_pinned=force_release_pinned,
+        ),
     )
