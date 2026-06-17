@@ -54,9 +54,10 @@ COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
 USER app
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl --fail --silent --show-error http://127.0.0.1:8000/healthcheck || exit 1
-
+# NOTE: no image-level HEALTHCHECK — this runtime image is shared by app,
+# worker, scheduler and migrate, but only `app` serves HTTP on :8000. The
+# app's HTTP healthcheck is defined on the `app` service in docker-compose.yaml
+# instead, so the non-HTTP services don't inherit a check they can never pass.
 CMD ["gunicorn", \
      "--workers", "4", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
