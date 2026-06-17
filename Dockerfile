@@ -26,6 +26,7 @@ RUN poetry install --only main --no-root
 
 COPY src/ ./src/
 COPY alembic.ini ./
+COPY README.md ./
 RUN poetry install --only main
 
 
