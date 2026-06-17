@@ -69,6 +69,13 @@ http://:8081 {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
+		# Next.js (output:'standalone') rebuilds absolute redirect URLs — e.g.
+		# next-intl's locale redirect / -> /ru — from the forwarded headers.
+		# Without the host+port it falls back to its internal listen port and
+		# emits https://{$SITE_DOMAIN}:3000/ru. Pin the public host and 443 so
+		# the redirect targets this edge, not the container port.
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Port 443
 
 		health_uri /healthz
 		health_interval 10s
