@@ -1,0 +1,54 @@
+# Bundled Redis for the TaskIQ broker + result backend.
+#
+# This is an OVERLAY on docker-compose.yaml, not a standalone project — it is
+# only ever used merged: `docker compose -f docker-compose.yaml -f docker-compose.redis.yaml ...`.
+# The `just prod-up` / `prod-up-colocated` recipes append it BY DEFAULT; set
+# `REDIS=external` in the environment (or .env) to drop it and point
+# TASKIQ_BROKER_URL / TASKIQ_RESULT_BACKEND_URL at a managed/host Redis instead.
+#
+# When bundled, the broker is reachable by its compose service name, so the
+# server .env must use:
+#   TASKIQ_BROKER_URL=redis://redis:6379/0
+#   TASKIQ_RESULT_BACKEND_URL=redis://redis:6379/1
+#
+# `redis` joins learnic-net only (defined in the base file) — it is internal,
+# never exposed on the edge. depends_on is MERGED into the base app/worker/
+# scheduler definitions (it does not replace their postgres/migrate ordering),
+# so a green `up --wait` now also means the broker is reachable.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: learnic-redis
+    restart: unless-stopped
+    init: true
+    networks:
+      - learnic-net
+    # appendonly = the task queue survives a container restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  app:
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+    name: learnic-redis-data

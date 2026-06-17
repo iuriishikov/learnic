@@ -1,0 +1,39 @@
+# Auto-deploy the backend to production on every push to main.
+#
+# Model: build-on-host. This job SSHes into the prod server, fast-forwards the
+# checkout to origin/main and runs the existing `just` recipe, which does
+# `docker compose up -d --build --wait` — i.e. it rebuilds the images on the
+# server. Secrets live in the server's .env (gitignored); CI never sees them.
+# Migrations run automatically inside the stack (the `migrate` service runs
+# `alembic upgrade head` before `app` starts).
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # lets you re-deploy manually from the Actions tab
+
+# Never let two deploys overlap. An in-flight deploy finishes; the newest queued
+# run waits and then supersedes older queued ones.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0 # consider pinning to a commit SHA for supply-chain safety
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 30m # build-on-host can be slow on a small VPS
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.PROD_DIR }}"
+            git fetch --prune origin
+            git reset --hard origin/main   # discard any drift on the server; .env is untracked so it's preserved
+            just prod-up-colocated          # split deploy: change to `just prod-up`

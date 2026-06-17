@@ -239,7 +239,7 @@ just dev-down            # остановить и удалить контейн
 
 ## Деплой
 
-Прод-стек описан в `docker-compose.yaml`: Postgres → migrate-контейнер → app → Caddy. TLS-сертификат выдаётся автоматически через Let's Encrypt при первом запуске.
+Прод-стек описан в `docker-compose.yaml`: Postgres → migrate-контейнер → app → Caddy, плюс TaskIQ `worker` и `scheduler`. TLS-сертификат выдаётся автоматически через Let's Encrypt при первом запуске.
 
 ```bash
 # на сервере с Docker
@@ -255,7 +255,7 @@ curl -I https://<your-domain>/healthz    # 200 OK — Caddy жив
 curl -I https://<your-domain>/healthcheck # 200 OK — приложение жив
 ```
 
-**Важно**: текущий `docker-compose.yaml` ещё не содержит сервисов Redis и воркера — их нужно добавить при необходимости фоновой обработки в проде (см. секцию TaskIQ в CLAUDE.md).
+**Redis**: брокер TaskIQ поднимается из оверлея `docker-compose.redis.yaml`, который `just prod-up`/`prod-up-colocated` подключают **по умолчанию**. В серверном `.env` укажи `TASKIQ_BROKER_URL=redis://redis:6379/0` и `TASKIQ_RESULT_BACKEND_URL=redis://redis:6379/1` (резолв по имени сервиса в сети `learnic-net`). Чтобы использовать внешний/managed Redis, поставь `REDIS=external` в `.env` и пропиши его адрес в тех же переменных.
 
 ---
 
