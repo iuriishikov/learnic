@@ -135,6 +135,18 @@ users_table = sa.Table(
     # migration ``usrsearch0001``) and excluded from the entity mapping.
     sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
     sa.Column("search_text", sa.Text(), nullable=True),
+    # Partial index over just the unverified rows, backing the
+    # abandoned-account purge (every 15 min) and the per-email reclaim
+    # at re-registration. The predicate is written ``email_verified IS
+    # false`` to match the ``ColumnElement`` the adapter emits
+    # (``email_verified.is_(False)``) so Postgres proves the index
+    # applies; ``oid`` is indexed because the purge's NOT EXISTS
+    # subqueries correlate on it. See migration ``purgeidx0001``.
+    sa.Index(
+        "ix_users_unverified",
+        "oid",
+        postgresql_where=sa.text("email_verified IS false"),
+    ),
 )
 
 

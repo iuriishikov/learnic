@@ -78,7 +78,23 @@ class RegisterCommandHandler:
     async def run(self, data: RegisterCommand) -> RegisterResult:
         await self._anon_rate_limiter.check(data.email)
         if await self._user_gateway.with_email(data.email) is not None:
-            raise EmailAlreadyRegisteredError
+            # The address is taken. Reclaim it only if the holder is an
+            # abandoned unverified registration past self-recovery (no
+            # live verify token, no live signup session — exactly the
+            # rows the periodic purge reaps): delete it on demand so the
+            # new owner need not wait for the sweep. A verified account,
+            # or one still inside its 24h verification window, is
+            # untouchable and still rejects the registration. The delete
+            # runs in this transaction, so the INSERT below reuses the
+            # freed email without tripping the UNIQUE constraint.
+            reclaimed = (
+                await self._user_gateway.delete_abandoned_unverified_by_email(
+                    data.email,
+                    datetime.now(timezone.utc),
+                )
+            )
+            if not reclaimed:
+                raise EmailAlreadyRegisteredError
 
         user = User.create_user(
             email=Email(data.email),

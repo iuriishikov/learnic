@@ -518,11 +518,13 @@ from learnic.application.billing.entitlement import EntitlementService
 from learnic.application.common.persistence.billing import (
     AuthorActiveFilesReader,
     FileUsageReader,
-    GlobalSchedulerLock,
     StorageQuotaBreachGateway,
     StorageQuotaLock,
     SubscriptionGateway,
     SubscriptionReader,
+)
+from learnic.application.common.persistence.scheduler_lock import (
+    GlobalSchedulerLock,
 )
 from learnic.application.common.persistence.file import (
     FilesGateway,
@@ -873,11 +875,13 @@ from learnic.infrastructure.persistence.adapters.note_release import (
 from learnic.infrastructure.persistence.adapters.billing import (
     AuthorActiveFilesReaderAlchemy,
     FileUsageReaderAlchemy,
-    GlobalSchedulerLockAlchemy,
     StorageQuotaBreachMapperAlchemy,
     StorageQuotaLockAlchemy,
     SubscriptionMapperAlchemy,
     SubscriptionReaderAlchemy,
+)
+from learnic.infrastructure.persistence.adapters.scheduler_lock import (
+    GlobalSchedulerLockAlchemy,
 )
 from learnic.infrastructure.persistence.adapters.file import (
     FilesMapperAlchemy,
