@@ -51,6 +51,11 @@ dev-down:
 _net:
     docker network inspect learnic-edge >/dev/null 2>&1 || docker network create learnic-edge
 
+# Compose file list: base + (unless REDIS=external) the bundled-Redis overlay.
+# `docker-compose.redis.yaml` adds an in-stack Redis for the TaskIQ broker and is
+# the DEFAULT; set REDIS=external (env or .env) to use a managed/host Redis instead.
+_compose_files := "-f docker-compose.yaml"
+
 [doc("Build and start the production stack with the API edge (split / two-host deploy)")]
 prod-up:
     #!/usr/bin/env bash
@@ -58,7 +63,11 @@ prod-up:
     just _net
     just _kill-port 80
     just _kill-port 443
-    docker compose up -d --build --wait
+    files="{{ _compose_files }}"
+    if [ "${REDIS:-bundled}" != "external" ]; then
+        files="$files -f docker-compose.redis.yaml"
+    fi
+    docker compose $files up -d --build --wait
 
 [doc("Start as the SINGLE co-located edge — Caddy fronts BOTH frontend + API. Run the frontend with `just prod-up-colocated`.")]
 prod-up-colocated:
@@ -67,8 +76,18 @@ prod-up-colocated:
     just _net
     just _kill-port 80
     just _kill-port 443
-    BACKEND_CADDYFILE=./deploy/caddy/Caddyfile.colocated docker compose up -d --build --wait
+    files="{{ _compose_files }}"
+    if [ "${REDIS:-bundled}" != "external" ]; then
+        files="$files -f docker-compose.redis.yaml"
+    fi
+    BACKEND_CADDYFILE=./deploy/caddy/Caddyfile.colocated docker compose $files up -d --build --wait
 
 [doc("Stop the production-like stack (keeps volumes)")]
 prod-down:
-    docker compose down
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files="{{ _compose_files }}"
+    if [ "${REDIS:-bundled}" != "external" ]; then
+        files="$files -f docker-compose.redis.yaml"
+    fi
+    docker compose $files down
