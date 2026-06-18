@@ -13,6 +13,5 @@ class SecurityPolicies(Protocol):
 
     frontend_base_url: str
     access_token_ttl_seconds: int
-    verify_email_token_ttl_seconds: int
     signup_session_ttl_seconds: int
     reset_password_token_ttl_seconds: int
