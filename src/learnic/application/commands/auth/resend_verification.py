@@ -11,8 +11,10 @@ from learnic.application.common.email.components import (
 from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
-from learnic.application.common.security.email_tokens import (
+from learnic.application.common.security.constants import (
     VERIFY_EMAIL_TOKEN_TTL_SECONDS,
+)
+from learnic.application.common.security.email_tokens import (
     EmailTokenPurpose,
     EmailTokenStore,
 )
