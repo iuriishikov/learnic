@@ -83,7 +83,7 @@ class RegisterCommandHandler:
             # live verify token, no live signup session — exactly the
             # rows the periodic purge reaps): delete it on demand so the
             # new owner need not wait for the sweep. A verified account,
-            # or one still inside its 24h verification window, is
+            # or one still inside its 1h verification window, is
             # untouchable and still rejects the registration. The delete
             # runs in this transaction, so the INSERT below reuses the
             # freed email without tripping the UNIQUE constraint.
@@ -134,7 +134,7 @@ class RegisterCommandHandler:
                     "Подтвердите ваш email, нажав на кнопку ниже:",
                 ),
                 EmailButton(label="Подтвердить email", url=link),
-                EmailParagraph.text("Ссылка действует 24 часа."),
+                EmailParagraph.text("Ссылка действует 1 час."),
             ],
         )
         return RegisterResult(
