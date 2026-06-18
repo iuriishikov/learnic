@@ -21,6 +21,15 @@ services:
       - learnic-net
     expose:
       - "5432"
+    # Published to the host LOOPBACK ONLY (127.0.0.1) so the database can be
+    # reached for admin / GUI access (psql, TablePlus, DBeaver, pgweb, …) over
+    # an SSH tunnel — e.g. `ssh -N -L 5432:localhost:5432 user@host` — WITHOUT
+    # ever being exposed to the public internet. The `127.0.0.1:` prefix is
+    # load-bearing: drop it (a bare "5432:5432") and Docker binds 0.0.0.0,
+    # opening the DB to the world. In external/managed-DB mode this overlay is
+    # not loaded (POSTGRES=external), so the publish simply never applies there.
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
