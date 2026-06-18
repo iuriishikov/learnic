@@ -1,7 +1,7 @@
 """Periodic purge of abandoned unverified user accounts.
 
 A user who registered but never confirmed their email is stuck the
-moment their verify-email link expires (24h) and their signup session
+moment their verify-email link expires (1h) and their signup session
 expires (30m): login is blocked (``EmailNotVerifiedError``), resend
 needs the gone signup session, and re-registration is blocked by the
 UNIQUE ``email`` — the row reserves that address forever. Without a
@@ -9,7 +9,7 @@ sweep these rows accumulate and squat real email addresses.
 
 This sweep deletes exactly the rows that can no longer self-recover —
 unverified, with no active VERIFY token and no active signup session.
-The 24h verify-token TTL is the de-facto grace period: a user with a
+The 1h verify-token TTL is the de-facto grace period: a user with a
 live link (or who keeps hitting resend) is never touched. Wired to a
 15-minute TaskIQ cron in ``infrastructure/tasks/handlers/auth.py``;
 the same rows are also reclaimed on demand at re-registration. A

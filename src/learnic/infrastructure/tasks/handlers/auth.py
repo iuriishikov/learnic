@@ -30,7 +30,7 @@ async def purge_unverified_users_task(
     the backstop sweep, not the only path.
 
     A user who registered but never confirmed their email is locked
-    out once their verify link (24h) and signup session (30m) expire:
+    out once their verify link (1h) and signup session (30m) expire:
     login is blocked, resend needs the gone session, and the UNIQUE
     ``email`` blocks re-registration, so the row squats that address
     forever. This sweep removes exactly those unrecoverable rows;

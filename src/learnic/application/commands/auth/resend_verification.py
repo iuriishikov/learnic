@@ -91,6 +91,6 @@ class ResendVerificationCommandHandler:
                     "Подтвердите ваш email, нажав на кнопку ниже:",
                 ),
                 EmailButton(label="Подтвердить email", url=link),
-                EmailParagraph.text("Ссылка действует 24 часа."),
+                EmailParagraph.text("Ссылка действует 1 час."),
             ],
         )

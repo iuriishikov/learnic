@@ -85,7 +85,7 @@ class SecurityConfig(BaseSettings):
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 30 * 24 * 3600
     signup_session_ttl_seconds: int = 30 * 60
-    verify_email_token_ttl_seconds: int = 24 * 3600
+    verify_email_token_ttl_seconds: int = 60 * 60
     reset_password_token_ttl_seconds: int = 3600
     cookie_domain: str | None = None
     cookie_secure: bool = True
