@@ -16,6 +16,7 @@ from learnic.application.common.persistence.transaction import (
 )
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
+    VERIFY_EMAIL_TOKEN_TTL_SECONDS,
     EmailTokenPurpose,
     EmailTokenStore,
 )
@@ -115,7 +116,7 @@ class RegisterCommandHandler:
         verify_token = await self._email_tokens.issue(
             user.oid,
             EmailTokenPurpose.VERIFY,
-            self._config.verify_email_token_ttl_seconds,
+            VERIFY_EMAIL_TOKEN_TTL_SECONDS,
         )
         signup_token = await self._signup_sessions.issue(
             user.oid,

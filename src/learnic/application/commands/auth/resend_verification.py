@@ -12,6 +12,7 @@ from learnic.application.common.errors import InvalidTokenError
 from learnic.application.common.persistence.transaction import Transaction
 from learnic.application.common.persistence.user import UserGateway
 from learnic.application.common.security.email_tokens import (
+    VERIFY_EMAIL_TOKEN_TTL_SECONDS,
     EmailTokenPurpose,
     EmailTokenStore,
 )
@@ -77,7 +78,7 @@ class ResendVerificationCommandHandler:
         raw_token = await self._email_tokens.issue(
             user.oid,
             EmailTokenPurpose.VERIFY,
-            self._config.verify_email_token_ttl_seconds,
+            VERIFY_EMAIL_TOKEN_TTL_SECONDS,
         )
         await self._transaction.commit()
         base = self._config.frontend_base_url.rstrip("/")
