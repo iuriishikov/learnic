@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Final, Protocol
+from typing import Protocol
 
 from learnic.entities.user.models import UserID
 
@@ -9,15 +9,6 @@ from learnic.entities.user.models import UserID
 class EmailTokenPurpose(StrEnum):
     VERIFY = "verify"
     RESET = "reset"
-
-
-# Lifetime of a VERIFY email token, in seconds. Deliberately a fixed
-# code constant rather than an env-tunable setting (unlike the other
-# auth TTLs on SecurityConfig): the verification window is a product
-# decision, not a per-environment operational knob. Keeping it here as
-# the single source of truth removes the env-vs-code drift that once
-# let prod silently run 24h while the code default said 1h.
-VERIFY_EMAIL_TOKEN_TTL_SECONDS: Final = 60 * 60
 
 
 @dataclass(slots=True, frozen=True)
