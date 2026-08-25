@@ -1,270 +1,177 @@
-# Learnic
+<div align="center">
 
-Backend-сервис на **Clean Architecture** со строгим разделением слоёв,
-CQRS-паттерном для персистентности и императивным маппингом SQLAlchemy.
+# 📚 Learnic
 
-Ветка `bootstrap` содержит инфраструктурную основу — DI, конфигурация,
-брокер фоновых задач, S3-хранилище, email-транспорт — поверх которой
-дальше разворачиваются продуктовые агрегаты и use-case'ы.
+**Конспекты собираются из блоков, публикуются версиями и редактируются вдвоём — в реальном времени.**
+
+Бэкенд платформы: Clean Architecture, CQRS и 23 агрегата на FastAPI.
+
+![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+
+![mypy](https://img.shields.io/badge/mypy-strict-1f5082?style=flat-square)
+![ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square)
+![security](https://img.shields.io/badge/security-bandit%20%2B%20semgrep-yellow?style=flat-square)
+![realtime](https://img.shields.io/badge/realtime-WebSocket-6f42c1?style=flat-square)
+
+[Фронтенд](https://github.com/iuriishikov/learnic-web) · [Архитектура](#-архитектура) · [Быстрый старт](#-быстрый-старт) · [Команды](#-команды)
+
+</div>
 
 ---
 
-## Стек
+## 🎯 Что это
+
+Сайт конспектов для студентов и репетиторов. Автор собирает конспект из блоков — текст, код, формулы, интерактивные чертежи — публикует его версиями и открывает доступ другим.
+
+| | Возможность |
+|---|---|
+| ✍️ | **Конспект из блоков.** Черновик, модули, уроки, релизы: контент версионируется, читатель видит опубликованную версию, автор правит следующую |
+| 👥 | **Соавторство в реальном времени.** Присутствие, курсоры соавторов и синхронизация черновика идут по WebSocket |
+| 💬 | **Вопросы к автору.** Обсуждение привязано к конспекту, а не к комментариям под ним |
+| 🎁 | **Подарки и оплата.** Конспект можно купить или подарить; квоты и биллинг живут отдельным агрегатом |
+| 🔔 | **Уведомления.** In-app, e-mail и web-push с раздельными настройками по типам событий |
+| 🛡️ | **Роли и модерация.** Админка, роли, модерация публикаций и чистка брошенных черновиков |
+
+---
+
+## 🏗 Архитектура
+
+Зависимости текут только внутрь. Домен не знает ни про FastAPI, ни про SQLAlchemy, ни про S3.
+
+```mermaid
+flowchart TB
+    subgraph PR ["presentation · FastAPI"]
+        HTTP["HTTP-роуты"]
+        WS["WebSocket-каналы"]
+    end
+
+    subgraph AP ["application · use-cases"]
+        CMD["commands · 23 агрегата"]
+        QRY["queries"]
+        PROTO["Protocol-границы<br/>Transaction · Gateway · Reader<br/>FileStorage · EmailSender · TaskScheduler"]
+    end
+
+    subgraph EN ["entities · чистый домен"]
+        DOM["Сущности · Value Objects · доменные ошибки<br/>нулевые внешние импорты"]
+    end
+
+    subgraph IN ["infrastructure · адаптеры"]
+        PG[("PostgreSQL<br/>SQLAlchemy 2")]
+        S3[("S3 / MinIO")]
+        RDS[("Redis<br/>TaskIQ")]
+        MAIL["Rusender"]
+    end
+
+    HTTP --> CMD
+    HTTP --> QRY
+    WS --> CMD
+    CMD --> DOM
+    QRY --> DOM
+    CMD -.- PROTO
+    PROTO -. реализуется в .-> IN
+```
+
+**Три правила, на которых всё держится**
+
+| | Правило |
+|---|---|
+| 🧱 | `entities/` не импортирует ничего внешнего — ни ORM, ни фреймворк |
+| 🔌 | `application/` объявляет границы через `Protocol`, `infrastructure/` их реализует: хранилище или брокер задач меняются, не задевая бизнес-логику |
+| 🗺️ | Маппинг SQLAlchemy **императивный** — доменные сущности ничего не знают о таблицах |
+
+---
+
+## ⚙️ Стек
 
 | Слой | Технология |
 |---|---|
 | Язык | Python 3.14 |
 | HTTP | FastAPI + uvicorn (gunicorn в проде) |
-| БД | PostgreSQL 16, SQLAlchemy 2 (async `asyncpg` в приложении, sync `psycopg` для Alembic) |
+| БД | PostgreSQL 16, SQLAlchemy 2 (async `asyncpg`) |
 | Миграции | Alembic |
-| Фоновые задачи | TaskIQ + Redis (`taskiq-redis`) |
+| Фоновые задачи | TaskIQ + Redis |
 | Объектное хранилище | S3-совместимое (`aioboto3`), локально MinIO |
-| Email | Rusender через `httpx` |
+| Реальное время | WebSocket: присутствие, курсоры, уведомления |
+| Аутентификация | JWT (`pyjwt`) + Argon2, сессии, verify-email и reset-password |
+| Push | Web Push (VAPID) |
+| Email | Rusender |
 | DI | dishka |
-| Валидация | Pydantic 2 (на HTTP-границе и в конфигах) |
+| Валидация | Pydantic 2 |
 | TLS на проде | Caddy с автоматическим ACME |
-| Пакеты | Poetry 2 |
-| Тесты | pytest + pytest-asyncio + httpx (ASGI transport) |
+| Тесты | pytest + pytest-asyncio + httpx (ASGI transport) + fakeredis |
 | Качество кода | ruff, mypy (strict), bandit, semgrep, codespell |
-| Локальный оркестратор | `just` + `docker compose` |
+| Оркестратор | just + docker compose |
 
 ---
 
-## Архитектура
+## 🚀 Быстрый старт
 
-Зависимости текут **только внутрь**:
-
-```
-presentation ─▶ application ─▶ entities
-                     ▲
-infrastructure ──────┘        (реализует application-протоколы)
+```bash
+git clone https://github.com/iuriishikov/learnic && cd learnic
+cp .env.dist .env        # отредактировать под себя
+just dev-up              # postgres + minio + redis в docker, приложение локально
 ```
 
-- `entities/` — чистый домен: сущности, VO, доменные ошибки. Нулевые внешние импорты.
-- `application/` — use-case'ы, `Protocol`-границы (`Transaction`, `*Gateway`, `*Reader`, `TaskScheduler`, `FileStorage`, `EmailSender`). Ничего не знает про FastAPI, SQLAlchemy или dishka.
-- `infrastructure/` — адаптеры: SQLAlchemy-мапперы, S3, Rusender, TaskIQ-брокер и таски.
-- `presentation/http/` — роуты FastAPI, Pydantic-схемы, exception handlers.
-
-Полные архитектурные правила и чек-листы добавления новых use-case'ов / агрегатов — в [`CLAUDE.md`](./CLAUDE.md).
+API — `http://localhost:8000`, Swagger — `http://localhost:8000/docs`.
 
 ---
 
-## Структура репозитория
+## 🧰 Команды
+
+| Рецепт | Что делает |
+|---|---|
+| `just dev-up` | Поднять dev-инфраструктуру, синхронизировать `.env`, запустить app + worker + scheduler с reload |
+| `just dev-down` | Остановить dev-инфраструктуру (volumes сохраняются) |
+| `just check` | Гейт качества: ruff + codespell + mypy + bandit + semgrep |
+| `just prod-up` | Прод-стек с собственным HTTPS-edge (раздельный деплой фронта и API) |
+| `just prod-up-colocated` | Прод-стек, где один Caddy обслуживает и фронтенд, и API |
+| `just prod-down` | Остановить прод-стек (volumes сохраняются) |
+
+---
+
+## 📁 Структура
 
 ```
 src/learnic/
+├── entities/          # чистый домен: сущности, VO, ошибки
 ├── application/
-│   ├── commands/                 # командные хендлеры (write-side)
-│   ├── queries/                  # query-хендлеры (read-side)
-│   └── common/
-│       ├── email/sender.py       # EmailSender Protocol
-│       ├── persistence/          # Transaction, EntitySaver, *Gateway, *Reader
-│       ├── storage/file_storage.py
-│       └── tasks/scheduler.py    # TaskScheduler Protocol
-├── entities/
-│   ├── common/                   # BaseEntity, DomainError, FieldError
-│   └── user/                     # User + VO + errors + constants
-├── infrastructure/
-│   ├── configs.py                # BaseSettings: Postgres, ASGI, S3, TaskIQ, Rusender
-│   ├── email/adapters/rusender.py
-│   ├── persistence/
-│   │   ├── adapters/             # *MapperAlchemy, TransactionAlchemy
-│   │   ├── alembic/              # миграции
-│   │   └── models/               # sa.Table + map_<aggregate>_table()
-│   ├── storage/adapters/s3.py
-│   └── tasks/
-│       ├── broker.py             # singleton AsyncBroker
-│       ├── scheduler.py          # TaskSchedulerTaskIQ адаптер
-│       └── handlers/             # @broker.task функции
-├── presentation/http/routes/
-├── static/                       # статика, раздаётся с корня (/)
-├── bootstrap.py                  # setup_configs, setup_routes, setup_map_tables
-├── ioc.py                        # dishka-провайдеры
-├── web.py                        # create_app_production / create_app_tests
-├── __main__.py                   # прод-энтрипоинт API (uvicorn)
-└── worker.py                     # энтрипоинт TaskIQ-воркера
+│   ├── commands/      # write-side, 23 агрегата
+│   ├── queries/       # read-side
+│   └── common/        # Protocol-границы: persistence, storage, email, tasks
+├── infrastructure/    # SQLAlchemy-мапперы, S3, Rusender, TaskIQ, миграции
+├── presentation/http/ # роуты, WebSocket-каналы, схемы, обработчики ошибок
+├── bootstrap.py       # сборка приложения
+├── ioc.py             # dishka-провайдеры
+├── web.py             # фабрики приложения
+└── worker.py          # энтрипоинт TaskIQ-воркера
 ```
 
 ---
 
-## Быстрый старт
+## 🔒 Качество и безопасность
 
-### Требования
-
-- Python 3.14
-- Poetry ≥ 2.0
-- Docker + Docker Compose
-- `just` (`brew install just`)
-
-### Установка
-
-```bash
-git clone <repo-url> learnic && cd learnic
-just bootstrap           # копирует .env.dist → .env, ставит зависимости
-```
-
-### Конфигурация
-
-`just bootstrap` скопирует `.env.dist` в `.env`. Отредактируй `.env` под себя — секция **Environment** ниже поясняет ключи. Обязательный ручной шаг: `S3_SECRET_KEY` должен быть ≥ 8 символов (требование MinIO).
-
-### Запуск
-
-```bash
-just serve
-```
-
-Эта команда:
-
-1. Поднимает Postgres, MinIO и Redis через `docker-compose.dev.yaml`.
-2. Прогоняет `alembic upgrade head`.
-3. Параллельно стартует **FastAPI с `--reload`** и **TaskIQ-воркер с `--reload`**.
-
-API доступен на `http://localhost:8000`. Swagger — `http://localhost:8000/docs`.
-
----
-
-## Процесс разработки
-
-### Запуск только воркера
-
-```bash
-just worker
-```
-
-Удобно, когда хочется дебажить таски без HTTP-шума.
-
-### Линтеры и форматтер
-
-```bash
-just lint               # ruff check + ruff format + codespell (быстро, каждые 30 сек)
-```
-
-### Статический анализ
-
-```bash
-just static             # mypy strict + bandit + semgrep (дольше, перед пушем)
-```
-
-### Тесты
-
-Smoke-набор на `httpx.AsyncClient + ASGITransport` — без поднятия HTTP-сервера, прямо в память:
-
-```bash
-poetry run pytest                    # весь набор
-poetry run pytest -v                 # с именами тестов
-poetry run pytest -k healthcheck     # по фильтру
-```
-
-### Поднятие / опускание dev-стека
-
-```bash
-just dev-up              # Postgres + MinIO + Redis (+ создание бакета)
-just dev-down            # остановить и удалить контейнеры (volumes сохраняются)
-```
-
----
-
-## Справка по командам (`just`)
-
-| Рецепт | Назначение |
+| | |
 |---|---|
-| `bootstrap` | Первичная установка: копирование `.env`, `poetry install` |
-| `serve` | Локальный запуск API + воркера в параллели (с миграциями и `--reload`) |
-| `worker` | Только TaskIQ-воркер |
-| `lint` | Быстрая проверка стиля и опечаток (ruff + codespell) |
-| `static` | Глубокая проверка типов и безопасности (mypy + bandit + semgrep) |
-| `dev-up` / `dev-down` | Подъём / остановка dev-инфраструктуры в Docker |
-| `prod-up` / `prod-down` | Сборка и запуск прод-подобного стека с Caddy |
+| 🧪 | `mypy` в strict-режиме, `ruff` как линтер и форматтер, `codespell` на опечатки |
+| 🕵️ | `bandit` и `semgrep` в том же гейте, что и тесты |
+| ⚡ | Тесты бьют по приложению через ASGI-транспорт `httpx`, без поднятия HTTP-сервера |
+| 🔑 | Секреты живут в `.env` на сервере (он в `.gitignore`); CI их не видит и не логирует |
+| 🗄️ | Медиа отдаются по подписанным ссылкам, публичный доступ к бакету закрыт |
 
 ---
 
-## Environment
+## 🚢 Деплой
 
-`.env.dist` — шаблон. `just bootstrap` копирует его в `.env`, дальше правь под себя.
+Прод описан в `docker-compose.yaml`: Postgres → migrate → app → Caddy, плюс TaskIQ worker и scheduler. Сертификат выпускается автоматически через Let's Encrypt при первом запуске.
 
-### PostgreSQL
-
-| Переменная | Обязательная | Описание |
-|---|---|---|
-| `POSTGRES_USER` | ✓ | Пользователь БД |
-| `POSTGRES_PASSWORD` | ✓ | Пароль |
-| `POSTGRES_HOST` | ✓ | Хост (`postgres` внутри compose, `localhost` вне) |
-| `POSTGRES_PORT` | ✓ | Порт (обычно `5432`) |
-| `POSTGRES_DB` | ✓ | Имя БД |
-| `SQLALCHEMY_DEBUG` | ✗ | `1` — логирует SQL-запросы (`echo=True`) |
-
-### Uvicorn / FastAPI
-
-| Переменная | Обязательная | Описание |
-|---|---|---|
-| `UVICORN_HOST` | ✓ | Интерфейс биндинга (`0.0.0.0` внутри контейнера) |
-| `UVICORN_PORT` | ✓ | Порт (обычно `8000`) |
-| `FASTAPI_DEBUG` | ✗ | `1` включает debug-режим FastAPI |
-
-### S3 / MinIO
-
-| Переменная | Обязательная | Описание |
-|---|---|---|
-| `S3_ENDPOINT` | ✓ | URL S3-сервиса (`http://localhost:9000` для локального MinIO) |
-| `S3_ACCESS_KEY` | ✓ | Access key; для MinIO ≥ 3 символов |
-| `S3_SECRET_KEY` | ✓ | Secret key; для MinIO **≥ 8 символов** |
-| `S3_BUCKET` | ✓ | Имя бакета |
-| `S3_REGION` | ✗ | Регион (по умолчанию `us-east-1`) |
-
-### TaskIQ / Redis
-
-| Переменная | Дефолт | Описание |
-|---|---|---|
-| `TASKIQ_BROKER_URL` | `redis://localhost:6379/0` | URL брокера |
-| `TASKIQ_RESULT_BACKEND_URL` | `redis://localhost:6379/1` | URL хранилища результатов |
-| `TASKIQ_IN_MEMORY` | `false` | `true` — `InMemoryBroker` для тестов/одноразового дева |
-| `TASKIQ_WORKERS` | `2` | Количество воркер-процессов (игнорируется при `--reload`) |
-
-### Rusender (email)
-
-| Переменная | Обязательная | Описание |
-|---|---|---|
-| `RUSENDER_API_KEY` | ✓ | Ключ API с https://beta.rusender.ru/api |
-| `RUSENDER_FROM_EMAIL` | ✓ | Адрес отправителя (должен быть верифицирован на стороне Rusender) |
-| `RUSENDER_FROM_NAME` | ✗ | Отображаемое имя отправителя |
-
-### Деплой / Caddy
-
-| Переменная | Описание |
-|---|---|
-| `DOMAIN` | Доменное имя для ACME-сертификата |
-| `ACME_EMAIL` | Email для Let's Encrypt (уведомления о продлении) |
+Выкатка — GitHub Actions (`.github/workflows/deploy.yml`) по push в `main`: раннер подключается к серверу по SSH, подтягивает `main` и пересобирает стек на месте. Миграции применяются внутри стека до старта приложения.
 
 ---
 
-## Деплой
-
-Прод-стек описан в `docker-compose.yaml`: Postgres → migrate-контейнер → app → Caddy, плюс TaskIQ `worker` и `scheduler`. TLS-сертификат выдаётся автоматически через Let's Encrypt при первом запуске.
-
-```bash
-# на сервере с Docker
-git clone <repo-url> /opt/learnic && cd /opt/learnic
-cp .env.dist .env    # отредактировать: реальные секреты, DOMAIN, ACME_EMAIL
-just prod-up
-```
-
-Проверка:
-
-```bash
-curl -I https://<your-domain>/healthz    # 200 OK — Caddy жив
-curl -I https://<your-domain>/healthcheck # 200 OK — приложение жив
-```
-
-**Redis**: брокер TaskIQ поднимается из оверлея `docker-compose.redis.yaml`, который `just prod-up`/`prod-up-colocated` подключают **по умолчанию**. В серверном `.env` укажи `TASKIQ_BROKER_URL=redis://redis:6379/0` и `TASKIQ_RESULT_BACKEND_URL=redis://redis:6379/1` (резолв по имени сервиса в сети `learnic-net`). Чтобы использовать внешний/managed Redis, поставь `REDIS=external` в `.env` и пропиши его адрес в тех же переменных.
-
----
-
-## Для агентов и будущих разработчиков
-
-[`CLAUDE.md`](./CLAUDE.md) — полная архитектурная документация: правила слоёв, канонические паттерны (VO, Entity, CommandHandler, route, TaskIQ-таска), анти-паттерны и чек-листы добавления новых use-case'ов и агрегатов. Перед первым коммитом в проект — читать обязательно.
-
----
-
-## Лицензия
+## 📄 Лицензия
 
 Пока не определена.
